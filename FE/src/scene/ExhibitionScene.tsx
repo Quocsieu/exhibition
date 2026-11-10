@@ -1,6 +1,6 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Line } from '@react-three/drei';
+import { Line, OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Booth as BoothType, Point2D, Product, VisitorState } from '../types/expo';
 import type { PlayerTransform } from '../controls/useClickToMove';
@@ -39,7 +39,102 @@ export interface ExhibitionSceneProps {
   zoom?: number;
 }
 
-interface IsometricCameraRigProps {
+export interface ShopShowcaseCameraTargets {
+  cameraPosition: THREE.Vector3;
+  lookAtTarget: THREE.Vector3;
+  entryPosition: THREE.Vector3;
+}
+
+const ISOMETRIC_OFFSET = new THREE.Vector3(16, 26, 22);
+const MIN_CAMERA_ZOOM = 14;
+const MAX_CAMERA_ZOOM = 64;
+const SHOP_SHOWCASE_FOV = 38;
+const EMPTY_PRODUCTS: Product[] = [];
+
+/**
+ * Computes the front-facing eye-level camera position and lookAt target in world coordinates
+ * from a booth's local coordinate system (positionX, positionZ, rotationY, width, depth).
+ *
+ * Guarantees:
+ * - Camera always stands in front of the open storefront (+Z in booth local space)
+ * - Near eye-level elevation (~2.15m), looking straight into the shop interior (-Z in booth local space)
+ * - Responsive framing for Desktop split-screen (right drawer open) vs Mobile bottom-sheet
+ */
+export function computeShopShowcaseCameraTargets(
+  booth: Pick<BoothType, 'positionX' | 'positionZ' | 'rotationY' | 'width' | 'depth'>,
+  viewportWidth: number,
+  viewportHeight: number,
+  isPanelOpen: boolean
+): ShopShowcaseCameraTargets {
+  const safeWidth = Math.max(viewportWidth, 320);
+  const safeHeight = Math.max(viewportHeight, 320);
+  const aspect = safeWidth / safeHeight;
+  const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(SHOP_SHOWCASE_FOV / 2));
+
+  const isDesktopSplit = isPanelOpen && safeWidth > 860;
+  const isMobileSheet = isPanelOpen && safeWidth <= 860;
+
+  let localCamZ: number;
+  let localCamY: number;
+  let localLookY: number;
+  const localLookZ = -0.45;
+  let panX = 0;
+
+  if (isDesktopSplit) {
+    // Drawer occupies min(500px, 44vw) on the right side of the screen
+    const drawerFraction = Math.min(500 / safeWidth, 0.44);
+    const openFraction = Math.max(0.52, 1 - drawerFraction);
+    const halfSpanRequired = Math.max(booth.width, 6.2) * 0.62;
+    const distForWidth =
+      1.6 + halfSpanRequired / Math.max(0.32, openFraction * tanHalfFov * aspect);
+    const distForHeight = 2.25 + 2.95 / tanHalfFov;
+    localCamZ = THREE.MathUtils.clamp(Math.max(distForWidth, distForHeight), 10.6, 15.8);
+    localCamY = 2.22;
+    localLookY = 2.12;
+
+    // Shift both camera and lookAt along local +X so the shop sits in the open left viewport
+    // while keeping the sightline 100% perpendicular (0 deg horizontal angle) to the storefront
+    const frustumHalfWidthAtCenter = localCamZ * tanHalfFov * aspect;
+    panX = drawerFraction * 0.88 * frustumHalfWidthAtCenter;
+  } else if (isMobileSheet) {
+    // Bottom sheet occupies up to 62vh on mobile; frame storefront in the upper viewport
+    const halfSpanRequired = Math.max(booth.width, 6.2) * 0.6;
+    const distForWidth = 1.8 + halfSpanRequired / Math.max(0.24, tanHalfFov * aspect);
+    localCamZ = THREE.MathUtils.clamp(Math.max(distForWidth, 11.8), 11.8, 17.5);
+    localCamY = 2.15;
+    localLookY = 0.72;
+    panX = 0;
+  } else {
+    localCamZ = 10.8;
+    localCamY = 2.2;
+    localLookY = 2.1;
+    panX = 0;
+  }
+
+  const cosR = Math.cos(booth.rotationY);
+  const sinR = Math.sin(booth.rotationY);
+
+  const toWorld = (lx: number, ly: number, lz: number): THREE.Vector3 =>
+    new THREE.Vector3(
+      booth.positionX + lx * cosR + lz * sinR,
+      ly,
+      booth.positionZ - lx * sinR + lz * cosR
+    );
+
+  const cameraPosition = toWorld(panX, localCamY, localCamZ);
+  const lookAtTarget = toWorld(panX, localLookY, localLookZ);
+  const entryPosition = toWorld(panX, localCamY + 0.75, localCamZ + 2.6);
+
+  return {
+    cameraPosition,
+    lookAtTarget,
+    entryPosition,
+  };
+}
+
+interface HybridCameraRigProps {
+  orthoCamRef: React.RefObject<THREE.OrthographicCamera | null>;
+  perspCamRef: React.RefObject<THREE.PerspectiveCamera | null>;
   targetX: number;
   targetZ: number;
   playerTransformRef?: React.MutableRefObject<PlayerTransform>;
@@ -50,12 +145,9 @@ interface IsometricCameraRigProps {
   zoom: number;
 }
 
-const ISOMETRIC_OFFSET = new THREE.Vector3(16, 26, 22);
-const MIN_CAMERA_ZOOM = 14;
-const MAX_CAMERA_ZOOM = 64;
-const EMPTY_PRODUCTS: Product[] = [];
-
-const IsometricCameraRig: React.FC<IsometricCameraRigProps> = ({
+const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
+  orthoCamRef,
+  perspCamRef,
   targetX,
   targetZ,
   playerTransformRef,
@@ -65,7 +157,6 @@ const IsometricCameraRig: React.FC<IsometricCameraRigProps> = ({
   isPanelOpen,
   zoom,
 }) => {
-  const camera = useThree((state) => state.camera);
   const size = useThree((state) => state.size);
 
   const clampedZoom = THREE.MathUtils.clamp(zoom, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
@@ -74,18 +165,27 @@ const IsometricCameraRig: React.FC<IsometricCameraRigProps> = ({
   const initFocusX = THREE.MathUtils.clamp(initX * 0.9, -18, 18);
   const initFocusZ = THREE.MathUtils.clamp(initZ * 0.85 - 1.2, -16, 16);
 
-  const smoothedTarget = useRef(new THREE.Vector3(initFocusX, 0.4, initFocusZ));
-  const desiredTarget = useRef(new THREE.Vector3(initFocusX, 0.4, initFocusZ));
+  // Isometric camera state (Overview & Explore modes)
+  const smoothedIsoTarget = useRef(new THREE.Vector3(initFocusX, 0.4, initFocusZ));
+  const desiredIsoTarget = useRef(new THREE.Vector3(initFocusX, 0.4, initFocusZ));
+
+  // Front-facing Shop Showcase perspective camera state (Focus mode)
+  const smoothedShopCamPos = useRef(new THREE.Vector3(0, 2.2, 12));
+  const smoothedShopLookAt = useRef(new THREE.Vector3(0, 2.1, 0));
+  const lastFocusedBoothIdRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
-    camera.near = 0.1;
-    camera.far = 320;
-    camera.position.copy(smoothedTarget.current).add(ISOMETRIC_OFFSET);
-    camera.lookAt(smoothedTarget.current);
-    camera.zoom = clampedZoom;
-    camera.updateProjectionMatrix();
-    camera.updateMatrixWorld();
-  }, [camera, size.width, size.height]);
+    const orthoCam = orthoCamRef.current;
+    if (orthoCam) {
+      orthoCam.near = 0.1;
+      orthoCam.far = 320;
+      orthoCam.position.copy(smoothedIsoTarget.current).add(ISOMETRIC_OFFSET);
+      orthoCam.lookAt(smoothedIsoTarget.current);
+      orthoCam.zoom = clampedZoom;
+      orthoCam.updateProjectionMatrix();
+      orthoCam.updateMatrixWorld();
+    }
+  }, [orthoCamRef, size.width, size.height]);
 
   useFrame((_, rawDelta) => {
     const delta = Math.min(rawDelta, 0.1);
@@ -95,42 +195,66 @@ const IsometricCameraRig: React.FC<IsometricCameraRigProps> = ({
       onStepMovement(rawDelta);
     }
 
-    // 2. Compute desired target based on Hybrid Isometric Camera Mode
+    // 2. Always keep exterior isometric target updated so returning from Shop Showcase is seamless
     if (cameraMode === 'overview') {
-      desiredTarget.current.set(0, 0.2, 0.8);
-    } else if (cameraMode === 'focus' && focusedBooth) {
-      // Offset toward screen-right when Shop Showcase drawer is open on desktop
-      // so the 3D Shopfront occupies the open left 62% of the viewport cleanly
-      const panelOffsetX = isPanelOpen && size.width > 860 ? 2.35 : 0.25;
-      const panelOffsetZ = isPanelOpen && size.width > 860 ? -0.95 : 0.15;
-      desiredTarget.current.set(
-        focusedBooth.positionX + panelOffsetX,
-        1.25,
-        focusedBooth.positionZ + panelOffsetZ
-      );
+      desiredIsoTarget.current.set(0, 0.2, 0.8);
     } else {
-      // Explore Mode (default): smoothly follow live player coordinates
       const liveX = playerTransformRef ? playerTransformRef.current.x : targetX;
       const liveZ = playerTransformRef ? playerTransformRef.current.z : targetZ;
       const nextFocusX = THREE.MathUtils.clamp(liveX * 0.9, -18, 18);
       const nextFocusZ = THREE.MathUtils.clamp(liveZ * 0.85 - 1.2, -16, 16);
-      desiredTarget.current.set(nextFocusX, 0.45, nextFocusZ);
+      desiredIsoTarget.current.set(nextFocusX, 0.45, nextFocusZ);
     }
 
-    // 3. Frame-rate independent exponential damping (zero camera jump, zero micro-stutter)
-    const posAlpha = 1 - Math.exp(-6.5 * delta);
-    const zoomAlpha = 1 - Math.exp(-7.5 * delta);
+    const isoPosAlpha = 1 - Math.exp(-6.5 * delta);
+    const isoZoomAlpha = 1 - Math.exp(-7.5 * delta);
+    smoothedIsoTarget.current.lerp(desiredIsoTarget.current, isoPosAlpha);
 
-    smoothedTarget.current.lerp(desiredTarget.current, posAlpha);
+    const isShopShowcase = cameraMode === 'focus' && focusedBooth !== null;
 
-    camera.position.copy(smoothedTarget.current).add(ISOMETRIC_OFFSET);
-    camera.lookAt(smoothedTarget.current);
+    if (isShopShowcase && focusedBooth) {
+      const perspCam = perspCamRef.current;
+      if (!perspCam) return;
 
-    if (Math.abs(camera.zoom - clampedZoom) > 0.015) {
-      camera.zoom = THREE.MathUtils.lerp(camera.zoom, clampedZoom, zoomAlpha);
-      camera.updateProjectionMatrix();
+      const targets = computeShopShowcaseCameraTargets(
+        focusedBooth,
+        size.width,
+        size.height,
+        isPanelOpen
+      );
+
+      // When newly entering a booth's Shop Showcase, start from a gentle front-entry offset
+      // in that booth's own front corridor so the camera never sweeps through roofs or walls
+      if (lastFocusedBoothIdRef.current !== focusedBooth.id) {
+        lastFocusedBoothIdRef.current = focusedBooth.id;
+        smoothedShopCamPos.current.copy(targets.entryPosition);
+        smoothedShopLookAt.current.copy(targets.lookAtTarget);
+      }
+
+      const focusAlpha = 1 - Math.exp(-8.5 * delta);
+      smoothedShopCamPos.current.lerp(targets.cameraPosition, focusAlpha);
+      smoothedShopLookAt.current.lerp(targets.lookAtTarget, focusAlpha);
+
+      perspCam.position.copy(smoothedShopCamPos.current);
+      perspCam.lookAt(smoothedShopLookAt.current);
+      perspCam.updateMatrixWorld();
+      return;
     }
-    camera.updateMatrixWorld();
+
+    // Reset booth focus tracker when back in exterior Overview / Explore mode
+    lastFocusedBoothIdRef.current = null;
+
+    const orthoCam = orthoCamRef.current;
+    if (orthoCam) {
+      orthoCam.position.copy(smoothedIsoTarget.current).add(ISOMETRIC_OFFSET);
+      orthoCam.lookAt(smoothedIsoTarget.current);
+
+      if (Math.abs(orthoCam.zoom - clampedZoom) > 0.015) {
+        orthoCam.zoom = THREE.MathUtils.lerp(orthoCam.zoom, clampedZoom, isoZoomAlpha);
+        orthoCam.updateProjectionMatrix();
+      }
+      orthoCam.updateMatrixWorld();
+    }
   });
 
   return null;
@@ -156,6 +280,9 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     onGroundClick,
     zoom = 34,
   }) => {
+    const orthoCamRef = useRef<THREE.OrthographicCamera | null>(null);
+    const perspCamRef = useRef<THREE.PerspectiveCamera | null>(null);
+
     const boothNamesById = useMemo(() => {
       const m = new Map<string, string>();
       booths.forEach((b) => m.set(b.id, b.name));
@@ -169,6 +296,8 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
       }
       return null;
     }, [focusedBooth, selectedBoothId, booths]);
+
+    const isShopShowcase = cameraMode === 'focus' && activeFocusedBooth !== null;
 
     const clickMarker =
       activePath.length > 0 ? activePath[activePath.length - 1] : null;
@@ -207,7 +336,29 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
           <color attach="background" args={['#0f172a']} />
           <fog attach="fog" args={['#0f172a', 110, 210]} />
 
-          <IsometricCameraRig
+          {/* Exterior Isometric Orthographic Camera (Overview & Explore Modes) */}
+          <OrthographicCamera
+            ref={orthoCamRef}
+            makeDefault={!isShopShowcase}
+            position={[16, 26, 28]}
+            zoom={34}
+            near={0.1}
+            far={320}
+          />
+
+          {/* Front-Facing Eye-Level Shop Showcase Perspective Camera (Focus Mode) */}
+          <PerspectiveCamera
+            ref={perspCamRef}
+            makeDefault={isShopShowcase}
+            fov={SHOP_SHOWCASE_FOV}
+            near={0.2}
+            far={160}
+            position={[0, 2.2, 12]}
+          />
+
+          <HybridCameraRig
+            orthoCamRef={orthoCamRef}
+            perspCamRef={perspCamRef}
             targetX={player.x}
             targetZ={player.z}
             playerTransformRef={playerTransformRef}
@@ -244,7 +395,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             clickMarker={clickMarker}
           />
 
-          {linePoints.length >= 2 && (
+          {!isShopShowcase && linePoints.length >= 2 && (
             <Line
               points={linePoints}
               color="#f59e0b"
@@ -264,12 +415,13 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
                 selectedBoothId === booth.id ||
                 (cameraMode === 'focus' && activeFocusedBooth?.id === booth.id)
               }
+              visible={!isShopShowcase || activeFocusedBooth?.id === booth.id}
               onSelect={onSelectBooth}
             />
           ))}
 
           {/* Conditionally Mounted Shop Showcase 3D Stage (Only active when viewing a booth) */}
-          {cameraMode === 'focus' && activeFocusedBooth && onSelectProduct && (
+          {isShopShowcase && activeFocusedBooth && onSelectProduct && (
             <ShopShowcaseStage
               booth={activeFocusedBooth}
               products={activeBoothProducts}
@@ -278,22 +430,27 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             />
           )}
 
-          <LocalPlayer
-            name={player.name}
-            color={player.color}
-            x={player.x}
-            z={player.z}
-            rotationY={player.rotationY}
-            state={player.state}
-            transformRef={playerTransformRef}
-            activeBoothName={selectedBoothId ? boothNamesById.get(selectedBoothId) : null}
-          />
+          {/* Hide exterior avatars during front-facing Shop Showcase so they never photobomb the lens */}
+          {!isShopShowcase && (
+            <>
+              <LocalPlayer
+                name={player.name}
+                color={player.color}
+                x={player.x}
+                z={player.z}
+                rotationY={player.rotationY}
+                state={player.state}
+                transformRef={playerTransformRef}
+                activeBoothName={selectedBoothId ? boothNamesById.get(selectedBoothId) : null}
+              />
 
-          <RemotePlayers
-            visitors={remoteVisitors}
-            boothNamesById={boothNamesById}
-            remoteVisitorsLiveRef={remoteVisitorsLiveRef}
-          />
+              <RemotePlayers
+                visitors={remoteVisitors}
+                boothNamesById={boothNamesById}
+                remoteVisitorsLiveRef={remoteVisitorsLiveRef}
+              />
+            </>
+          )}
         </Canvas>
       </div>
     );

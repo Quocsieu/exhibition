@@ -16,6 +16,8 @@ import {
   createAvatarNametagTexture,
   getActiveCanvasTextureCount,
 } from '../scene/sceneTextures';
+import { resolveBoothTheme } from '../scene/Booth';
+import { computeShopShowcaseCameraTargets } from '../scene/ExhibitionScene';
 
 describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => {
   it('enforces world boundary limits accurately', () => {
@@ -219,5 +221,93 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     tex5.dispose();
     tex6.dispose();
     expect(getActiveCanvasTextureCount()).toBe(baseline);
+  });
+
+  it('resolves all 6 default booths to 6 distinct industry themes and disposes their themed textures cleanly', () => {
+    const baseline = getActiveCanvasTextureCount();
+    const resolvedThemes = DEFAULT_BOOTHS.map((booth) => resolveBoothTheme(booth));
+
+    expect(resolvedThemes).toEqual([
+      'tech',
+      'living',
+      'coffee',
+      'robotics',
+      'design',
+      'energy',
+    ]);
+    expect(new Set(resolvedThemes).size).toBe(6);
+
+    const createdTextures = DEFAULT_BOOTHS.flatMap((booth) => {
+      const theme = resolveBoothTheme(booth);
+      return [
+        createBoothSignTexture({
+          name: booth.name,
+          category: booth.category,
+          productCount: 3,
+          color: booth.color,
+          active: false,
+          theme,
+        }),
+        createBoothFasciaTexture({
+          name: booth.name,
+          category: booth.category,
+          color: booth.color,
+          theme,
+        }),
+        createBoothPosterTexture({
+          name: booth.name,
+          category: booth.category,
+          tagline: booth.description,
+          color: booth.color,
+          productCount: 3,
+          theme,
+        }),
+      ];
+    });
+
+    expect(getActiveCanvasTextureCount()).toBe(baseline + 18);
+    createdTextures.forEach((t) => t.dispose());
+    expect(getActiveCanvasTextureCount()).toBe(baseline);
+  });
+
+  it('computes a front-facing eye-level Shop Showcase camera (not top-down) across all booth rotations and viewports', () => {
+    for (const booth of DEFAULT_BOOTHS) {
+      // 1. Desktop split-screen (1440x900, drawer open)
+      const desktop = computeShopShowcaseCameraTargets(booth, 1440, 900, true);
+      expect(desktop.cameraPosition.y).toBeGreaterThanOrEqual(2.0);
+      expect(desktop.cameraPosition.y).toBeLessThanOrEqual(2.5);
+
+      // View direction from camera to lookAt must point horizontally into the booth (-Z in local space)
+      const viewDirX = desktop.lookAtTarget.x - desktop.cameraPosition.x;
+      const viewDirY = desktop.lookAtTarget.y - desktop.cameraPosition.y;
+      const viewDirZ = desktop.lookAtTarget.z - desktop.cameraPosition.z;
+      const horizDist = Math.hypot(viewDirX, viewDirZ);
+      const pitchDeg = Math.abs((Math.atan2(viewDirY, horizDist) * 180) / Math.PI);
+
+      // Pitch is nearly horizontal (< 3 deg), never top-down (~45-60 deg)
+      expect(pitchDeg).toBeLessThan(3);
+
+      // Check alignment with booth's inward normal (-sin(rotY), -cos(rotY))
+      const inwardNormalX = -Math.sin(booth.rotationY);
+      const inwardNormalZ = -Math.cos(booth.rotationY);
+      const dotInward =
+        (viewDirX / horizDist) * inwardNormalX + (viewDirZ / horizDist) * inwardNormalZ;
+      expect(dotInward).toBeCloseTo(1, 4);
+
+      // 2. Mobile bottom-sheet (390x844, drawer open)
+      const mobile = computeShopShowcaseCameraTargets(booth, 390, 844, true);
+      expect(mobile.cameraPosition.y).toBeGreaterThanOrEqual(2.0);
+      expect(mobile.cameraPosition.y).toBeLessThanOrEqual(2.5);
+    }
+
+    // Also verify a rotated booth (e.g. facing North / rotationY = Math.PI)
+    const rotatedBooth = {
+      ...DEFAULT_BOOTHS[2],
+      rotationY: Math.PI,
+    };
+    const rotatedTargets = computeShopShowcaseCameraTargets(rotatedBooth, 1440, 900, false);
+    // When rotationY = PI, local +Z points along world -Z, so camera stands at Z < booth.positionZ looking +Z
+    expect(rotatedTargets.cameraPosition.z).toBeLessThan(rotatedBooth.positionZ - 8);
+    expect(rotatedTargets.lookAtTarget.z).toBeGreaterThan(rotatedTargets.cameraPosition.z);
   });
 });
