@@ -1,0 +1,24 @@
+{
+  "name": "virtual-expo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Virtual Expo 2.5D Proof of Concept (FE + BE npm workspaces)",
+  "workspaces": [
+    "FE",
+    "BE"
+  ],
+  "scripts": {
+    "dev": "concurrently -n BE,FE -c cyan,magenta \"npm run dev -w BE\" \"npm run dev -w FE\"",
+    "dev:fe": "npm run dev -w FE",
+    "dev:be": "npm run dev -w BE",
+    "build": "npm run build -w BE && npm run build -w FE",
+    "typecheck": "npm run typecheck -w BE && npm run typecheck -w FE",
+    "test": "vitest run",
+    "start": "npm run start -w BE"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}
