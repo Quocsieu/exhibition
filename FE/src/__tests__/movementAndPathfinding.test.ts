@@ -10,6 +10,9 @@ import {
 } from '../types/expo';
 import {
   createBoothSignTexture,
+  createBoothFasciaTexture,
+  createBoothPosterTexture,
+  createProductTagTexture,
   createAvatarNametagTexture,
   getActiveCanvasTextureCount,
 } from '../scene/sceneTextures';
@@ -184,15 +187,37 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
       isSelf: true,
       activeBoothName: 'Aether Tech Lab',
     });
+    const tex4 = createBoothPosterTexture({
+      name: 'Aether Tech Lab',
+      category: 'Công nghệ & Điện tử',
+      tagline: 'Thiết bị phần cứng thông minh & IoT công nghiệp',
+      color: '#0ea5e9',
+      productCount: 4,
+    });
+    const tex5 = createBoothFasciaTexture({
+      name: 'Aether Tech Lab',
+      category: 'Công nghệ & Điện tử',
+      color: '#0ea5e9',
+    });
+    const tex6 = createProductTagTexture({
+      index: 1,
+      name: 'Trạm Cảm Biến AetherSense X1',
+      priceText: '6.850.000 ₫',
+      color: '#0ea5e9',
+      selected: true,
+    });
 
-    expect(getActiveCanvasTextureCount()).toBe(baseline + 3);
+    expect(getActiveCanvasTextureCount()).toBe(baseline + 6);
 
     tex1.dispose();
     tex1.dispose(); // idempotent double-dispose check
-    expect(getActiveCanvasTextureCount()).toBe(baseline + 2);
+    expect(getActiveCanvasTextureCount()).toBe(baseline + 5);
 
     tex2.dispose();
     tex3.dispose();
+    tex4.dispose();
+    tex5.dispose();
+    tex6.dispose();
     expect(getActiveCanvasTextureCount()).toBe(baseline);
   });
 });

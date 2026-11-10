@@ -72,7 +72,7 @@ const PERIMETER_TREES: [number, number, number][] = [
 ];
 
 const ALL_TREES: { x: number; z: number; scale: number }[] = [
-  ...CENTRAL_PLANTER_ISLANDS.map((island) => ({ x: island.x, z: island.z, scale: 1.05 })),
+  ...CENTRAL_PLANTER_ISLANDS.map((island) => ({ x: island.x, z: island.z, scale: 1.08 })),
   ...PERIMETER_TREES.map(([x, z, scale]) => ({ x, z, scale })),
 ];
 
@@ -99,11 +99,54 @@ const PERIMETER_LAMPS: [number, number][] = [
   [16.5, 3.5],
 ];
 
-const BOOTH_CONNECTOR_PATHS: { x: number; z: number; w: number; d: number }[] = [
-  { x: -12, z: -4.5, w: 3.2, d: 7.5 },
-  { x: 12, z: -4.5, w: 3.2, d: 7.5 },
-  { x: -12, z: 3.8, w: 3.2, d: 6.4 },
-  { x: 12, z: 3.8, w: 3.2, d: 6.4 },
+const BOOTH_CONNECTOR_PATHS: { x: number; z: number; w: number; d: number; accent: string }[] = [
+  { x: -12, z: -4.5, w: 3.4, d: 7.5, accent: '#0ea5e9' },
+  { x: 12, z: -4.5, w: 3.4, d: 7.5, accent: '#f59e0b' },
+  { x: -12, z: 3.8, w: 3.4, d: 6.4, accent: '#6366f1' },
+  { x: 12, z: 3.8, w: 3.4, d: 6.4, accent: '#ec4899' },
+];
+
+// 4 Cozy Perimeter Rest Lounge Zones (located in outer garden corners, clear of all walkways)
+const REST_LOUNGE_ZONES: { x: number; z: number; color: string }[] = [
+  { x: -18.8, z: -15.5, color: '#0ea5e9' },
+  { x: 18.8, z: -15.5, color: '#f59e0b' },
+  { x: -18.8, z: 14.8, color: '#6366f1' },
+  { x: 18.8, z: 14.8, color: '#10b981' },
+];
+
+// 8 Perimeter Festival Flag Totems along outer balustrade
+const FESTIVAL_TOTEMS: { x: number; z: number; ry: number }[] = [
+  { x: -22.6, z: -12.5, ry: Math.PI / 2 },
+  { x: -22.6, z: -4.5, ry: Math.PI / 2 },
+  { x: -22.6, z: 4.5, ry: Math.PI / 2 },
+  { x: -22.6, z: 12.5, ry: Math.PI / 2 },
+  { x: 22.6, z: -12.5, ry: -Math.PI / 2 },
+  { x: 22.6, z: -4.5, ry: -Math.PI / 2 },
+  { x: 22.6, z: 4.5, ry: -Math.PI / 2 },
+  { x: 22.6, z: 12.5, ry: -Math.PI / 2 },
+];
+
+// Colorful Flower Clusters placed inside central planters & entrance beds
+const FLOWER_CLUSTERS_PINK: [number, number, number][] = [
+  [-6.45, 0.62, -5.45],
+  [-5.55, 0.62, -4.55],
+  [6.45, 0.62, -5.45],
+  [5.55, 0.62, -4.55],
+  [-6.45, 0.62, 5.45],
+  [6.45, 0.62, 5.45],
+  [-6.2, 0.42, 20.8],
+  [6.2, 0.42, 20.8],
+];
+
+const FLOWER_CLUSTERS_GOLD: [number, number, number][] = [
+  [-6.45, 0.62, -4.55],
+  [6.45, 0.62, -4.55],
+  [-5.55, 0.62, 5.45],
+  [-6.45, 0.62, 4.55],
+  [5.55, 0.62, 5.45],
+  [6.45, 0.62, 4.55],
+  [-6.6, 0.42, 21.1],
+  [6.6, 0.42, 21.1],
 ];
 
 // Shared module-level Geometries & Materials to minimize WebGL memory & state switches
@@ -112,6 +155,17 @@ const TREE_LOW_GEOM = new THREE.DodecahedronGeometry(0.92, 0);
 const TREE_MID_GEOM = new THREE.DodecahedronGeometry(0.68, 0);
 const TREE_TOP_GEOM = new THREE.IcosahedronGeometry(0.48, 0);
 const TREE_BASE_GEOM = new THREE.CylinderGeometry(0.85, 0.95, 0.44, 12);
+
+const FLOWER_BUSH_GEOM = new THREE.DodecahedronGeometry(0.24, 0);
+const FLOWER_BLOSSOM_GEOM = new THREE.IcosahedronGeometry(0.15, 0);
+
+const PARASOL_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.06, 2.35, 8);
+const PARASOL_CANOPY_GEOM = new THREE.ConeGeometry(1.55, 0.58, 8);
+const LOUNGE_TABLE_TOP_GEOM = new THREE.CylinderGeometry(0.68, 0.68, 0.07, 14);
+const LOUNGE_TABLE_BASE_GEOM = new THREE.CylinderGeometry(0.12, 0.34, 0.72, 10);
+
+const FLAG_POLE_GEOM = new THREE.CylinderGeometry(0.04, 0.06, 3.6, 8);
+const FLAG_BANNER_GEOM = new THREE.BoxGeometry(0.04, 1.45, 0.58);
 
 const TREE_TRUNK_MAT = new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.85 });
 const TREE_LOW_MAT = new THREE.MeshStandardMaterial({
@@ -130,6 +184,31 @@ const TREE_TOP_MAT = new THREE.MeshStandardMaterial({
   flatShading: true,
 });
 const SLATE_POT_MAT = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.7 });
+
+const FLOWER_PINK_MAT = new THREE.MeshStandardMaterial({
+  color: '#f43f5e',
+  roughness: 0.45,
+  flatShading: true,
+});
+const FLOWER_GOLD_MAT = new THREE.MeshStandardMaterial({
+  color: '#fbbf24',
+  roughness: 0.4,
+  flatShading: true,
+});
+
+const PARASOL_CREAM_MAT = new THREE.MeshStandardMaterial({
+  color: '#fffbeb',
+  roughness: 0.45,
+  flatShading: true,
+});
+const TABLE_WHITE_MAT = new THREE.MeshStandardMaterial({
+  color: '#f8fafc',
+  roughness: 0.3,
+});
+const FLAG_ACCENT_MAT = new THREE.MeshStandardMaterial({
+  color: '#0ea5e9',
+  roughness: 0.38,
+});
 
 const BENCH_SEAT_GEOM = new THREE.BoxGeometry(1.28, 0.07, 0.42);
 const BENCH_BACK_GEOM = new THREE.BoxGeometry(1.26, 0.28, 0.06);
@@ -169,7 +248,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       () =>
         createBannerSignTexture({
           title: '🌐 QUẢNG TRƯỜNG TRUNG TÂM',
-          subtitle: 'Virtual Expo 2.5D · Giao lộ 6 Gian hàng',
+          subtitle: 'Virtual Expo 2.5D · Giao lộ 6 Gian hàng Thương mại',
           accentColor: '#38bdf8',
         }),
       []
@@ -179,8 +258,18 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       () =>
         createBannerSignTexture({
           title: '✨ CỔNG CHÀO VIRTUAL EXPO 2.5D ✨',
-          subtitle: 'Chào mừng khách tham quan · Bấm vào gian hàng để xem sản phẩm',
+          subtitle: 'Chào mừng khách tham quan · Bấm vào gian hàng để mở Cửa hàng 3D',
           accentColor: '#0ea5e9',
+        }),
+      []
+    );
+
+    const directoryKioskTexture = useMemo(
+      () =>
+        createBannerSignTexture({
+          title: '🗺️ BẢNG THÔNG TIN TRIỂN LÃM',
+          subtitle: '6 Gian hàng Chính hãng · Công nghệ · Nội thất · Cà phê · Robot · Thiết kế · Năng lượng',
+          accentColor: '#fbbf24',
         }),
       []
     );
@@ -203,9 +292,10 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       return () => {
         plazaBannerTexture.dispose();
         entranceBannerTexture.dispose();
+        directoryKioskTexture.dispose();
         wayfindingTextures.forEach((tex) => tex?.dispose());
       };
-    }, [plazaBannerTexture, entranceBannerTexture, wayfindingTextures]);
+    }, [plazaBannerTexture, entranceBannerTexture, directoryKioskTexture, wayfindingTextures]);
 
     useFrame(({ clock }, delta) => {
       const t = clock.getElapsedTime();
@@ -254,102 +344,111 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           }}
         >
           <planeGeometry args={[width, depth]} />
-          <meshStandardMaterial color="#dbe4ee" roughness={0.82} />
+          <meshStandardMaterial color="#e2e8f0" roughness={0.78} />
         </mesh>
 
         <gridHelper
-          args={[width, 48, '#94a3b8', '#c4d0dec8']}
+          args={[width, 48, '#94a3b8', '#cbd5e1']}
           position={[0, 0.008, 0]}
         />
 
         {/* ================================================================
-            2. STRUCTURED WALKWAY & AVENUE SYSTEM
+            2. STRUCTURED WALKWAY, BOULEVARD & COLOR-CODED BOOTH LANES
            ================================================================ */}
         <group position={[0, 0.014, 1.5]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
             <planeGeometry args={[5.8, depth - 3.6]} />
-            <meshStandardMaterial color="#f1f5f9" roughness={0.68} />
+            <meshStandardMaterial color="#f8fafc" roughness={0.62} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-2.95, 0.002, 0]}>
-            <planeGeometry args={[0.16, depth - 3.6]} />
-            <meshStandardMaterial color="#64748b" roughness={0.6} />
+            <planeGeometry args={[0.18, depth - 3.6]} />
+            <meshStandardMaterial color="#0ea5e9" roughness={0.5} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[2.95, 0.002, 0]}>
-            <planeGeometry args={[0.16, depth - 3.6]} />
-            <meshStandardMaterial color="#64748b" roughness={0.6} />
+            <planeGeometry args={[0.18, depth - 3.6]} />
+            <meshStandardMaterial color="#0ea5e9" roughness={0.5} />
           </mesh>
         </group>
 
         <group position={[0, 0.016, -0.5]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
             <planeGeometry args={[width - 3.6, 5.6]} />
-            <meshStandardMaterial color="#f1f5f9" roughness={0.68} />
+            <meshStandardMaterial color="#f8fafc" roughness={0.62} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, -2.85]}>
-            <planeGeometry args={[width - 3.6, 0.16]} />
-            <meshStandardMaterial color="#64748b" roughness={0.6} />
+            <planeGeometry args={[width - 3.6, 0.18]} />
+            <meshStandardMaterial color="#38bdf8" roughness={0.5} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 2.85]}>
-            <planeGeometry args={[width - 3.6, 0.16]} />
-            <meshStandardMaterial color="#64748b" roughness={0.6} />
+            <planeGeometry args={[width - 3.6, 0.18]} />
+            <meshStandardMaterial color="#38bdf8" roughness={0.5} />
           </mesh>
         </group>
 
         {BOOTH_CONNECTOR_PATHS.map((conn, idx) => (
-          <mesh
-            key={`conn-${idx}`}
-            rotation={[-Math.PI / 2, 0, 0]}
-            position={[conn.x, 0.013, conn.z]}
-            receiveShadow
-          >
-            <planeGeometry args={[conn.w, conn.d]} />
-            <meshStandardMaterial color="#e8eff6" roughness={0.72} />
-          </mesh>
+          <group key={`conn-${idx}`} position={[conn.x, 0.013, conn.z]}>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+              <planeGeometry args={[conn.w, conn.d]} />
+              <meshStandardMaterial color="#f1f5f9" roughness={0.68} />
+            </mesh>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-conn.w / 2, 0.002, 0]}>
+              <planeGeometry args={[0.12, conn.d]} />
+              <meshBasicMaterial color={conn.accent} />
+            </mesh>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[conn.w / 2, 0.002, 0]}>
+              <planeGeometry args={[0.12, conn.d]} />
+              <meshBasicMaterial color={conn.accent} />
+            </mesh>
+          </group>
         ))}
 
         {/* Entrance Welcome Carpet */}
         <group position={[0, 0.02, 18.6]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-            <planeGeometry args={[4.4, 4.6]} />
-            <meshStandardMaterial color="#0284c7" roughness={0.65} />
+            <planeGeometry args={[4.8, 4.8]} />
+            <meshStandardMaterial color="#0284c7" roughness={0.62} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
-            <planeGeometry args={[3.9, 4.2]} />
-            <meshStandardMaterial color="#0ea5e9" roughness={0.6} />
+            <planeGeometry args={[4.2, 4.3]} />
+            <meshStandardMaterial color="#0ea5e9" roughness={0.55} />
           </mesh>
         </group>
 
         {/* ================================================================
-            3. CENTRAL PLAZA & FOUNTAIN MONUMENT
+            3. CENTRAL PLAZA & KINETIC FOUNTAIN MONUMENT
            ================================================================ */}
         <group position={[0, 0, 0]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.022, 0]} receiveShadow>
-            <circleGeometry args={[7.8, 48]} />
-            <meshStandardMaterial color="#e2e8f0" roughness={0.65} />
+            <circleGeometry args={[8.1, 48]} />
+            <meshStandardMaterial color="#e2e8f0" roughness={0.62} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.026, 0]}>
-            <ringGeometry args={[6.8, 7.15, 48]} />
-            <meshBasicMaterial color="#38bdf8" transparent opacity={0.65} />
+            <ringGeometry args={[7.1, 7.45, 48]} />
+            <meshBasicMaterial color="#38bdf8" transparent opacity={0.75} />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.028, 0]}>
+            <ringGeometry args={[5.35, 5.55, 48]} />
+            <meshBasicMaterial color="#fbbf24" transparent opacity={0.8} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.026, 0]} receiveShadow>
-            <circleGeometry args={[5.2, 36]} />
-            <meshStandardMaterial color="#f8fafc" roughness={0.55} />
+            <circleGeometry args={[5.3, 36]} />
+            <meshStandardMaterial color="#f8fafc" roughness={0.5} />
           </mesh>
 
           <mesh position={[0, 0.22, 0]} castShadow receiveShadow>
-            <cylinderGeometry args={[2.1, 2.3, 0.44, 24]} />
+            <cylinderGeometry args={[2.15, 2.35, 0.44, 24]} />
             <meshStandardMaterial color="#334155" roughness={0.5} />
           </mesh>
           <mesh position={[0, 0.46, 0]} receiveShadow>
-            <cylinderGeometry args={[1.88, 1.98, 0.14, 24]} />
-            <meshStandardMaterial color="#cbd5e1" roughness={0.4} />
+            <cylinderGeometry args={[1.92, 2.02, 0.14, 24]} />
+            <meshStandardMaterial color="#cbd5e1" roughness={0.38} />
           </mesh>
           <mesh position={[0, 0.54, 0]}>
-            <cylinderGeometry args={[1.76, 1.76, 0.06, 24]} />
+            <cylinderGeometry args={[1.8, 1.8, 0.06, 24]} />
             <meshStandardMaterial
               color="#38bdf8"
               emissive="#0284c7"
-              emissiveIntensity={0.35}
+              emissiveIntensity={0.38}
               roughness={0.12}
               metalness={0.45}
             />
@@ -366,7 +465,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
               <meshStandardMaterial
                 color="#0ea5e9"
                 emissive="#0284c7"
-                emissiveIntensity={0.25}
+                emissiveIntensity={0.28}
                 metalness={0.65}
                 roughness={0.18}
                 flatShading
@@ -392,7 +491,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         </group>
 
         {/* ================================================================
-            4. GRAND SOUTH ENTRANCE ARCHWAY (Z = 21)
+            4. GRAND SOUTH ENTRANCE ARCHWAY & INFO DIRECTORY KIOSK (Z = 21)
            ================================================================ */}
         <group position={[0, 0, 21]}>
           {[-4.4, 4.4].map((px, i) => (
@@ -411,30 +510,58 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
               </mesh>
               <mesh position={[0, 2.5, -0.63]}>
                 <boxGeometry args={[0.16, 3.8, 0.04]} />
-                <meshBasicMaterial color="#38bdf8" />
+                <meshBasicMaterial color="#fbbf24" />
+              </mesh>
+            </group>
+          ))}
+
+          {/* Flanking Entrance Flower Beds */}
+          {[-6.4, 6.4].map((fx, i) => (
+            <group key={`gate-flowerbed-${i}`} position={[fx, 0.16, -0.1]}>
+              <mesh receiveShadow material={PLANTER_BOX_MAT}>
+                <boxGeometry args={[1.6, 0.32, 1.1]} />
+              </mesh>
+              <mesh position={[0, 0.18, 0]} material={PLANTER_SOIL_MAT}>
+                <boxGeometry args={[1.4, 0.06, 0.92]} />
               </mesh>
             </group>
           ))}
 
           <mesh position={[0, 4.95, 0]} castShadow receiveShadow>
-            <boxGeometry args={[11.8, 0.95, 1.85]} />
+            <boxGeometry args={[12.2, 0.95, 1.85]} />
             <meshStandardMaterial color="#0f172a" roughness={0.3} metalness={0.4} />
           </mesh>
 
           <mesh position={[0, 5.55, 0]}>
-            <boxGeometry args={[12.6, 0.25, 2.3]} />
+            <boxGeometry args={[13.0, 0.28, 2.3]} />
             <meshStandardMaterial color="#0ea5e9" roughness={0.3} metalness={0.25} />
           </mesh>
 
           <mesh position={[0, 4.45, 0]}>
-            <boxGeometry args={[7.4, 0.08, 0.45]} />
-            <meshBasicMaterial color="#38bdf8" />
+            <boxGeometry args={[7.8, 0.09, 0.48]} />
+            <meshBasicMaterial color="#fbbf24" />
           </mesh>
 
-          <Billboard position={[0, 6.45, 0]}>
+          <Billboard position={[0, 6.48, 0]}>
             <mesh>
-              <planeGeometry args={[6.4, 1.32]} />
+              <planeGeometry args={[6.6, 1.36]} />
               <meshBasicMaterial map={entranceBannerTexture} transparent depthWrite={false} />
+            </mesh>
+          </Billboard>
+        </group>
+
+        {/* Exhibition Directory Info Board Kiosk (East of Entrance Gate) */}
+        <group position={[6.4, 0, 18.8]} rotation={[0, -0.35, 0]}>
+          <mesh position={[0, 0.12, 0]} material={BENCH_IRON_MAT}>
+            <boxGeometry args={[1.4, 0.24, 0.52]} />
+          </mesh>
+          <mesh position={[0, 1.15, 0]} material={LAMP_POLE_MAT}>
+            <boxGeometry args={[1.18, 1.85, 0.18]} />
+          </mesh>
+          <Billboard position={[0, 2.45, 0]}>
+            <mesh>
+              <planeGeometry args={[3.8, 0.8]} />
+              <meshBasicMaterial map={directoryKioskTexture} transparent depthWrite={false} />
             </mesh>
           </Billboard>
         </group>
@@ -471,9 +598,9 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         })}
 
         {/* ================================================================
-            6. INSTANCED TREES, BENCHES & BOULEVARD LAMP POSTS (PERF-04)
+            6. INSTANCED TREES, FLOWER BUSHES, LOUNGE PAVILIONS, BENCHES & LAMPS
            ================================================================ */}
-        {/* 12 Instanced Trees (4 draw calls total instead of 48) */}
+        {/* 12 Instanced Trees (4 draw calls total) */}
         <Instances geometry={TREE_TRUNK_GEOM} material={TREE_TRUNK_MAT} castShadow>
           {ALL_TREES.map((t, i) => (
             <Instance
@@ -511,14 +638,69 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           ))}
         </Instances>
 
-        {/* 8 Instanced Perimeter Tree Planter Bases (1 draw call instead of 8) */}
+        {/* Instanced Colorful Flower Bushes & Blossoms in Planters (3 draw calls total) */}
+        <Instances geometry={FLOWER_BUSH_GEOM} material={TREE_MID_MAT}>
+          {[...FLOWER_CLUSTERS_PINK, ...FLOWER_CLUSTERS_GOLD].map(([fx, fy, fz], i) => (
+            <Instance key={`fbush-${i}`} position={[fx, fy, fz]} />
+          ))}
+        </Instances>
+        <Instances geometry={FLOWER_BLOSSOM_GEOM} material={FLOWER_PINK_MAT}>
+          {FLOWER_CLUSTERS_PINK.map(([fx, fy, fz], i) => (
+            <Instance key={`fpink-${i}`} position={[fx, fy + 0.18, fz]} />
+          ))}
+        </Instances>
+        <Instances geometry={FLOWER_BLOSSOM_GEOM} material={FLOWER_GOLD_MAT}>
+          {FLOWER_CLUSTERS_GOLD.map(([fx, fy, fz], i) => (
+            <Instance key={`fgold-${i}`} position={[fx, fy + 0.18, fz]} />
+          ))}
+        </Instances>
+
+        {/* 4 Instanced Perimeter Rest Lounge Pavilions (Tables & Parasol Umbrellas) */}
+        <Instances geometry={LOUNGE_TABLE_BASE_GEOM} material={BENCH_IRON_MAT}>
+          {REST_LOUNGE_ZONES.map((z, i) => (
+            <Instance key={`ltbase-${i}`} position={[z.x, 0.36, z.z]} />
+          ))}
+        </Instances>
+        <Instances geometry={LOUNGE_TABLE_TOP_GEOM} material={TABLE_WHITE_MAT}>
+          {REST_LOUNGE_ZONES.map((z, i) => (
+            <Instance key={`lttop-${i}`} position={[z.x, 0.74, z.z]} />
+          ))}
+        </Instances>
+        <Instances geometry={PARASOL_POLE_GEOM} material={LAMP_POLE_MAT}>
+          {REST_LOUNGE_ZONES.map((z, i) => (
+            <Instance key={`ppole-${i}`} position={[z.x, 1.18, z.z]} />
+          ))}
+        </Instances>
+        <Instances geometry={PARASOL_CANOPY_GEOM} material={PARASOL_CREAM_MAT}>
+          {REST_LOUNGE_ZONES.map((z, i) => (
+            <Instance key={`pcanopy-${i}`} position={[z.x, 2.38, z.z]} />
+          ))}
+        </Instances>
+
+        {/* 8 Instanced Perimeter Festival Flag Totems */}
+        <Instances geometry={FLAG_POLE_GEOM} material={LAMP_POLE_MAT}>
+          {FESTIVAL_TOTEMS.map((f, i) => (
+            <Instance key={`fpole-${i}`} position={[f.x, 1.8, f.z]} />
+          ))}
+        </Instances>
+        <Instances geometry={FLAG_BANNER_GEOM} material={FLAG_ACCENT_MAT}>
+          {FESTIVAL_TOTEMS.map((f, i) => (
+            <Instance
+              key={`fbanner-${i}`}
+              position={[f.x + (f.x < 0 ? 0.28 : -0.28), 2.65, f.z]}
+              rotation={[0, f.ry, 0]}
+            />
+          ))}
+        </Instances>
+
+        {/* 8 Instanced Perimeter Tree Planter Bases */}
         <Instances geometry={TREE_BASE_GEOM} material={SLATE_POT_MAT} receiveShadow>
           {PERIMETER_TREES.map(([tx, tz], i) => (
             <Instance key={`tbase-${i}`} position={[tx, 0.22, tz]} />
           ))}
         </Instances>
 
-        {/* 8 Instanced Park Benches (3 draw calls instead of 32) */}
+        {/* 8 Instanced Park Benches */}
         <Instances geometry={BENCH_SEAT_GEOM} material={BENCH_WOOD_MAT} castShadow>
           {ALL_BENCHES.map((b, i) => (
             <Instance
@@ -560,7 +742,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           })}
         </Instances>
 
-        {/* 8 Instanced Boulevard Lamp Posts (3 draw calls instead of 24) */}
+        {/* 8 Instanced Boulevard Lamp Posts */}
         <Instances geometry={LAMP_BASE_GEOM} material={BENCH_IRON_MAT}>
           {PERIMETER_LAMPS.map(([lx, lz], i) => (
             <Instance key={`lbase-${i}`} position={[lx, 0.15, lz]} />

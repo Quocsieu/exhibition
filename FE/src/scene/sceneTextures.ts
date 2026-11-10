@@ -73,48 +73,48 @@ export function createBoothSignTexture(options: {
   color: string;
   active: boolean;
 }): THREE.CanvasTexture {
-  const canvas = createCanvasElement(640, 220);
+  const canvas = createCanvasElement(704, 240);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
-    createRoundRectPath(ctx, 16, 16, 608, 188, 28);
-    ctx.fillStyle = options.active ? 'rgba(15, 23, 42, 0.97)' : 'rgba(15, 23, 42, 0.92)';
+    createRoundRectPath(ctx, 14, 14, 676, 212, 30);
+    ctx.fillStyle = options.active ? 'rgba(15, 23, 42, 0.98)' : 'rgba(15, 23, 42, 0.94)';
     ctx.fill();
-    ctx.lineWidth = options.active ? 8 : 5;
+    ctx.lineWidth = options.active ? 9 : 6;
     ctx.strokeStyle = options.color || '#0ea5e9';
     ctx.stroke();
     ctx.restore();
 
     ctx.save();
-    createRoundRectPath(ctx, 36, 30, 568, 10, 5);
+    createRoundRectPath(ctx, 36, 28, 632, 12, 6);
     ctx.fillStyle = options.color || '#0ea5e9';
     ctx.fill();
     ctx.restore();
 
-    ctx.font = '700 22px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '700 23px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#94a3b8';
-    ctx.fillText(truncateText(options.category.toUpperCase(), 34), 320, 74);
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillText(truncateText(options.category.toUpperCase(), 36), 352, 76);
 
-    ctx.font = '800 36px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '800 40px Inter, Segoe UI, Arial, sans-serif';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(truncateText(options.name, 26), 320, 122);
+    ctx.fillText(truncateText(options.name, 26), 352, 128);
 
     ctx.save();
-    createRoundRectPath(ctx, 130, 142, 380, 44, 22);
-    ctx.fillStyle = options.active ? options.color : 'rgba(30, 41, 59, 0.95)';
+    createRoundRectPath(ctx, 122, 150, 460, 50, 25);
+    ctx.fillStyle = options.active ? options.color : 'rgba(30, 41, 59, 0.96)';
     ctx.fill();
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.5;
     ctx.strokeStyle = options.color || '#38bdf8';
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '700 22px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '700 23px Inter, Segoe UI, Arial, sans-serif';
     ctx.fillStyle = options.active ? '#ffffff' : '#38bdf8';
-    ctx.fillText(`📦 ${options.productCount} sản phẩm · Bấm để xem`, 320, 171);
+    ctx.fillText(`📦 ${options.productCount} sản phẩm · Bấm để tham quan`, 352, 183);
   }
 
   return registerTrackedTexture(canvas);
@@ -125,7 +125,7 @@ export function createBoothFasciaTexture(options: {
   category: string;
   color: string;
 }): THREE.CanvasTexture {
-  const canvas = createCanvasElement(768, 128);
+  const canvas = createCanvasElement(896, 144);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
@@ -133,18 +133,94 @@ export function createBoothFasciaTexture(options: {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.fillStyle = options.color || '#0ea5e9';
-    ctx.fillRect(0, 0, 28, canvas.height);
-    ctx.fillRect(canvas.width - 28, 0, 28, canvas.height);
-    ctx.fillRect(0, canvas.height - 10, canvas.width, 10);
+    ctx.fillRect(0, 0, 36, canvas.height);
+    ctx.fillRect(canvas.width - 36, 0, 36, canvas.height);
+    ctx.fillRect(0, 0, canvas.width, 8);
+    ctx.fillRect(0, canvas.height - 12, canvas.width, 12);
 
-    ctx.font = '800 40px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '800 44px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillText(truncateText(options.name.toUpperCase(), 26), canvas.width / 2, 64);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(truncateText(options.name.toUpperCase(), 28), canvas.width / 2, 70);
 
-    ctx.font = '600 22px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '700 24px Inter, Segoe UI, Arial, sans-serif';
     ctx.fillStyle = '#38bdf8';
-    ctx.fillText(truncateText(options.category, 38), canvas.width / 2, 100);
+    ctx.fillText(truncateText(`★ ${options.category.toUpperCase()} ★`, 42), canvas.width / 2, 110);
+  }
+
+  return registerTrackedTexture(canvas);
+}
+
+export function createBoothPosterTexture(options: {
+  name: string;
+  category: string;
+  tagline: string;
+  color: string;
+  productCount: number;
+}): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 320);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Top accent bar
+    ctx.fillStyle = options.color || '#0ea5e9';
+    ctx.fillRect(0, 0, canvas.width, 18);
+
+    // Subtle inner frame
+    ctx.strokeStyle = options.color || '#0ea5e9';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(14, 28, canvas.width - 28, canvas.height - 42);
+
+    // Category header pill
+    ctx.save();
+    createRoundRectPath(ctx, 36, 48, 440, 38, 19);
+    ctx.fillStyle = 'rgba(30, 41, 59, 0.95)';
+    ctx.fill();
+    ctx.restore();
+
+    ctx.font = '700 19px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillText(truncateText(options.category.toUpperCase(), 34), canvas.width / 2, 73);
+
+    // Booth Title
+    ctx.font = '800 32px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillText(truncateText(options.name, 24), canvas.width / 2, 132);
+
+    // Tagline (2 lines)
+    const tagline = options.tagline || 'Giải pháp trưng bày & thương mại chính hãng';
+    const words = tagline.split(/\s+/);
+    let line1 = '';
+    let line2 = '';
+    for (const w of words) {
+      if ((line1 + ' ' + w).trim().length <= 34) {
+        line1 = (line1 + ' ' + w).trim();
+      } else {
+        line2 = (line2 + ' ' + w).trim();
+      }
+    }
+
+    ctx.font = '600 20px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillText(truncateText(line1, 36), canvas.width / 2, 178);
+    if (line2) {
+      ctx.fillText(truncateText(line2, 36), canvas.width / 2, 208);
+    }
+
+    // Bottom showcase badge
+    ctx.save();
+    createRoundRectPath(ctx, 76, 234, 360, 42, 12);
+    ctx.fillStyle = options.color || '#0ea5e9';
+    ctx.fill();
+    ctx.restore();
+
+    ctx.font = '700 20px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`✨ SHOWCASE · ${options.productCount} SẢN PHẨM`, canvas.width / 2, 262);
   }
 
   return registerTrackedTexture(canvas);
@@ -194,6 +270,54 @@ export function createAvatarNametagTexture(options: {
       ctx.fillStyle = '#38bdf8';
       ctx.fillText(`🛍️ ${truncateText(options.activeBoothName, 24)}`, 96, 96);
     }
+  }
+
+  return registerTrackedTexture(canvas);
+}
+
+export function createProductTagTexture(options: {
+  index: number;
+  name: string;
+  priceText: string;
+  color: string;
+  selected: boolean;
+}): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 144);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    createRoundRectPath(ctx, 12, 12, 488, 120, 26);
+    ctx.fillStyle = options.selected ? 'rgba(15, 23, 42, 0.98)' : 'rgba(15, 23, 42, 0.92)';
+    ctx.fill();
+    ctx.lineWidth = options.selected ? 7 : 4;
+    ctx.strokeStyle = options.selected ? '#fbbf24' : options.color || '#38bdf8';
+    ctx.stroke();
+    ctx.restore();
+
+    // Index badge circle
+    ctx.beginPath();
+    ctx.arc(58, 72, 26, 0, Math.PI * 2);
+    ctx.fillStyle = options.selected ? '#fbbf24' : options.color || '#0ea5e9';
+    ctx.fill();
+
+    ctx.font = '800 26px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = options.selected ? '#0f172a' : '#ffffff';
+    ctx.fillText(`#${options.index}`, 58, 81);
+
+    // Product Name
+    ctx.font = '700 24px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(truncateText(options.name, 22), 100, 64);
+
+    // Price & CTA
+    ctx.font = '700 21px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = options.selected ? '#fde68a' : '#38bdf8';
+    ctx.fillText(`${truncateText(options.priceText, 18)} · Bấm xem`, 100, 100);
   }
 
   return registerTrackedTexture(canvas);
