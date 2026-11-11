@@ -22,6 +22,8 @@ import {
   createEnterpriseBackdropTexture,
   createProductDisplayCardTexture,
   computeAspectFitRect,
+  fitEnterpriseTitleLines,
+  wrapProductTitleLines,
   createProductTagTexture,
   createAvatarNametagTexture,
   createPlazaTileTexture,
@@ -729,6 +731,92 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
           clearance,
           `${prop.label} (${prop.x}, ${prop.z}) is too close (${clearance.toFixed(2)}m) to Shop Showcase sightline of ${booth.id}`
         ).toBeGreaterThan(3.8);
+      }
+    }
+  });
+
+  it('frames 100% of the Crown Signboard & enlarged 6-slot shelves without truncation across 1920x1080, 1366x768, and 390x844', () => {
+    // 1. Enterprise names must NEVER be truncated with `...` or `…`
+    const enterpriseNames = [
+      ...DEFAULT_BOOTHS.map((b) => (b.companyName || b.name).toUpperCase()),
+      'CÔNG TY CỔ PHẦN CÔNG NGHỆ TRÍ TUỆ NHÂN TẠO & ĐIỆN TOÁN ĐÁM MÂY AETHER VIỆT NAM',
+    ];
+
+    for (const fullTitle of enterpriseNames) {
+      const fitted = fitEnterpriseTitleLines(null, fullTitle, 1168, 64, 34);
+      expect(fitted.lines.length).toBeGreaterThanOrEqual(1);
+      expect(fitted.lines.length).toBeLessThanOrEqual(2);
+      expect(fitted.lines.join(' ')).toBe(fullTitle);
+      expect(fitted.lines.join(' ').includes('…')).toBe(false);
+      expect(fitted.lines.join(' ').includes('...')).toBe(false);
+    }
+
+    // 2. Product names wrap cleanly up to 2 high-contrast lines
+    const shortProdLines = wrapProductTitleLines(null, 'Kính AR Aether Vision Pro', 944, 38);
+    expect(shortProdLines.length).toBe(1);
+    const longProdLines = wrapProductTitleLines(
+      null,
+      'Hệ thống Robot Tự hành Công nghiệp Kinetix X9 Ultra Pro Max Phiên bản Triển lãm Quốc tế 2026',
+      944,
+      38
+    );
+    expect(longProdLines.length).toBe(2);
+
+    // 3. Enlarged 6 slots have > 1.3m 3D separation and fit inside the 6.0m x 4.4m booth footprint
+    for (let i = 0; i < BOOTH_SLOT_DEFINITIONS.length; i++) {
+      const a = BOOTH_SLOT_DEFINITIONS[i];
+      expect(a.maxSize[0]).toBeGreaterThanOrEqual(1.3);
+      expect(a.maxSize[1]).toBeGreaterThanOrEqual(1.05);
+      expect(Math.abs(a.position[0]) + a.maxSize[0] / 2).toBeLessThan(2.96);
+      for (let j = i + 1; j < BOOTH_SLOT_DEFINITIONS.length; j++) {
+        const b = BOOTH_SLOT_DEFINITIONS[j];
+        const dist3D = Math.hypot(
+          a.position[0] - b.position[0],
+          a.position[1] - b.position[1],
+          a.position[2] - b.position[2]
+        );
+        expect(dist3D).toBeGreaterThan(1.3);
+      }
+    }
+
+    // 4. Verify Crown Signboard (top at y = 4.784m, local z = 3.44m) and Counter base (y = 0.0m)
+    // fit 100% inside the Shop Showcase camera frustum across 1920x1080, 1366x768, and 390x844
+    const viewports: [number, number][] = [
+      [1920, 1080],
+      [1366, 768],
+      [390, 844],
+    ];
+    const tanHalfFov = Math.tan((19 * Math.PI) / 180);
+    const crownSignZ = 3.44;
+    const crownSignTopY = 4.784;
+
+    for (const [vw, vh] of viewports) {
+      for (const booth of DEFAULT_BOOTHS) {
+        const { cameraPosition, lookAtTarget } = computeShopShowcaseCameraTargets(
+          booth,
+          vw,
+          vh,
+          false
+        );
+        const camDistFromBoothCenter = Math.hypot(
+          cameraPosition.x - booth.positionX,
+          cameraPosition.z - booth.positionZ
+        );
+        const lookDistFromBoothCenter = Math.hypot(
+          lookAtTarget.x - booth.positionX,
+          lookAtTarget.z - booth.positionZ
+        );
+        const totalSightSpanZ = camDistFromBoothCenter + lookDistFromBoothCenter;
+        const distCamToSignZ = camDistFromBoothCenter - crownSignZ;
+        const rayCenterYAtSign =
+          cameraPosition.y +
+          (lookAtTarget.y - cameraPosition.y) * (distCamToSignZ / totalSightSpanZ);
+        const frustumHalfHeightAtSign = distCamToSignZ * tanHalfFov;
+        const frustumTopY = rayCenterYAtSign + frustumHalfHeightAtSign;
+        const frustumBottomY = rayCenterYAtSign - frustumHalfHeightAtSign;
+
+        expect(frustumTopY).toBeGreaterThan(crownSignTopY + 0.2);
+        expect(frustumBottomY).toBeLessThanOrEqual(0.05);
       }
     }
   });

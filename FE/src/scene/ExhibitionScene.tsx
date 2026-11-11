@@ -104,10 +104,10 @@ export function computeShopShowcaseCameraTargets(
     const halfSpanRequired = Math.max(booth.width, 6.2) * 0.62;
     const distForWidth =
       1.6 + halfSpanRequired / Math.max(0.32, openFraction * tanHalfFov * aspect);
-    const distForHeight = 2.25 + 2.95 / tanHalfFov;
-    localCamZ = THREE.MathUtils.clamp(Math.max(distForWidth, distForHeight), 10.6, 15.8);
-    localCamY = 2.22;
-    localLookY = 2.12;
+    const distForHeight = 3.44 + 2.45 / tanHalfFov;
+    localCamZ = THREE.MathUtils.clamp(Math.max(distForWidth, distForHeight), 10.85, 15.8);
+    localCamY = 2.44;
+    localLookY = 2.54;
 
     // Shift both camera and lookAt along local +X so the shop sits in the open left viewport
     // while keeping the sightline 100% perpendicular (0 deg horizontal angle) to the storefront
@@ -117,15 +117,19 @@ export function computeShopShowcaseCameraTargets(
     // Bottom sheet occupies up to 62vh on mobile; frame storefront in the upper viewport
     const halfSpanRequired = Math.max(booth.width, 6.2) * 0.6;
     const distForWidth = 1.8 + halfSpanRequired / Math.max(0.24, tanHalfFov * aspect);
-    localCamZ = THREE.MathUtils.clamp(Math.max(distForWidth, 11.8), 11.8, 17.5);
-    localCamY = 2.15;
-    localLookY = 0.72;
+    localCamZ = THREE.MathUtils.clamp(Math.max(distForWidth, 12.2), 12.2, 17.8);
+    localCamY = 2.38;
+    localLookY = 1.12;
     panX = 0;
   } else {
-    // Full-screen Shop Showcase: closer eye-level framing so all 6 product slots and backdrop are large & clear
-    localCamZ = 9.35;
-    localCamY = 2.15;
-    localLookY = 1.96;
+    // Full-screen Shop Showcase: frames the entire booth from counter plinth (y = 0) up to
+    // above the Crown Signboard (y = 5.08m > 4.78m) while keeping all 6 product slots large & clear
+    const halfSpanRequired = Math.max(booth.width, 6.2) * 0.56;
+    const distForWidth =
+      2.6 + halfSpanRequired / Math.max(0.22, tanHalfFov * aspect);
+    localCamZ = THREE.MathUtils.clamp(Math.max(10.85, distForWidth), 10.85, 16.4);
+    localCamY = 2.44;
+    localLookY = 2.58;
     panX = 0;
   }
 

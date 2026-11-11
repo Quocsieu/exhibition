@@ -1089,12 +1089,12 @@ export function buildCoffeeBoothExteriorShell(): THREE.Group {
   mansardMesh.receiveShadow = true;
   group.add(mansardMesh);
 
-  // Curved Parisian Bistro Awning projecting from the front facade (ExtrudeGeometry)
+  // Curved Parisian Bistro Awning projecting from the front facade (Compact overhang clear of fascia & sightlines)
   const awningShape = new THREE.Shape();
-  awningShape.moveTo(0, 3.88);
-  awningShape.bezierCurveTo(0.45, 3.82, 0.85, 3.45, 1.15, 3.28);
-  awningShape.lineTo(1.15, 3.12);
-  awningShape.bezierCurveTo(0.8, 3.32, 0.4, 3.68, 0, 3.74);
+  awningShape.moveTo(0, 3.08);
+  awningShape.bezierCurveTo(0.24, 3.04, 0.44, 2.92, 0.58, 2.84);
+  awningShape.lineTo(0.58, 2.74);
+  awningShape.bezierCurveTo(0.42, 2.82, 0.22, 2.94, 0, 2.98);
   awningShape.closePath();
 
   const awningGeom = new THREE.ExtrudeGeometry(awningShape, {
@@ -1108,11 +1108,11 @@ export function buildCoffeeBoothExteriorShell(): THREE.Group {
   group.add(awningMesh);
 
   // Alternating Cream Stripes on Awning
-  const stripeGeom = new RoundedBoxGeometry(0.44, 0.06, 1.12, 2, 0.01);
+  const stripeGeom = new RoundedBoxGeometry(0.44, 0.05, 0.58, 2, 0.01);
   for (let i = -3; i <= 3; i++) {
     const stripe = new THREE.Mesh(stripeGeom, creamStoneMat);
-    stripe.position.set(i * 0.88, 3.58, 2.98);
-    stripe.rotation.x = 0.46;
+    stripe.position.set(i * 0.88, 2.94, 2.74);
+    stripe.rotation.x = 0.36;
     group.add(stripe);
   }
 

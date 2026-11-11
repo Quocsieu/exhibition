@@ -67,6 +67,140 @@ function truncateText(text: string, maxLen: number): string {
   return `${text.slice(0, maxLen - 1)}…`;
 }
 
+function measureCanvasTextWidth(
+  ctx: CanvasRenderingContext2D | null,
+  text: string,
+  fontPx: number,
+  fontWeight = '900',
+  fontFamily = 'Inter, Segoe UI, Arial, sans-serif'
+): number {
+  const estimatedWidth = text.length * fontPx * 0.56;
+  if (ctx && typeof ctx.measureText === 'function') {
+    ctx.font = `${fontWeight} ${fontPx}px ${fontFamily}`;
+    const measured = ctx.measureText(text).width;
+    if (Number.isFinite(measured) && measured > 0) {
+      return Math.max(measured, text.length * fontPx * 0.48);
+    }
+  }
+  return estimatedWidth;
+}
+
+/**
+ * Dynamically fits an enterprise or booth title into a signboard region without ever
+ * truncating characters with `…` / `...`.
+ * - First attempts to fit on 1 line by scaling font size between `maxFontPx` and `minFontPx`.
+ * - If still wider than `maxWidthPx`, splits cleanly into 2 balanced word-wrapped lines.
+ */
+export function fitEnterpriseTitleLines(
+  ctx: CanvasRenderingContext2D | null,
+  rawText: string,
+  maxWidthPx: number,
+  maxFontPx: number,
+  minFontPx: number,
+  fontFamily = 'Inter, Segoe UI, Arial, sans-serif'
+): { lines: string[]; fontPx: number } {
+  const cleanText = rawText.trim().replace(/\s+/g, ' ');
+  if (!cleanText) {
+    return { lines: [''], fontPx: maxFontPx };
+  }
+
+  for (let px = maxFontPx; px >= minFontPx; px -= 2) {
+    const w = measureCanvasTextWidth(ctx, cleanText, px, '900', fontFamily);
+    if (w <= maxWidthPx) {
+      return { lines: [cleanText], fontPx: px };
+    }
+  }
+
+  // Split into 2 balanced lines at word boundary without losing any characters
+  const words = cleanText.split(' ');
+  if (words.length <= 1) {
+    const fittedPx = Math.max(
+      22,
+      Math.floor((maxWidthPx / Math.max(1, cleanText.length)) / 0.58)
+    );
+    return { lines: [cleanText], fontPx: Math.min(maxFontPx, fittedPx) };
+  }
+
+  let bestSplit = 1;
+  let bestDiff = Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const left = words.slice(0, i).join(' ');
+    const right = words.slice(i).join(' ');
+    const diff = Math.abs(left.length - right.length);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestSplit = i;
+    }
+  }
+
+  const line1 = words.slice(0, bestSplit).join(' ');
+  const line2 = words.slice(bestSplit).join(' ');
+  const twoLineMaxPx = Math.min(maxFontPx, Math.round(maxFontPx * 0.78));
+
+  for (let px = twoLineMaxPx; px >= 24; px -= 2) {
+    const w1 = measureCanvasTextWidth(ctx, line1, px, '900', fontFamily);
+    const w2 = measureCanvasTextWidth(ctx, line2, px, '900', fontFamily);
+    if (Math.max(w1, w2) <= maxWidthPx) {
+      return { lines: [line1, line2], fontPx: px };
+    }
+  }
+
+  return { lines: [line1, line2], fontPx: 24 };
+}
+
+/**
+ * Wraps a product title into up to 2 high-contrast lines across the full width of the
+ * 3D product display card so product names are large and immediately readable.
+ */
+export function wrapProductTitleLines(
+  ctx: CanvasRenderingContext2D | null,
+  rawName: string,
+  maxWidthPx = 944,
+  fontPx = 38,
+  fontFamily = 'Inter, Segoe UI, Arial, sans-serif'
+): string[] {
+  const clean = rawName.trim().replace(/\s+/g, ' ');
+  if (!clean) return ['Sản phẩm trưng bày'];
+
+  if (measureCanvasTextWidth(ctx, clean, fontPx, '900', fontFamily) <= maxWidthPx) {
+    return [clean];
+  }
+
+  const words = clean.split(' ');
+  let line1 = '';
+  let restStartIdx = 0;
+
+  for (let i = 0; i < words.length; i++) {
+    const candidate = line1 ? `${line1} ${words[i]}` : words[i];
+    if (
+      measureCanvasTextWidth(ctx, candidate, fontPx, '900', fontFamily) <= maxWidthPx ||
+      !line1
+    ) {
+      line1 = candidate;
+      restStartIdx = i + 1;
+    } else {
+      break;
+    }
+  }
+
+  if (restStartIdx >= words.length) {
+    return [line1];
+  }
+
+  let line2 = words.slice(restStartIdx).join(' ');
+  if (measureCanvasTextWidth(ctx, line2, fontPx, '900', fontFamily) > maxWidthPx) {
+    while (
+      line2.length > 4 &&
+      measureCanvasTextWidth(ctx, `${line2}…`, fontPx, '900', fontFamily) > maxWidthPx
+    ) {
+      line2 = line2.slice(0, -1).trimEnd();
+    }
+    line2 = `${line2}…`;
+  }
+
+  return [line1, line2];
+}
+
 export type BoothVisualTheme = 'tech' | 'living' | 'coffee' | 'robotics' | 'design' | 'energy';
 
 interface ThemePalette {
@@ -160,7 +294,7 @@ export function createBoothSignTexture(options: {
   active: boolean;
   theme?: BoothVisualTheme;
 }): THREE.CanvasTexture {
-  const canvas = createCanvasElement(896, 288);
+  const canvas = createCanvasElement(1280, 360);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
@@ -168,49 +302,65 @@ export function createBoothSignTexture(options: {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
-    createRoundRectPath(ctx, 16, 16, 864, 256, 36);
+    createRoundRectPath(ctx, 16, 14, 1248, 332, 42);
     ctx.fillStyle = options.active ? pal.bgActive : pal.bg;
     ctx.fill();
-    ctx.lineWidth = options.active ? 11 : 7;
+    ctx.lineWidth = options.active ? 12 : 8;
     ctx.strokeStyle = options.active ? '#fbbf24' : pal.border;
     ctx.stroke();
     ctx.restore();
 
-    // Decorative top accent bar
+    // Decorative top illuminated accent bar
     ctx.save();
-    createRoundRectPath(ctx, 44, 32, 808, 12, 6);
-    ctx.fillStyle = pal.border;
+    createRoundRectPath(ctx, 56, 32, 1168, 12, 6);
+    ctx.fillStyle = options.active ? '#fbbf24' : pal.border;
     ctx.fill();
     ctx.restore();
 
-    ctx.font = '800 26px Inter, Segoe UI, Arial, sans-serif';
+    // Category & Booth Subtitle Header (auto-fitted, no truncation of key info)
+    const categoryHeader = `${pal.icon} ${options.category.toUpperCase()}`;
+    const fittedSub = fitEnterpriseTitleLines(ctx, categoryHeader, 1140, 30, 22);
+    ctx.font = `800 ${fittedSub.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillStyle = pal.textSub;
-    ctx.fillText(
-      truncateText(`${pal.icon} ${options.category.toUpperCase()}`, 40),
-      canvas.width / 2,
-      88
-    );
+    ctx.fillText(fittedSub.lines[0] || categoryHeader, canvas.width / 2, 86);
 
-    ctx.font = '900 48px Inter, Segoe UI, Arial, sans-serif';
-    ctx.fillStyle = pal.textMain;
-    ctx.fillText(truncateText(options.name.toUpperCase(), 26), canvas.width / 2, 152);
-
+    // Full Enterprise Name (100% complete — never truncated with `...`)
+    const fullEnterpriseTitle = options.name.toUpperCase();
+    const fittedTitle = fitEnterpriseTitleLines(ctx, fullEnterpriseTitle, 1168, 64, 34);
     ctx.save();
-    createRoundRectPath(ctx, 158, 182, 580, 58, 29);
+    ctx.font = `900 ${fittedTitle.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = pal.textMain;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 3;
+
+    if (fittedTitle.lines.length === 1) {
+      ctx.fillText(fittedTitle.lines[0], canvas.width / 2, 178);
+    } else {
+      ctx.fillText(fittedTitle.lines[0], canvas.width / 2, 144);
+      ctx.fillText(fittedTitle.lines[1], canvas.width / 2, 198);
+    }
+    ctx.restore();
+
+    // Bottom interactive badge
+    ctx.save();
+    createRoundRectPath(ctx, 250, 242, 780, 68, 34);
     ctx.fillStyle = options.active ? pal.border : pal.badgeBg;
     ctx.fill();
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 3;
     ctx.strokeStyle = '#ffffff';
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '800 25px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '800 29px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'center';
     ctx.fillStyle = pal.badgeText;
     ctx.fillText(
       `📦 ${options.productCount} sản phẩm · Bấm để xem Gian hàng`,
       canvas.width / 2,
-      220
+      287
     );
   }
 
@@ -225,7 +375,7 @@ export function createBoothFasciaTexture(options: {
   color: string;
   theme?: BoothVisualTheme;
 }): THREE.CanvasTexture {
-  const canvas = createCanvasElement(1024, 192);
+  const canvas = createCanvasElement(1280, 220);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
@@ -239,18 +389,24 @@ export function createBoothFasciaTexture(options: {
     ctx.fillRect(0, 0, canvas.width, 12);
     ctx.fillRect(0, canvas.height - 14, canvas.width, 14);
 
-    ctx.font = '900 52px Inter, Segoe UI, Arial, sans-serif';
+    // Full Enterprise Name on architectural fascia (auto-fitted, zero `...` truncation)
+    const fasciaTitle = `${pal.icon} ${options.name.toUpperCase()}`;
+    const fittedFascia = fitEnterpriseTitleLines(ctx, fasciaTitle, 1140, 56, 30);
+    ctx.font = `900 ${fittedFascia.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillStyle = pal.textMain;
-    ctx.fillText(
-      truncateText(`${pal.icon} ${options.name.toUpperCase()}`, 28),
-      canvas.width / 2,
-      94
-    );
+    if (fittedFascia.lines.length === 1) {
+      ctx.fillText(fittedFascia.lines[0], canvas.width / 2, 104);
+    } else {
+      ctx.fillText(fittedFascia.lines[0], canvas.width / 2, 74);
+      ctx.fillText(fittedFascia.lines[1], canvas.width / 2, 118);
+    }
 
-    ctx.font = '800 28px Inter, Segoe UI, Arial, sans-serif';
+    const categoryLine = `★ ${options.category.toUpperCase()} ★`;
+    const fittedCat = fitEnterpriseTitleLines(ctx, categoryLine, 1140, 28, 20);
+    ctx.font = `800 ${fittedCat.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
     ctx.fillStyle = pal.textSub;
-    ctx.fillText(truncateText(`★ ${options.category.toUpperCase()} ★`, 44), canvas.width / 2, 148);
+    ctx.fillText(fittedCat.lines[0] || categoryLine, canvas.width / 2, 172);
   }
 
   const texture = registerTrackedTexture(canvas);
@@ -824,7 +980,7 @@ export function createEnterpriseBackdropTexture(options: {
       ctx.fillText(initials || pal.icon, 122, 148);
     }
 
-    // Enterprise Company Name badge
+    // Enterprise Company Name badge (auto-fitted without `...` truncation)
     ctx.save();
     createRoundRectPath(ctx, 214, 68, 740, 44, 12);
     ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
@@ -834,19 +990,29 @@ export function createEnterpriseBackdropTexture(options: {
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '800 22px Inter, Segoe UI, Arial, sans-serif';
+    const badgeLine = `🏢 ${companyTitle}  ·  ${options.category.toUpperCase()}`;
+    const fittedBadge = fitEnterpriseTitleLines(ctx, badgeLine, 704, 22, 16);
+    ctx.font = `800 ${fittedBadge.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
     ctx.textAlign = 'left';
     ctx.fillStyle = pal.textSub;
-    ctx.fillText(
-      truncateText(`🏢 ${companyTitle}  ·  ${options.category.toUpperCase()}`, 52),
-      234,
-      98
-    );
+    ctx.fillText(fittedBadge.lines[0] || badgeLine, 234, 98);
 
-    // Main Exhibition Stand Name
-    ctx.font = '900 54px Inter, Segoe UI, Arial, sans-serif';
+    // Main Exhibition Stand Name (auto-fitted without `...` truncation)
+    const fittedStandName = fitEnterpriseTitleLines(
+      ctx,
+      options.name.toUpperCase(),
+      740,
+      54,
+      28
+    );
+    ctx.font = `900 ${fittedStandName.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
     ctx.fillStyle = pal.textMain;
-    ctx.fillText(truncateText(options.name.toUpperCase(), 24), 214, 172);
+    if (fittedStandName.lines.length === 1) {
+      ctx.fillText(fittedStandName.lines[0], 214, 172);
+    } else {
+      ctx.fillText(fittedStandName.lines[0], 214, 152);
+      ctx.fillText(fittedStandName.lines[1], 214, 194);
+    }
 
     // Divider line
     ctx.fillStyle = pal.border;
@@ -1033,7 +1199,7 @@ export function createProductDisplayCardTexture(options: {
   selected: boolean;
 }): THREE.CanvasTexture {
   const W = 1024;
-  const H = 768;
+  const H = 836;
   const canvas = createCanvasElement(W, H);
   const ctx = canvas.getContext('2d');
   const texture = registerTrackedTexture(canvas);
@@ -1060,18 +1226,18 @@ export function createProductDisplayCardTexture(options: {
     // 1. Outer Display Stand Frame Background
     ctx.save();
     createRoundRectPath(ctx, 4, 4, W - 8, H - 8, 28);
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = '#090d16';
     ctx.fill();
-    ctx.lineWidth = options.selected ? 12 : 7;
+    ctx.lineWidth = options.selected ? 14 : 8;
     ctx.strokeStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
     ctx.stroke();
     ctx.restore();
 
-    // 2. Enlarged Prominent Studio Photo Viewport (Occupies ~83% of the entire display board height)
-    const frameX = 16;
-    const frameY = 14;
-    const frameW = W - 32; // 992
-    const frameH = 636;
+    // 2. Large Prominent Studio Photo Viewport (Occupies the main upper display area: 988 x 548)
+    const frameX = 18;
+    const frameY = 16;
+    const frameW = W - 36; // 988
+    const frameH = 548;
 
     ctx.save();
     createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 20);
@@ -1092,7 +1258,7 @@ export function createProductDisplayCardTexture(options: {
 
       // Subtle studio backdrop fill so portrait/square photos never leave harsh blank bars
       ctx.save();
-      ctx.globalAlpha = 0.24;
+      ctx.globalAlpha = 0.22;
       const coverScale = Math.max(frameW / Math.max(1, natW), frameH / Math.max(1, natH));
       const coverW = natW * coverScale;
       const coverH = natH * coverScale;
@@ -1105,18 +1271,17 @@ export function createProductDisplayCardTexture(options: {
       );
       ctx.restore();
 
-      // Minimal 6px padding so the true-aspect-ratio product photo fills the maximum viewport area
+      // True-aspect-ratio product photo (100% unstretched, uncropped)
       const fit = computeAspectFitRect(natW, natH, frameX, frameY, frameW, frameH, 6);
       ctx.save();
-      ctx.shadowColor = 'rgba(15, 23, 42, 0.26)';
-      ctx.shadowBlur = 18;
+      ctx.shadowColor = 'rgba(15, 23, 42, 0.24)';
+      ctx.shadowBlur = 16;
       ctx.shadowOffsetY = 4;
       createRoundRectPath(ctx, fit.x, fit.y, fit.width, fit.height, 14);
       ctx.fillStyle = '#ffffff';
       ctx.fill();
       ctx.restore();
 
-      // True aspect-ratio product photo (100% unstretched, uncropped)
       ctx.save();
       createRoundRectPath(ctx, fit.x, fit.y, fit.width, fit.height, 14);
       ctx.clip();
@@ -1137,13 +1302,13 @@ export function createProductDisplayCardTexture(options: {
 
       ctx.save();
       ctx.beginPath();
-      ctx.arc(W / 2, frameY + frameH / 2 - 28, 64, 0, Math.PI * 2);
+      ctx.arc(W / 2, frameY + frameH / 2 - 28, 66, 0, Math.PI * 2);
       ctx.fillStyle = options.accentColor || '#0ea5e9';
-      ctx.globalAlpha = 0.22;
+      ctx.globalAlpha = 0.24;
       ctx.fill();
       ctx.restore();
 
-      ctx.font = '800 46px Inter, Segoe UI, Arial, sans-serif';
+      ctx.font = '800 48px Inter, Segoe UI, Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#f8fafc';
       const initials = options.name
@@ -1152,7 +1317,7 @@ export function createProductDisplayCardTexture(options: {
         .slice(0, 2)
         .map((w) => w[0]?.toUpperCase())
         .join('');
-      ctx.fillText(initials || 'SP', W / 2, frameY + frameH / 2 - 12);
+      ctx.fillText(initials || 'SP', W / 2, frameY + frameH / 2 - 10);
 
       ctx.font = '700 28px Inter, Segoe UI, Arial, sans-serif';
       ctx.fillStyle = '#94a3b8';
@@ -1175,7 +1340,7 @@ export function createProductDisplayCardTexture(options: {
 
     ctx.save();
     createRoundRectPath(ctx, frameX + 12, frameY + 12, 134, 40, 11);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.84)';
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.86)';
     ctx.fill();
     ctx.lineWidth = 2.5;
     ctx.strokeStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
@@ -1187,28 +1352,66 @@ export function createProductDisplayCardTexture(options: {
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(shortSlotBadge.toUpperCase(), frameX + 79, frameY + 39);
 
-    // 3. Compact High-Contrast Bottom Product Caption Strip (Product Name + Price + Action Pill)
-    ctx.font = '900 34px Inter, Segoe UI, Arial, sans-serif';
+    // 3. Dedicated High-Contrast Bottom Info Zone (y = 574..820, never overlaps product photo)
+    const infoX = 18;
+    const infoY = 574;
+    const infoW = W - 36; // 988
+    const infoH = 246;
+
+    ctx.save();
+    createRoundRectPath(ctx, infoX, infoY, infoW, infoH, 20);
+    ctx.fillStyle = '#0f172a';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
+    ctx.stroke();
+    ctx.restore();
+
+    // Accent top bar inside info panel
+    ctx.save();
+    ctx.fillStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
+    ctx.fillRect(infoX + 24, infoY, infoW - 48, 5);
+    ctx.restore();
+
+    // Product Name: up to 2 full-width lines in high-contrast bold white
+    const titleLines = wrapProductTitleLines(ctx, options.name, 944, 38);
     ctx.textAlign = 'left';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(truncateText(options.name, 28), 28, 696);
+    if (titleLines.length === 1) {
+      ctx.font = '900 42px Inter, Segoe UI, Arial, sans-serif';
+      ctx.fillText(titleLines[0], 40, 646);
+    } else {
+      ctx.font = '900 37px Inter, Segoe UI, Arial, sans-serif';
+      ctx.fillText(titleLines[0], 40, 626);
+      ctx.fillText(titleLines[1], 40, 672);
+    }
 
-    ctx.font = '800 32px Inter, Segoe UI, Arial, sans-serif';
+    // Prominent Price Box & Value right below Product Name (e.g., `6.850.000 ₫`)
+    ctx.save();
+    createRoundRectPath(ctx, 34, 696, 716, 102, 16);
+    ctx.fillStyle = 'rgba(251, 191, 36, 0.14)';
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.65)';
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.font = '900 48px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'left';
     ctx.fillStyle = '#fbbf24';
-    ctx.fillText(truncateText(options.priceText, 22), 28, 742);
+    ctx.fillText(truncateText(options.priceText, 22), 54, 764);
 
-    // Action badge on bottom-right
+    // Interactive Action Pill on bottom-right of Price Row
     ctx.save();
-    createRoundRectPath(ctx, W - 246, 676, 220, 62, 16);
+    createRoundRectPath(ctx, W - 254, 704, 216, 86, 16);
     ctx.fillStyle = options.selected ? '#fbbf24' : options.accentColor || '#0ea5e9';
     ctx.fill();
     ctx.restore();
 
-    ctx.font = '900 24px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '900 25px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = options.selected ? '#0f172a' : '#ffffff';
-    ctx.fillText('XEM CHI TIẾT', W - 136, 715);
+    ctx.fillText('CHI TIẾT ▸', W - 146, 756);
 
     texture.needsUpdate = true;
   };
