@@ -130,6 +130,9 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   const nameInputId = useId();
   const boothSelectId = useId();
 
+  const lastSilentRefreshAtRef = useRef<number>(0);
+  const isSilentRefreshingRef = useRef<boolean>(false);
+
   const loadExpoData = useCallback(async () => {
     setLoadingData(true);
     try {
@@ -145,6 +148,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       setProducts(fetchedProducts);
       setSlotAssignments(fetchedSlots.assignments);
       setDataWarning(null);
+      lastSilentRefreshAtRef.current = Date.now();
     } catch {
       setBooths(DEFAULT_BOOTHS);
       setProducts(DEFAULT_PRODUCTS);
@@ -159,8 +163,16 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
    * Silent background refresh for Scenarios B, C, and D:
    * Fetches latest booths, products, and slot assignments from SQLite without
    * triggering the full-screen loading overlay, and synchronizes active booth/product state.
+   * Throttled by default (4s cooldown) to prevent duplicate network calls when switching booths/tabs,
+   * while `force = true` refreshes immediately when an explicit Admin mutation event arrives.
    */
-  const refreshExpoDataSilently = useCallback(async () => {
+  const refreshExpoDataSilently = useCallback(async (force = false) => {
+    const now = Date.now();
+    if (isSilentRefreshingRef.current) return;
+    if (!force && now - lastSilentRefreshAtRef.current < 4000) return;
+
+    isSilentRefreshingRef.current = true;
+    lastSilentRefreshAtRef.current = now;
     try {
       const [fetchedBooths, fetchedProducts, fetchedSlots] = await Promise.all([
         apiClient.getBooths(),
@@ -173,6 +185,8 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       setDataWarning(null);
     } catch {
       // Keep current in-memory state if background refresh encounters transient network error
+    } finally {
+      isSilentRefreshingRef.current = false;
     }
   }, []);
 
@@ -196,16 +210,16 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   useEffect(() => {
     const handleFocusOrVisible = () => {
       if (document.visibilityState === 'visible') {
-        void refreshExpoDataSilently();
+        void refreshExpoDataSilently(false);
       }
     };
     const handleStorage = (e: StorageEvent) => {
       if (e.key === EXPO_DATA_UPDATED_STORAGE_KEY) {
-        void refreshExpoDataSilently();
+        void refreshExpoDataSilently(true);
       }
     };
     const handleCustomMutated = () => {
-      void refreshExpoDataSilently();
+      void refreshExpoDataSilently(true);
     };
 
     window.addEventListener('focus', handleFocusOrVisible);
@@ -218,7 +232,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       if (typeof BroadcastChannel !== 'undefined') {
         bc = new BroadcastChannel(EXPO_DATA_SYNC_CHANNEL);
         bc.onmessage = () => {
-          void refreshExpoDataSilently();
+          void refreshExpoDataSilently(true);
         };
       }
     } catch {
@@ -471,11 +485,17 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
   const handleGroundClick = useCallback(
     (x: number, z: number) => {
+      // In Third-Person Explore Mode (`cameraMode === 'explore'`), mouse/touch on the canvas
+      // is reserved for rotating the camera — clicking/tapping the ground does NOT auto-walk.
+      if (cameraMode === 'explore') {
+        return;
+      }
       if (cameraMode === 'focus') {
         setCameraMode('explore');
         setSelectedBooth(null);
         setFocusedBooth(null);
         setZoom(EXPLORE_DEFAULT_ZOOM);
+        return;
       }
       moveToPoint(x, z);
     },
@@ -771,16 +791,16 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
           </div>
           <ul className="expo-help-card__list">
             <li>
-              <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> hoặc <strong>Phím mũi tên</strong>: Di chuyển tự do theo góc nhìn nhân vật.
+              <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> hoặc <strong>Phím mũi tên</strong>: Di chuyển nhân vật theo hướng nhìn camera.
             </li>
             <li>
-              <strong>Click chuột xuống sàn</strong>: Tự động tìm đường (A*) tránh vật cản tới điểm chọn.
+              <strong>Giữ chuột trái &amp; kéo</strong> (PC) / <strong>Vuốt màn hình</strong> (Điện thoại): Xoay góc nhìn camera 360° (trái, phải, lên, xuống) trong chế độ <em>Tham quan</em>; <strong>Cuộn chuột</strong> để zoom.
             </li>
             <li>
-              <strong>3 chế độ Camera</strong>: Chọn <em>Toàn cảnh</em> (Isometric 2.5D), <em>Tham quan</em> (Third-person theo nhân vật), hoặc <em>Click vào Gian hàng</em> để xem cận cảnh quầy kệ & sản phẩm.
+              <strong>Joystick cảm ứng</strong> (Góc dưới trái): Di chuyển nhân vật trên điện thoại/máy tính bảng (hỗ trợ vừa đi vừa vuốt xoay góc nhìn).
             </li>
             <li>
-              <strong>Joystick cảm ứng</strong> (Góc dưới trái): Điều khiển mượt mà trên điện thoại/máy tính bảng.
+              <strong>3 chế độ Camera</strong>: Chọn <em>Toàn cảnh</em> (Isometric 2.5D — hỗ trợ click sàn tìm đường A*), <em>Tham quan</em> (Third-person theo nhân vật), hoặc <em>Click vào Gian hàng</em> để xem cận cảnh sản phẩm.
             </li>
           </ul>
         </aside>
@@ -808,6 +828,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         onSelectBooth={handleSelectBooth}
         onGroundClick={handleGroundClick}
         zoom={zoom}
+        onZoomChange={setZoom}
       />
 
       {!isBoothShowcaseActive && <MobileJoystick onMove={handleJoystickMove} />}

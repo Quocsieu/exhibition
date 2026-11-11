@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Line, OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
@@ -47,6 +47,7 @@ export interface ExhibitionSceneProps {
   onSelectBooth: (booth: BoothType) => void;
   onGroundClick: (x: number, z: number) => void;
   zoom?: number;
+  onZoomChange?: (updater: (prevZoom: number) => number) => void;
 }
 
 export interface ShopShowcaseCameraTargets {
@@ -160,12 +161,18 @@ export function computeThirdPersonCameraTargets(
   playerZ: number,
   cameraYaw: number,
   zoom: number,
-  booths: BoothType[]
+  booths: BoothType[],
+  cameraPitch = 0
 ): ThirdPersonCameraTargets {
   const clampedZoom = THREE.MathUtils.clamp(zoom, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
+  const clampedPitch = THREE.MathUtils.clamp(cameraPitch, -0.42, 0.48);
   const zoomRatio = 34 / clampedZoom;
   const desiredDist = THREE.MathUtils.clamp(5.2 * zoomRatio, 3.5, 7.4);
-  const camHeight = THREE.MathUtils.clamp(2.26 * zoomRatio, 1.72, 3.05);
+  const baseCamHeight = THREE.MathUtils.clamp(2.26 * zoomRatio, 1.72, 3.05);
+  const pitchedCamHeight =
+    clampedPitch === 0
+      ? baseCamHeight
+      : THREE.MathUtils.clamp(baseCamHeight - Math.sin(clampedPitch) * 0.95, 1.32, 3.55);
 
   const fwdX = Math.sin(cameraYaw);
   const fwdZ = Math.cos(cameraYaw);
@@ -206,11 +213,14 @@ export function computeThirdPersonCameraTargets(
     WORLD_BOUNDS.minZ + 0.9,
     WORLD_BOUNDS.maxZ - 0.9
   );
-  const camY = Math.max(1.65, camHeight);
+  const camY = clampedPitch === 0 ? Math.max(1.65, baseCamHeight) : Math.max(1.32, pitchedCamHeight);
 
   const lookAheadDist = 3.4;
   const lookX = playerX + fwdX * lookAheadDist;
-  const lookY = 1.46;
+  const lookY =
+    clampedPitch === 0
+      ? 1.46
+      : THREE.MathUtils.clamp(1.46 + Math.sin(clampedPitch) * 1.65, 0.45, 3.25);
   const lookZ = playerZ + fwdZ * lookAheadDist;
 
   return {
@@ -223,6 +233,12 @@ function shortestAngleDiff(fromAngle: number, toAngle: number): number {
   return Math.atan2(Math.sin(toAngle - fromAngle), Math.cos(toAngle - fromAngle));
 }
 
+interface ExploreOrbitState {
+  yaw: number;
+  pitch: number;
+  isDragging: boolean;
+}
+
 interface HybridCameraRigProps {
   orthoCamRef: React.RefObject<THREE.OrthographicCamera | null>;
   perspCamRef: React.RefObject<THREE.PerspectiveCamera | null>;
@@ -232,6 +248,7 @@ interface HybridCameraRigProps {
   targetRotY: number;
   playerTransformRef?: React.MutableRefObject<PlayerTransform>;
   cameraYawRef?: React.MutableRefObject<number | null>;
+  orbitStateRef: React.MutableRefObject<ExploreOrbitState>;
   hasActiveAutoPath: boolean;
   onStepMovement?: (delta: number) => void;
   cameraMode: CameraViewMode;
@@ -249,6 +266,7 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
   targetRotY,
   playerTransformRef,
   cameraYawRef,
+  orbitStateRef,
   hasActiveAutoPath,
   onStepMovement,
   cameraMode,
@@ -271,6 +289,7 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
 
   // Mode B: Low-Angle Third-Person camera state (Explore mode)
   const tpCamYawRef = useRef<number>(initRotY);
+  const tpCamPitchRef = useRef<number>(0);
   const smoothedTpCamPos = useRef(
     new THREE.Vector3(
       initX - Math.sin(initRotY) * 5.2,
@@ -390,27 +409,40 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
         perspCam.updateProjectionMatrix();
       }
 
-      // Smoothly steer camera yaw behind character when walking forward/turning or following an A* path,
-      // while avoiding a jarring 180-degree camera flip when the player steps backward (S / ArrowDown).
       if (!wasExploreModeRef.current) {
         wasExploreModeRef.current = true;
         tpCamYawRef.current = liveRotY;
+        tpCamPitchRef.current = 0;
+        orbitStateRef.current.yaw = liveRotY;
+        orbitStateRef.current.pitch = 0;
         const initTp = computeThirdPersonCameraTargets(
           liveX,
           liveZ,
           tpCamYawRef.current,
           clampedZoom,
-          booths
+          booths,
+          tpCamPitchRef.current
         );
         smoothedTpCamPos.current.copy(initTp.cameraPosition);
         smoothedTpLookAt.current.copy(initTp.lookAtTarget);
-      } else if (liveState === 'walk') {
-        const diff = shortestAngleDiff(tpCamYawRef.current, liveRotY);
-        if (hasActiveAutoPath || Math.abs(diff) < 2.35) {
-          const yawTurnRate = hasActiveAutoPath ? 3.8 : 2.6;
-          const yawAlpha = 1 - Math.exp(-yawTurnRate * delta);
-          tpCamYawRef.current += diff * yawAlpha;
+      } else {
+        // When following an auto-path from the quick-nav dropdown and user is not dragging camera,
+        // smoothly align orbit yaw behind the path direction.
+        if (hasActiveAutoPath && liveState === 'walk' && !orbitStateRef.current.isDragging) {
+          const autoDiff = shortestAngleDiff(orbitStateRef.current.yaw, liveRotY);
+          const autoAlpha = 1 - Math.exp(-3.6 * delta);
+          orbitStateRef.current.yaw += autoDiff * autoAlpha;
         }
+
+        // Smoothly damp camera yaw & pitch toward user's mouse-drag / touch-swipe target
+        const orbitAlpha = 1 - Math.exp(-18 * delta);
+        const yawDiff = shortestAngleDiff(tpCamYawRef.current, orbitStateRef.current.yaw);
+        tpCamYawRef.current += yawDiff * orbitAlpha;
+        tpCamPitchRef.current = THREE.MathUtils.lerp(
+          tpCamPitchRef.current,
+          orbitStateRef.current.pitch,
+          orbitAlpha
+        );
       }
 
       if (cameraYawRef) {
@@ -422,10 +454,11 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
         liveZ,
         tpCamYawRef.current,
         clampedZoom,
-        booths
+        booths,
+        tpCamPitchRef.current
       );
 
-      const tpAlpha = 1 - Math.exp(-9.5 * delta);
+      const tpAlpha = 1 - Math.exp(-12 * delta);
       smoothedTpCamPos.current.lerp(tpTargets.cameraPosition, tpAlpha);
       smoothedTpLookAt.current.lerp(tpTargets.lookAtTarget, tpAlpha);
 
@@ -476,9 +509,21 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     onSelectBooth,
     onGroundClick,
     zoom = 34,
+    onZoomChange,
   }) => {
     const orthoCamRef = useRef<THREE.OrthographicCamera | null>(null);
     const perspCamRef = useRef<THREE.PerspectiveCamera | null>(null);
+
+    const orbitStateRef = useRef<ExploreOrbitState>({
+      yaw: playerTransformRef ? playerTransformRef.current.rotationY : player.rotationY,
+      pitch: 0,
+      isDragging: false,
+    });
+    const activePointerIdRef = useRef<number | null>(null);
+    const lastPointerPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+    const dragDistanceRef = useRef<number>(0);
+    const suppressClickUntilRef = useRef<number>(0);
+    const [isDraggingOrbit, setIsDraggingOrbit] = useState(false);
 
     const boothNamesById = useMemo(() => {
       const m = new Map<string, string>();
@@ -496,6 +541,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
 
     const isShopShowcase = cameraMode === 'focus' && activeFocusedBooth !== null;
     const isOverviewMode = cameraMode === 'overview';
+    const isExploreMode = cameraMode === 'explore';
 
     const clickMarker =
       activePath.length > 0 ? activePath[activePath.length - 1] : null;
@@ -513,13 +559,107 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
 
     const handleEnvironmentGroundClick = useCallback(
       (pt: Point2D) => {
+        if (performance.now() < suppressClickUntilRef.current) return;
+        // In Third-Person Explore Mode, clicking/tapping the ground does NOT auto-walk
+        if (cameraMode === 'explore') return;
         onGroundClick(pt.x, pt.z);
       },
-      [onGroundClick]
+      [cameraMode, onGroundClick]
+    );
+
+    const handleBoothSelect = useCallback(
+      (booth: BoothType) => {
+        if (performance.now() < suppressClickUntilRef.current) return;
+        onSelectBooth(booth);
+      },
+      [onSelectBooth]
+    );
+
+    const handleProductSelect = useCallback(
+      (product: Product) => {
+        if (performance.now() < suppressClickUntilRef.current) return;
+        onSelectProduct?.(product);
+      },
+      [onSelectProduct]
+    );
+
+    const handlePointerDown = useCallback(
+      (e: React.PointerEvent<HTMLDivElement>) => {
+        if (cameraMode !== 'explore') return;
+        // On PC mouse, only rotate with Left Mouse Button (button === 0)
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        if (activePointerIdRef.current !== null) return;
+
+        activePointerIdRef.current = e.pointerId;
+        lastPointerPosRef.current = { x: e.clientX, y: e.clientY };
+        dragDistanceRef.current = 0;
+      },
+      [cameraMode]
+    );
+
+    const handlePointerMove = useCallback(
+      (e: React.PointerEvent<HTMLDivElement>) => {
+        if (cameraMode !== 'explore' || e.pointerId !== activePointerIdRef.current) return;
+
+        const dx = e.clientX - lastPointerPosRef.current.x;
+        const dy = e.clientY - lastPointerPosRef.current.y;
+        lastPointerPosRef.current = { x: e.clientX, y: e.clientY };
+
+        const stepDist = Math.hypot(dx, dy);
+        dragDistanceRef.current += stepDist;
+
+        if (dragDistanceRef.current > 3) {
+          if (!orbitStateRef.current.isDragging) {
+            orbitStateRef.current.isDragging = true;
+            setIsDraggingOrbit(true);
+          }
+          const yawSens = e.pointerType === 'touch' ? 0.0068 : 0.0052;
+          const pitchSens = e.pointerType === 'touch' ? 0.0046 : 0.0038;
+          orbitStateRef.current.yaw -= dx * yawSens;
+          orbitStateRef.current.pitch = THREE.MathUtils.clamp(
+            orbitStateRef.current.pitch - dy * pitchSens,
+            -0.42,
+            0.48
+          );
+        }
+      },
+      [cameraMode]
+    );
+
+    const handlePointerUpOrCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.pointerId !== activePointerIdRef.current) return;
+      if (dragDistanceRef.current > 6) {
+        suppressClickUntilRef.current = performance.now() + 140;
+      }
+      activePointerIdRef.current = null;
+      orbitStateRef.current.isDragging = false;
+      setIsDraggingOrbit(false);
+    }, []);
+
+    const handleWheel = useCallback(
+      (e: React.WheelEvent<HTMLDivElement>) => {
+        if (!onZoomChange || cameraMode === 'focus') return;
+        const deltaZoom = e.deltaY < 0 ? 2.5 : -2.5;
+        onZoomChange((prev) =>
+          THREE.MathUtils.clamp(prev + deltaZoom, MIN_CAMERA_ZOOM, 60)
+        );
+      },
+      [cameraMode, onZoomChange]
     );
 
     return (
-      <div className="expo-canvas-container" aria-label="Không gian triển lãm 3D">
+      <div
+        className={`expo-canvas-container ${
+          isExploreMode ? 'expo-canvas-container--explore' : ''
+        } ${isDraggingOrbit ? 'expo-canvas-container--dragging' : ''}`}
+        aria-label="Không gian triển lãm 3D"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUpOrCancel}
+        onPointerCancel={handlePointerUpOrCancel}
+        onPointerLeave={handlePointerUpOrCancel}
+        onWheel={handleWheel}
+      >
         <Canvas
           orthographic
           shadows
@@ -568,6 +708,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             targetRotY={player.rotationY}
             playerTransformRef={playerTransformRef}
             cameraYawRef={cameraYawRef}
+            orbitStateRef={orbitStateRef}
             hasActiveAutoPath={activePath.length > 0}
             onStepMovement={onStepMovement}
             cameraMode={cameraMode}
@@ -620,13 +761,13 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
               productCount={productCountByBooth[booth.id] ?? 0}
               slots={slotsByBooth?.[booth.id]}
               selectedProductId={selectedProductId}
-              onSelectProduct={onSelectProduct}
+              onSelectProduct={handleProductSelect}
               isSelected={
                 selectedBoothId === booth.id ||
                 (cameraMode === 'focus' && activeFocusedBooth?.id === booth.id)
               }
               visible={!isShopShowcase || activeFocusedBooth?.id === booth.id}
-              onSelect={onSelectBooth}
+              onSelect={handleBoothSelect}
             />
           ))}
 
@@ -637,7 +778,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
               products={activeBoothProducts}
               slots={slotsByBooth?.[activeFocusedBooth.id]}
               selectedProductId={selectedProductId}
-              onSelectProduct={onSelectProduct}
+              onSelectProduct={handleProductSelect}
             />
           )}
 

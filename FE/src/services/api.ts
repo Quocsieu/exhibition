@@ -80,8 +80,9 @@ async function requestJson<T>(path: string, options: RequestInit = {}): Promise<
 
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   const primaryUrl = buildApiUrl(normalizedPath);
+  const isGetRequest = !options.method || options.method.toUpperCase() === 'GET';
   const fetchOptions: RequestInit = {
-    cache: 'no-store',
+    ...(isGetRequest ? { cache: 'no-store' as RequestCache } : {}),
     ...options,
     headers,
   };

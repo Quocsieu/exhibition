@@ -648,7 +648,29 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     );
     expect(distFromPlayer).toBeLessThan(5.0);
 
-    // 3. Verify City Facade & Sky Dome textures track and dispose deterministically
+    // 3. Verify 360-degree horizontal yaw & clamped vertical pitch (mouse drag / mobile swipe)
+    const tpLookUp = computeThirdPersonCameraTargets(
+      CENTRAL_SPAWN_POINT.x,
+      CENTRAL_SPAWN_POINT.z,
+      Math.PI / 2,
+      34,
+      DEFAULT_BOOTHS,
+      0.42
+    );
+    const tpLookDown = computeThirdPersonCameraTargets(
+      CENTRAL_SPAWN_POINT.x,
+      CENTRAL_SPAWN_POINT.z,
+      Math.PI / 2,
+      34,
+      DEFAULT_BOOTHS,
+      -0.38
+    );
+    expect(tpLookUp.lookAtTarget.y).toBeGreaterThan(tpNorth.lookAtTarget.y);
+    expect(tpLookDown.lookAtTarget.y).toBeLessThan(tpNorth.lookAtTarget.y);
+    expect(tpLookUp.cameraPosition.y).toBeGreaterThanOrEqual(1.32);
+    expect(tpLookDown.cameraPosition.y).toBeGreaterThanOrEqual(1.32);
+
+    // 4. Verify City Facade & Sky Dome textures track and dispose deterministically
     const baseline = getActiveCanvasTextureCount();
     const facadeTex = createCityBuildingFacadeTexture();
     const skyTex = createSkyDomeTexture();
