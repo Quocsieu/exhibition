@@ -28,7 +28,14 @@ const isMain =
 
 if (isMain) {
   const PORT = Number(process.env.PORT || 4000);
-  const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+  const rawCors = process.env.CORS_ORIGIN || '*';
+  const CORS_ORIGIN =
+    rawCors === '*'
+      ? '*'
+      : rawCors
+          .split(',')
+          .map((origin) => origin.trim().replace(/\/+$/, ''))
+          .filter(Boolean);
   const dbPath = process.env.SQLITE_DB_PATH || './data/expo.db';
 
   const db = new ExpoDatabase(dbPath);

@@ -46,7 +46,10 @@ export function useRealtime({
   onMoveRejectedRef.current = onMoveRejected;
 
   useEffect(() => {
-    const socketUrl = (import.meta.env.VITE_SOCKET_URL as string | undefined) || undefined;
+    const rawSocketUrl =
+      (import.meta.env.VITE_SOCKET_URL as string | undefined) ||
+      (import.meta.env.VITE_API_URL as string | undefined);
+    const socketUrl = rawSocketUrl ? rawSocketUrl.replace(/\/+$/, '') : undefined;
     const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(socketUrl, {
       autoConnect: false,
       transports: ['websocket', 'polling'],

@@ -7,6 +7,9 @@
     "FE",
     "BE"
   ],
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "dev": "concurrently -n BE,FE -c cyan,magenta \"npm run dev -w BE\" \"npm run dev -w FE\"",
     "dev:fe": "npm run dev -w FE",

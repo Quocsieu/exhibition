@@ -8,7 +8,7 @@ import type {
   ExtractedProductDraft,
 } from '../types/expo';
 
-const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) || '';
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) || '').replace(/\/+$/, '');
 
 async function requestJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('expo_admin_token');
