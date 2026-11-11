@@ -333,8 +333,8 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             far: 320,
           }}
         >
-          <color attach="background" args={['#0f172a']} />
-          <fog attach="fog" args={['#0f172a', 110, 210]} />
+          <color attach="background" args={['#dce8f5']} />
+          <fog attach="fog" args={['#dce8f5', 82, 185]} />
 
           {/* Exterior Isometric Orthographic Camera (Overview & Explore Modes) */}
           <OrthographicCamera
@@ -369,13 +369,13 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             zoom={zoom}
           />
 
-          {/* Soft Warm-Daylight Architectural Lighting */}
-          <ambientLight intensity={0.76} />
-          <hemisphereLight args={['#fffbeb', '#334155', 0.66]} />
+          {/* Stylized 3D City Daylight & Golden-Hour Architectural Lighting */}
+          <ambientLight intensity={0.82} />
+          <hemisphereLight args={['#f0f9ff', '#64748b', 0.78]} />
           <directionalLight
-            position={[22, 36, 18]}
-            intensity={1.38}
-            color="#fffef5"
+            position={[24, 38, 20]}
+            intensity={1.52}
+            color="#fffbeb"
             castShadow
             shadow-mapSize-width={1024}
             shadow-mapSize-height={1024}
@@ -387,8 +387,8 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             shadow-camera-far={120}
             shadow-bias={-0.0004}
           />
-          <directionalLight position={[-18, 20, -16]} intensity={0.46} color="#bae6fd" />
-          <pointLight position={[0, 4.5, 0]} intensity={0.65} distance={18} color="#38bdf8" />
+          <directionalLight position={[-20, 24, -18]} intensity={0.52} color="#93c5fd" />
+          <pointLight position={[0, 5.2, 0]} intensity={0.75} distance={20} color="#fde68a" />
 
           <Environment
             onGroundClick={handleEnvironmentGroundClick}

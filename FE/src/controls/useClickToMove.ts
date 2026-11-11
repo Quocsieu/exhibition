@@ -3,6 +3,7 @@ import {
   type Booth,
   type Point2D,
   PLAYER_SPEED,
+  CENTRAL_SPAWN_POINT,
   resolveMovementWithSlide,
   findPathAStar,
 } from '../types/expo';
@@ -17,7 +18,7 @@ export interface PlayerTransform {
 
 export interface UseClickToMoveOptions {
   booths: Booth[];
-  initialPosition?: { x: number; z: number };
+  initialPosition?: { x: number; z: number; rotationY?: number };
   disabled?: boolean;
   onTransformChange?: (transform: PlayerTransform) => void;
   onReachBooth?: (booth: Booth) => void;
@@ -25,7 +26,7 @@ export interface UseClickToMoveOptions {
 
 export function useClickToMove({
   booths,
-  initialPosition = { x: 0, z: 17.5 },
+  initialPosition = CENTRAL_SPAWN_POINT,
   disabled = false,
   onTransformChange,
   onReachBooth,
@@ -33,7 +34,7 @@ export function useClickToMove({
   const transformRef = useRef<PlayerTransform>({
     x: initialPosition.x,
     z: initialPosition.z,
-    rotationY: Math.PI,
+    rotationY: initialPosition.rotationY ?? CENTRAL_SPAWN_POINT.rotationY,
     state: 'idle',
   });
 

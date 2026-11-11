@@ -261,6 +261,27 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
     expect(initB.onlineCount).toBe(2);
     expect(initB.visitors.length).toBe(2);
 
+    // Both visitors spawn near the Central Plaza (0, 0) at distinct non-overlapping slots
+    expect(Math.hypot(initA.self.x, initA.self.z)).toBeLessThanOrEqual(4.5);
+    expect(Math.hypot(initB.self.x, initB.self.z)).toBeLessThanOrEqual(4.5);
+    expect(initA.self.x !== initB.self.x || initA.self.z !== initB.self.z).toBe(true);
+
+    // Verify reconnect / reload restores valid walkable coordinates passed via handshake auth
+    const clientReconnect: ClientSocket<ServerToClientEvents, ClientToServerEvents> = createClient(
+      baseUrl,
+      {
+        transports: ['websocket'],
+        auth: { name: 'Khách Reconnect', color: '#f59e0b', x: -3.5, z: 6.2, rotationY: 1.25 },
+      }
+    );
+    const initReconnect = await new Promise<{ self: VisitorState }>((resolve) => {
+      clientReconnect.on('world:init', resolve);
+    });
+    expect(initReconnect.self.x).toBeCloseTo(-3.5, 2);
+    expect(initReconnect.self.z).toBeCloseTo(6.2, 2);
+    expect(initReconnect.self.rotationY).toBeCloseTo(1.25, 2);
+    clientReconnect.disconnect();
+
     const movedPromise = new Promise<VisitorState>((resolve) => {
       clientB.on('visitor:moved', resolve);
     });

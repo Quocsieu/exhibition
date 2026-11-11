@@ -1,9 +1,12 @@
-import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   type Booth,
   type Product,
   DEFAULT_BOOTHS,
   DEFAULT_PRODUCTS,
+  CENTRAL_SPAWN_POINT,
+  getBoothApproachPoint,
+  isPointWalkable,
 } from '../types/expo';
 import { ExhibitionScene, type CameraViewMode } from '../scene/ExhibitionScene';
 import { useClickToMove, type PlayerTransform } from '../controls/useClickToMove';
@@ -41,12 +44,53 @@ function getStoredIdentity(): { name: string; color: string } {
   return { name, color };
 }
 
+function getInitialVisitorSpawn(): {
+  x: number;
+  z: number;
+  rotationY: number;
+  restored: boolean;
+} {
+  try {
+    const raw = sessionStorage.getItem('expo_visitor_pos');
+    if (raw) {
+      const parsed = JSON.parse(raw) as { x?: unknown; z?: unknown; rotationY?: unknown };
+      if (
+        typeof parsed.x === 'number' &&
+        Number.isFinite(parsed.x) &&
+        typeof parsed.z === 'number' &&
+        Number.isFinite(parsed.z) &&
+        isPointWalkable(parsed.x, parsed.z, DEFAULT_BOOTHS)
+      ) {
+        return {
+          x: parsed.x,
+          z: parsed.z,
+          rotationY:
+            typeof parsed.rotationY === 'number' && Number.isFinite(parsed.rotationY)
+              ? parsed.rotationY
+              : CENTRAL_SPAWN_POINT.rotationY,
+          restored: true,
+        };
+      }
+    }
+  } catch {
+    // Ignore storage read errors and fall back to Central Plaza spawn
+  }
+  return {
+    x: CENTRAL_SPAWN_POINT.x,
+    z: CENTRAL_SPAWN_POINT.z,
+    rotationY: CENTRAL_SPAWN_POINT.rotationY,
+    restored: false,
+  };
+}
+
 export interface ExhibitionPageProps {
   onOpenAdmin: () => void;
 }
 
 export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) => {
   const initialIdentity = useMemo(() => getStoredIdentity(), []);
+  const initialSpawn = useMemo(() => getInitialVisitorSpawn(), []);
+  const hasLockedPositionRef = useRef<boolean>(initialSpawn.restored);
   const [playerName, setPlayerName] = useState(initialIdentity.name);
   const [playerColor, setPlayerColor] = useState(initialIdentity.color);
 
@@ -91,34 +135,6 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
     void loadExpoData();
   }, [loadExpoData]);
 
-  const {
-    isConnected,
-    onlineCount,
-    remoteVisitors,
-    remoteVisitorsLiveRef,
-    emitMovement,
-    emitProfileUpdate,
-  } = useRealtime({
-    initialName: initialIdentity.name,
-    initialColor: initialIdentity.color,
-    onMoveRejected: (x, z) => {
-      forcePosition(x, z);
-    },
-  });
-
-  const handleTransformChange = useCallback(
-    (nextTransform: PlayerTransform) => {
-      emitMovement({
-        x: nextTransform.x,
-        z: nextTransform.z,
-        rotationY: nextTransform.rotationY,
-        state: nextTransform.state,
-        activeBoothId: selectedBooth?.id ?? null,
-      });
-    },
-    [emitMovement, selectedBooth?.id]
-  );
-
   const handleSelectBooth = useCallback((booth: Booth) => {
     setSelectedBooth(booth);
     setSelectedProduct(null);
@@ -135,6 +151,44 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
     setZoom(FOCUS_DEFAULT_ZOOM);
   }, []);
 
+  const emitMovementRef = useRef<
+    ((payload: {
+      x: number;
+      z: number;
+      rotationY: number;
+      state: 'idle' | 'walk';
+      activeBoothId?: string | null;
+    }) => void) | null
+  >(null);
+
+  const handleTransformChange = useCallback(
+    (nextTransform: PlayerTransform) => {
+      hasLockedPositionRef.current = true;
+      if (nextTransform.state === 'idle') {
+        try {
+          sessionStorage.setItem(
+            'expo_visitor_pos',
+            JSON.stringify({
+              x: nextTransform.x,
+              z: nextTransform.z,
+              rotationY: nextTransform.rotationY,
+            })
+          );
+        } catch {
+          // Ignore storage quota errors
+        }
+      }
+      emitMovementRef.current?.({
+        x: nextTransform.x,
+        z: nextTransform.z,
+        rotationY: nextTransform.rotationY,
+        state: nextTransform.state,
+        activeBoothId: selectedBooth?.id ?? null,
+      });
+    },
+    [selectedBooth?.id]
+  );
+
   const {
     transformRef,
     activePath,
@@ -144,11 +198,44 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
     stepMovement,
   } = useClickToMove({
     booths,
-    initialPosition: { x: 0, z: 17.5 },
+    initialPosition: initialSpawn,
     disabled: false,
     onTransformChange: handleTransformChange,
     onReachBooth: handleReachBooth,
   });
+
+  const {
+    isConnected,
+    onlineCount,
+    remoteVisitors,
+    remoteVisitorsLiveRef,
+    emitMovement,
+    emitProfileUpdate,
+  } = useRealtime({
+    initialName: initialIdentity.name,
+    initialColor: initialIdentity.color,
+    getLiveTransform: () =>
+      hasLockedPositionRef.current
+        ? {
+            x: transformRef.current.x,
+            z: transformRef.current.z,
+            rotationY: transformRef.current.rotationY,
+          }
+        : null,
+    onWorldInitSelf: (self) => {
+      if (!hasLockedPositionRef.current) {
+        hasLockedPositionRef.current = true;
+        transformRef.current.x = self.x;
+        transformRef.current.z = self.z;
+        transformRef.current.rotationY = self.rotationY;
+      }
+    },
+    onMoveRejected: (x, z) => {
+      forcePosition(x, z);
+    },
+  });
+
+  emitMovementRef.current = emitMovement;
 
   const handleReturnToExplore = useCallback(() => {
     setCameraMode('explore');
@@ -245,8 +332,8 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
       setFocusedBooth(booth);
       setCameraMode('explore');
       setZoom(EXPLORE_DEFAULT_ZOOM);
-      const frontZ = booth.positionZ + (booth.depth || 3.8) / 2 + 1.4;
-      moveToPoint(booth.positionX, frontZ, booth);
+      const approach = getBoothApproachPoint(booth);
+      moveToPoint(approach.x, approach.z, booth);
     },
     [moveToPoint]
   );

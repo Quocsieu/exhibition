@@ -3,7 +3,11 @@ import { useFrame } from '@react-three/fiber';
 import { Billboard, Instance, Instances } from '@react-three/drei';
 import * as THREE from 'three';
 import { WORLD_BOUNDS } from '../types/expo';
-import { createBannerSignTexture } from './sceneTextures';
+import {
+  createBannerSignTexture,
+  createPlazaMedallionTexture,
+  createPlazaTileTexture,
+} from './sceneTextures';
 
 export interface EnvironmentProps {
   onGroundClick: (point: THREE.Vector3) => void;
@@ -99,11 +103,52 @@ const PERIMETER_LAMPS: [number, number][] = [
   [16.5, 3.5],
 ];
 
-const BOOTH_CONNECTOR_PATHS: { x: number; z: number; w: number; d: number; accent: string }[] = [
-  { x: -12, z: -4.5, w: 3.4, d: 7.5, accent: '#0ea5e9' },
-  { x: 12, z: -4.5, w: 3.4, d: 7.5, accent: '#f59e0b' },
-  { x: -12, z: 3.8, w: 3.4, d: 6.4, accent: '#6366f1' },
-  { x: 12, z: 3.8, w: 3.4, d: 6.4, accent: '#ec4899' },
+const BOOTH_CONNECTOR_PATHS: {
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  ry: number;
+  accent: string;
+}[] = [
+  { x: -9.2, z: -6.8, w: 3.1, d: 6.8, ry: Math.atan2(12.5, 9), accent: '#0ea5e9' },
+  { x: 0, z: -8.8, w: 3.3, d: 6.4, ry: 0, accent: '#10b981' },
+  { x: 9.2, z: -6.8, w: 3.1, d: 6.8, ry: Math.atan2(-12.5, 9), accent: '#f59e0b' },
+  { x: -9.2, z: 6.8, w: 3.1, d: 6.8, ry: Math.atan2(12.5, -9), accent: '#6366f1' },
+  { x: 9.2, z: 6.8, w: 3.1, d: 6.8, ry: Math.atan2(-12.5, -9), accent: '#ec4899' },
+  { x: 0, z: 8.8, w: 3.3, d: 6.4, ry: Math.PI, accent: '#14b8a6' },
+];
+
+// Stylized 3D City Background Skyline Silhouettes (Placed outside N/W/E perimeter, zero collision)
+const STYLIZED_CITY_BUILDINGS: {
+  x: number;
+  z: number;
+  sx: number;
+  sy: number;
+  sz: number;
+}[] = [
+  { x: -32, z: -31, sx: 6.5, sy: 9.5, sz: 5.5 },
+  { x: -23, z: -33, sx: 5.8, sy: 12.2, sz: 5.2 },
+  { x: -13, z: -34, sx: 6.8, sy: 8.6, sz: 5.4 },
+  { x: 0, z: -35, sx: 7.4, sy: 13.8, sz: 5.8 },
+  { x: 13, z: -34, sx: 6.4, sy: 9.8, sz: 5.4 },
+  { x: 23, z: -33, sx: 5.8, sy: 11.4, sz: 5.2 },
+  { x: 32, z: -31, sx: 6.5, sy: 8.8, sz: 5.5 },
+  { x: -34, z: -18, sx: 5.5, sy: 10.5, sz: 6.2 },
+  { x: -35, z: -6, sx: 5.6, sy: 8.2, sz: 6.0 },
+  { x: -34, z: 7, sx: 5.4, sy: 9.4, sz: 5.8 },
+  { x: 34, z: -18, sx: 5.5, sy: 9.2, sz: 6.2 },
+  { x: 35, z: -6, sx: 5.6, sy: 7.8, sz: 6.0 },
+];
+
+// Distant Low-Poly Parkland Hills around the outer horizon
+const HORIZON_HILLS: { x: number; z: number; sx: number; sy: number; sz: number }[] = [
+  { x: -42, z: -40, sx: 16, sy: 5.2, sz: 12 },
+  { x: -16, z: -44, sx: 18, sy: 6.4, sz: 14 },
+  { x: 16, z: -44, sx: 18, sy: 5.8, sz: 14 },
+  { x: 42, z: -40, sx: 16, sy: 4.8, sz: 12 },
+  { x: -44, z: -14, sx: 12, sy: 4.6, sz: 16 },
+  { x: -44, z: 14, sx: 12, sy: 4.2, sz: 15 },
 ];
 
 // 4 Cozy Perimeter Rest Lounge Zones (located in outer garden corners, clear of all walkways)
@@ -220,15 +265,42 @@ const BENCH_IRON_MAT = new THREE.MeshStandardMaterial({
   roughness: 0.4,
 });
 
-const LAMP_BASE_GEOM = new THREE.CylinderGeometry(0.16, 0.22, 0.3, 8);
-const LAMP_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.07, 2.6, 8);
+const LAMP_BASE_GEOM = new THREE.CylinderGeometry(0.18, 0.26, 0.34, 10);
+const LAMP_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.075, 2.65, 10);
+const LAMP_HOOD_GEOM = new THREE.ConeGeometry(0.36, 0.2, 12);
 const LAMP_BULB_GEOM = new THREE.SphereGeometry(0.22, 10, 10);
+const LAMP_POOL_GEOM = new THREE.CircleGeometry(1.55, 20);
 const LAMP_POLE_MAT = new THREE.MeshStandardMaterial({
-  color: '#334155',
-  metalness: 0.6,
-  roughness: 0.35,
+  color: '#1e293b',
+  metalness: 0.65,
+  roughness: 0.32,
 });
 const LAMP_BULB_MAT = new THREE.MeshBasicMaterial({ color: '#fde68a' });
+const LAMP_POOL_MAT = new THREE.MeshBasicMaterial({
+  color: '#fef08a',
+  transparent: true,
+  opacity: 0.22,
+  depthWrite: false,
+});
+
+// Stylized 3D City Horizon & Distant Hills Instanced Geometries & Materials
+const CITY_TOWER_GEOM = new THREE.BoxGeometry(1, 1, 1);
+const CITY_CROWN_GEOM = new THREE.BoxGeometry(0.82, 0.16, 0.82);
+const HORIZON_HILL_GEOM = new THREE.DodecahedronGeometry(1, 1);
+const CITY_TOWER_MAT = new THREE.MeshStandardMaterial({
+  color: '#cbd5e1',
+  roughness: 0.72,
+  metalness: 0.12,
+});
+const CITY_CROWN_MAT = new THREE.MeshStandardMaterial({
+  color: '#94a3b8',
+  roughness: 0.6,
+});
+const HORIZON_HILL_MAT = new THREE.MeshStandardMaterial({
+  color: '#86efac',
+  roughness: 0.85,
+  flatShading: true,
+});
 
 const PLANTER_BOX_GEOM = new THREE.BoxGeometry(1.52, 0.48, 1.52);
 const PLANTER_SOIL_GEOM = new THREE.BoxGeometry(1.3, 0.08, 1.3);
@@ -243,6 +315,9 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const sculptureRef = useRef<THREE.Group>(null);
     const outerRingRef = useRef<THREE.Mesh>(null);
     const markerGroupRef = useRef<THREE.Group>(null);
+
+    const plazaTileTexture = useMemo(() => createPlazaTileTexture(), []);
+    const plazaMedallionTexture = useMemo(() => createPlazaMedallionTexture(), []);
 
     const plazaBannerTexture = useMemo(
       () =>
@@ -290,18 +365,27 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
 
     useEffect(() => {
       return () => {
+        plazaTileTexture.dispose();
+        plazaMedallionTexture.dispose();
         plazaBannerTexture.dispose();
         entranceBannerTexture.dispose();
         directoryKioskTexture.dispose();
         wayfindingTextures.forEach((tex) => tex?.dispose());
       };
-    }, [plazaBannerTexture, entranceBannerTexture, directoryKioskTexture, wayfindingTextures]);
+    }, [
+      plazaTileTexture,
+      plazaMedallionTexture,
+      plazaBannerTexture,
+      entranceBannerTexture,
+      directoryKioskTexture,
+      wayfindingTextures,
+    ]);
 
     useFrame(({ clock }, delta) => {
       const t = clock.getElapsedTime();
       if (sculptureRef.current) {
         sculptureRef.current.rotation.y += delta * 0.55;
-        sculptureRef.current.position.y = 2.05 + Math.sin(t * 2.0) * 0.12;
+        sculptureRef.current.position.y = 1.65 + Math.sin(t * 2.0) * 0.08;
       }
       if (outerRingRef.current) {
         outerRingRef.current.rotation.z = t * 0.4;
@@ -316,16 +400,55 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     return (
       <group>
         {/* ================================================================
-            1. MULTI-TIERED ARCHITECTURAL FOUNDATION PODIUM
+            0. STYLIZED 3D CITY PARKLAND & SKYLINE BACKDROP (Zero Collision)
+           ================================================================ */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.75, 0]}>
+          <planeGeometry args={[156, 156]} />
+          <meshStandardMaterial color="#bbf7d0" roughness={0.92} />
+        </mesh>
+
+        {/* Instanced Distant Rolling Hills */}
+        <Instances geometry={HORIZON_HILL_GEOM} material={HORIZON_HILL_MAT}>
+          {HORIZON_HILLS.map((h, i) => (
+            <Instance
+              key={`hill-${i}`}
+              position={[h.x, h.sy * 0.22 - 0.6, h.z]}
+              scale={[h.sx, h.sy, h.sz]}
+            />
+          ))}
+        </Instances>
+
+        {/* Instanced Stylized 3D City Background Buildings */}
+        <Instances geometry={CITY_TOWER_GEOM} material={CITY_TOWER_MAT}>
+          {STYLIZED_CITY_BUILDINGS.map((b, i) => (
+            <Instance
+              key={`ctower-${i}`}
+              position={[b.x, b.sy / 2 - 0.65, b.z]}
+              scale={[b.sx, b.sy, b.sz]}
+            />
+          ))}
+        </Instances>
+        <Instances geometry={CITY_CROWN_GEOM} material={CITY_CROWN_MAT}>
+          {STYLIZED_CITY_BUILDINGS.map((b, i) => (
+            <Instance
+              key={`ccrown-${i}`}
+              position={[b.x, b.sy - 0.55, b.z]}
+              scale={[b.sx, 1, b.sz]}
+            />
+          ))}
+        </Instances>
+
+        {/* ================================================================
+            1. MULTI-TIERED ARCHITECTURAL FOUNDATION PODIUM & TILED COURTYARD
            ================================================================ */}
         <mesh position={[0, -0.65, 0]}>
           <boxGeometry args={[width + 5.5, 1.1, depth + 5.5]} />
-          <meshStandardMaterial color="#1e293b" roughness={0.85} />
+          <meshStandardMaterial color="#334155" roughness={0.8} />
         </mesh>
 
         <mesh position={[0, -0.14, 0]}>
           <boxGeometry args={[width + 2.2, 0.24, depth + 2.2]} />
-          <meshStandardMaterial color="#475569" roughness={0.7} />
+          <meshStandardMaterial color="#64748b" roughness={0.68} />
         </mesh>
 
         <mesh position={[0, -0.03, 0]}>
@@ -333,7 +456,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           <meshBasicMaterial color="#0ea5e9" />
         </mesh>
 
-        {/* Interactive Main Courtyard Ground Plane */}
+        {/* Interactive Main Courtyard Ground Plane with Seamless Stone Tile Texture */}
         <mesh
           rotation={[-Math.PI / 2, 0, 0]}
           position={[0, 0, 0]}
@@ -344,59 +467,59 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           }}
         >
           <planeGeometry args={[width, depth]} />
-          <meshStandardMaterial color="#e2e8f0" roughness={0.78} />
+          <meshStandardMaterial map={plazaTileTexture} color="#f8fafc" roughness={0.72} />
         </mesh>
 
-        <gridHelper
-          args={[width, 48, '#94a3b8', '#cbd5e1']}
-          position={[0, 0.008, 0]}
-        />
-
         {/* ================================================================
-            2. STRUCTURED WALKWAY, BOULEVARD & COLOR-CODED BOOTH LANES
+            2. STRUCTURED WALKWAY, BOULEVARD & 6 RADIAL CENTRAL PLAZA AVENUES
            ================================================================ */}
         <group position={[0, 0.014, 1.5]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
             <planeGeometry args={[5.8, depth - 3.6]} />
-            <meshStandardMaterial color="#f8fafc" roughness={0.62} />
+            <meshStandardMaterial color="#f8fafc" roughness={0.58} />
           </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-2.95, 0.002, 0]}>
-            <planeGeometry args={[0.18, depth - 3.6]} />
-            <meshStandardMaterial color="#0ea5e9" roughness={0.5} />
+          <mesh position={[-2.95, 0.018, 0]}>
+            <boxGeometry args={[0.22, 0.036, depth - 3.6]} />
+            <meshStandardMaterial color="#0ea5e9" roughness={0.45} />
           </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[2.95, 0.002, 0]}>
-            <planeGeometry args={[0.18, depth - 3.6]} />
-            <meshStandardMaterial color="#0ea5e9" roughness={0.5} />
+          <mesh position={[2.95, 0.018, 0]}>
+            <boxGeometry args={[0.22, 0.036, depth - 3.6]} />
+            <meshStandardMaterial color="#0ea5e9" roughness={0.45} />
           </mesh>
         </group>
 
         <group position={[0, 0.016, -0.5]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
             <planeGeometry args={[width - 3.6, 5.6]} />
-            <meshStandardMaterial color="#f8fafc" roughness={0.62} />
+            <meshStandardMaterial color="#f8fafc" roughness={0.58} />
           </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, -2.85]}>
-            <planeGeometry args={[width - 3.6, 0.18]} />
-            <meshStandardMaterial color="#38bdf8" roughness={0.5} />
+          <mesh position={[0, 0.018, -2.85]}>
+            <boxGeometry args={[width - 3.6, 0.036, 0.22]} />
+            <meshStandardMaterial color="#38bdf8" roughness={0.45} />
           </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 2.85]}>
-            <planeGeometry args={[width - 3.6, 0.18]} />
-            <meshStandardMaterial color="#38bdf8" roughness={0.5} />
+          <mesh position={[0, 0.018, 2.85]}>
+            <boxGeometry args={[width - 3.6, 0.036, 0.22]} />
+            <meshStandardMaterial color="#38bdf8" roughness={0.45} />
           </mesh>
         </group>
 
+        {/* 6 Radial Avenues from Central Plaza Ring to All 6 Booth Entrances */}
         {BOOTH_CONNECTOR_PATHS.map((conn, idx) => (
-          <group key={`conn-${idx}`} position={[conn.x, 0.013, conn.z]}>
+          <group
+            key={`conn-${idx}`}
+            position={[conn.x, 0.013, conn.z]}
+            rotation={[0, conn.ry, 0]}
+          >
             <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
               <planeGeometry args={[conn.w, conn.d]} />
-              <meshStandardMaterial color="#f1f5f9" roughness={0.68} />
+              <meshStandardMaterial color="#f1f5f9" roughness={0.62} />
             </mesh>
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-conn.w / 2, 0.002, 0]}>
-              <planeGeometry args={[0.12, conn.d]} />
+            <mesh position={[-conn.w / 2, 0.016, 0]}>
+              <boxGeometry args={[0.16, 0.032, conn.d]} />
               <meshBasicMaterial color={conn.accent} />
             </mesh>
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[conn.w / 2, 0.002, 0]}>
-              <planeGeometry args={[0.12, conn.d]} />
+            <mesh position={[conn.w / 2, 0.016, 0]}>
+              <boxGeometry args={[0.16, 0.032, conn.d]} />
               <meshBasicMaterial color={conn.accent} />
             </mesh>
           </group>
@@ -415,76 +538,72 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         </group>
 
         {/* ================================================================
-            3. CENTRAL PLAZA & KINETIC FOUNTAIN MONUMENT
+            3. CENTRAL PLAZA COMPASS MEDALLION & LOW ARCHITECTURAL CENTERPIECE
            ================================================================ */}
         <group position={[0, 0, 0]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.022, 0]} receiveShadow>
-            <circleGeometry args={[8.1, 48]} />
-            <meshStandardMaterial color="#e2e8f0" roughness={0.62} />
+            <circleGeometry args={[8.2, 48]} />
+            <meshStandardMaterial map={plazaMedallionTexture} roughness={0.52} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.026, 0]}>
-            <ringGeometry args={[7.1, 7.45, 48]} />
-            <meshBasicMaterial color="#38bdf8" transparent opacity={0.75} />
+            <ringGeometry args={[7.15, 7.5, 48]} />
+            <meshBasicMaterial color="#0ea5e9" transparent opacity={0.82} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.028, 0]}>
             <ringGeometry args={[5.35, 5.55, 48]} />
-            <meshBasicMaterial color="#fbbf24" transparent opacity={0.8} />
-          </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.026, 0]} receiveShadow>
-            <circleGeometry args={[5.3, 36]} />
-            <meshStandardMaterial color="#f8fafc" roughness={0.5} />
+            <meshBasicMaterial color="#f59e0b" transparent opacity={0.88} />
           </mesh>
 
-          <mesh position={[0, 0.22, 0]} castShadow receiveShadow>
-            <cylinderGeometry args={[2.15, 2.35, 0.44, 24]} />
-            <meshStandardMaterial color="#334155" roughness={0.5} />
+          <mesh position={[0, 0.18, 0]} castShadow receiveShadow>
+            <cylinderGeometry args={[2.1, 2.3, 0.36, 24]} />
+            <meshStandardMaterial color="#334155" roughness={0.48} />
           </mesh>
-          <mesh position={[0, 0.46, 0]} receiveShadow>
-            <cylinderGeometry args={[1.92, 2.02, 0.14, 24]} />
-            <meshStandardMaterial color="#cbd5e1" roughness={0.38} />
+          <mesh position={[0, 0.39, 0]} receiveShadow>
+            <cylinderGeometry args={[1.88, 1.98, 0.12, 24]} />
+            <meshStandardMaterial color="#f8fafc" roughness={0.35} />
           </mesh>
-          <mesh position={[0, 0.54, 0]}>
-            <cylinderGeometry args={[1.8, 1.8, 0.06, 24]} />
+          <mesh position={[0, 0.46, 0]}>
+            <cylinderGeometry args={[1.72, 1.72, 0.05, 24]} />
             <meshStandardMaterial
               color="#38bdf8"
               emissive="#0284c7"
-              emissiveIntensity={0.38}
-              roughness={0.12}
+              emissiveIntensity={0.42}
+              roughness={0.14}
               metalness={0.45}
             />
           </mesh>
 
-          <mesh position={[0, 1.0, 0]} castShadow>
-            <cylinderGeometry args={[0.45, 0.72, 0.95, 8]} />
+          <mesh position={[0, 0.82, 0]} castShadow>
+            <cylinderGeometry args={[0.38, 0.62, 0.72, 8]} />
             <meshStandardMaterial color="#0f172a" roughness={0.35} metalness={0.4} />
           </mesh>
 
-          <group ref={sculptureRef} position={[0, 2.05, 0]}>
+          <group ref={sculptureRef} position={[0, 1.65, 0]}>
             <mesh castShadow>
-              <octahedronGeometry args={[0.88, 0]} />
+              <octahedronGeometry args={[0.72, 0]} />
               <meshStandardMaterial
                 color="#0ea5e9"
                 emissive="#0284c7"
-                emissiveIntensity={0.28}
+                emissiveIntensity={0.3}
                 metalness={0.65}
                 roughness={0.18}
                 flatShading
               />
             </mesh>
             <mesh rotation={[0, Math.PI / 4, 0]}>
-              <octahedronGeometry args={[1.04, 0]} />
+              <octahedronGeometry args={[0.88, 0]} />
               <meshStandardMaterial color="#f8fafc" wireframe />
             </mesh>
           </group>
 
-          <mesh ref={outerRingRef} position={[0, 2.05, 0]}>
-            <torusGeometry args={[1.25, 0.045, 10, 32]} />
+          <mesh ref={outerRingRef} position={[0, 1.65, 0]}>
+            <torusGeometry args={[1.05, 0.04, 10, 32]} />
             <meshStandardMaterial color="#fbbf24" metalness={0.75} roughness={0.2} />
           </mesh>
 
-          <Billboard position={[0, 3.65, 0]}>
+          <Billboard position={[0, 3.05, 0]}>
             <mesh>
-              <planeGeometry args={[4.4, 0.92]} />
+              <planeGeometry args={[4.2, 0.88]} />
               <meshBasicMaterial map={plazaBannerTexture} transparent depthWrite={false} />
             </mesh>
           </Billboard>
@@ -742,7 +861,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           })}
         </Instances>
 
-        {/* 8 Instanced Boulevard Lamp Posts */}
+        {/* 8 Instanced Boulevard Lamp Posts with Metallic Hoods & Warm Ground Light Pools */}
         <Instances geometry={LAMP_BASE_GEOM} material={BENCH_IRON_MAT}>
           {PERIMETER_LAMPS.map(([lx, lz], i) => (
             <Instance key={`lbase-${i}`} position={[lx, 0.15, lz]} />
@@ -756,6 +875,20 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         <Instances geometry={LAMP_BULB_GEOM} material={LAMP_BULB_MAT}>
           {PERIMETER_LAMPS.map(([lx, lz], i) => (
             <Instance key={`lbulb-${i}`} position={[lx, 2.95, lz]} />
+          ))}
+        </Instances>
+        <Instances geometry={LAMP_HOOD_GEOM} material={LAMP_POLE_MAT}>
+          {PERIMETER_LAMPS.map(([lx, lz], i) => (
+            <Instance key={`lhood-${i}`} position={[lx, 3.12, lz]} />
+          ))}
+        </Instances>
+        <Instances geometry={LAMP_POOL_GEOM} material={LAMP_POOL_MAT}>
+          {PERIMETER_LAMPS.map(([lx, lz], i) => (
+            <Instance
+              key={`lpool-${i}`}
+              position={[lx, 0.019, lz]}
+              rotation={[-Math.PI / 2, 0, 0]}
+            />
           ))}
         </Instances>
 

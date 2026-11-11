@@ -8,6 +8,7 @@ import {
   VisitorProfilePayloadSchema,
   MOVE_EVENT_MIN_INTERVAL_MS,
   MAX_SERVER_SPEED,
+  CENTRAL_SPAWN_SLOTS,
   isPointWalkable,
 } from '../schemas/expoSchemas.js';
 import type { ExpoDatabase } from '../database/db.js';
@@ -48,14 +49,27 @@ export function attachSocketServer(
         ? auth.color
         : DEFAULT_COLORS[visitors.size % DEFAULT_COLORS.length];
 
-    const spawnOffsetX = ((visitors.size % 5) - 2) * 0.9;
+    const defaultSlot = CENTRAL_SPAWN_SLOTS[visitors.size % CENTRAL_SPAWN_SLOTS.length];
+    const boothsOnConnect = db.listBooths();
+    const rawAuthX = typeof auth.x === 'number' && Number.isFinite(auth.x) ? auth.x : null;
+    const rawAuthZ = typeof auth.z === 'number' && Number.isFinite(auth.z) ? auth.z : null;
+    const rawAuthRot =
+      typeof auth.rotationY === 'number' && Number.isFinite(auth.rotationY)
+        ? auth.rotationY
+        : defaultSlot.rotationY;
+
+    const canRestoreAuthPos =
+      rawAuthX !== null &&
+      rawAuthZ !== null &&
+      isPointWalkable(rawAuthX, rawAuthZ, boothsOnConnect);
+
     const initialVisitor: VisitorState = {
       sessionId: socket.id,
       name: rawName || `Khách #${socket.id.slice(0, 4)}`,
       color: rawColor,
-      x: spawnOffsetX,
-      z: 17.5,
-      rotationY: Math.PI,
+      x: canRestoreAuthPos ? Number(rawAuthX.toFixed(3)) : defaultSlot.x,
+      z: canRestoreAuthPos ? Number(rawAuthZ.toFixed(3)) : defaultSlot.z,
+      rotationY: Number(rawAuthRot.toFixed(3)),
       state: 'idle',
       activeBoothId: null,
       updatedAt: Date.now(),

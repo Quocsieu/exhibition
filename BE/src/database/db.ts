@@ -71,7 +71,21 @@ export class ExpoDatabase {
 
   private seedIfEmpty(): void {
     const row = this.db.prepare('SELECT COUNT(*) as count FROM booths').get() as { count: number };
-    if (row.count > 0) return;
+    if (row.count > 0) {
+      // Ensure legacy default booths (all rotation_y = 0) are migrated to Central Plaza inward-facing layout
+      const solaris = this.db
+        .prepare('SELECT rotation_y FROM booths WHERE id = ?')
+        .get('booth-solaris-energy') as { rotation_y: number } | undefined;
+      if (solaris && Math.abs(Number(solaris.rotation_y)) < 0.01) {
+        const updateLayout = this.db.prepare(
+          'UPDATE booths SET position_x = ?, position_z = ?, rotation_y = ? WHERE id = ?'
+        );
+        for (const b of DEFAULT_BOOTHS) {
+          updateLayout.run(b.positionX, b.positionZ, b.rotationY || 0, b.id);
+        }
+      }
+      return;
+    }
 
     const insertBooth = this.db.prepare(`
       INSERT INTO booths (

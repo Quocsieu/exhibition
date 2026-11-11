@@ -11,12 +11,16 @@ import {
 export interface UseRealtimeOptions {
   initialName: string;
   initialColor: string;
+  getLiveTransform?: () => { x: number; z: number; rotationY: number } | null;
+  onWorldInitSelf?: (self: VisitorState) => void;
   onMoveRejected?: (x: number, z: number, reason: string) => void;
 }
 
 export function useRealtime({
   initialName,
   initialColor,
+  getLiveTransform,
+  onWorldInitSelf,
   onMoveRejected,
 }: UseRealtimeOptions) {
   const [isConnected, setIsConnected] = useState(false);
@@ -32,6 +36,12 @@ export function useRealtime({
   const pendingPayloadRef = useRef<VisitorMovePayload | null>(null);
   const trailingTimerRef = useRef<number | null>(null);
 
+  const getLiveTransformRef = useRef(getLiveTransform);
+  getLiveTransformRef.current = getLiveTransform;
+
+  const onWorldInitSelfRef = useRef(onWorldInitSelf);
+  onWorldInitSelfRef.current = onWorldInitSelf;
+
   const onMoveRejectedRef = useRef(onMoveRejected);
   onMoveRejectedRef.current = onMoveRejected;
 
@@ -44,9 +54,19 @@ export function useRealtime({
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      auth: {
-        name: initialName,
-        color: initialColor,
+      auth: (cb) => {
+        const live = getLiveTransformRef.current?.();
+        cb({
+          name: initialName,
+          color: initialColor,
+          ...(live
+            ? {
+                x: live.x,
+                z: live.z,
+                rotationY: live.rotationY,
+              }
+            : {}),
+        });
       },
     });
 
@@ -63,6 +83,7 @@ export function useRealtime({
     socket.on('world:init', ({ self, visitors, onlineCount: count }) => {
       setSelfSessionId(self.sessionId);
       setOnlineCount(count);
+      onWorldInitSelfRef.current?.(self);
       const map: Record<string, VisitorState> = {};
       const liveMap = new Map<string, VisitorState>();
       for (const v of visitors) {

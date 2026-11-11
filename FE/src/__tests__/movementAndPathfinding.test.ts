@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_BOOTHS,
   WORLD_BOUNDS,
+  CENTRAL_SPAWN_POINT,
+  CENTRAL_SPAWN_SLOTS,
+  getBoothObstacleBox,
+  getBoothApproachPoint,
   isWithinWorldBounds,
   isPointWalkable,
   resolveMovementWithSlide,
@@ -14,6 +18,8 @@ import {
   createBoothPosterTexture,
   createProductTagTexture,
   createAvatarNametagTexture,
+  createPlazaTileTexture,
+  createPlazaMedallionTexture,
   getActiveCanvasTextureCount,
 } from '../scene/sceneTextures';
 import { resolveBoothTheme } from '../scene/Booth';
@@ -39,7 +45,8 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
 
   it('resolves movement with smooth wall-sliding along obstacle edges', () => {
     const booth = DEFAULT_BOOTHS[0];
-    const frontEdgeZ = booth.positionZ + booth.depth / 2 + 0.6;
+    const box = getBoothObstacleBox(booth);
+    const frontEdgeZ = box.maxZ + 0.6;
 
     expect(isPointWalkable(booth.positionX, frontEdgeZ, DEFAULT_BOOTHS)).toBe(true);
 
@@ -58,10 +65,10 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
   });
 
   it('computes a direct straight path when line of sight is unobstructed', () => {
-    const path = findPathAStar(-7.5, 16, -7.5, 6, DEFAULT_BOOTHS);
+    const path = findPathAStar(-3.5, 8, -3.5, 3.6, DEFAULT_BOOTHS);
     expect(path.length).toBe(1);
-    expect(path[0].x).toBeCloseTo(-7.5, 1);
-    expect(path[0].z).toBeCloseTo(6, 1);
+    expect(path[0].x).toBeCloseTo(-3.5, 1);
+    expect(path[0].z).toBeCloseTo(3.6, 1);
   });
 
   it('computes an obstacle-avoiding A* path around the central plaza monument', () => {
@@ -77,15 +84,65 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     }
   });
 
-  it('finds valid walkable paths from entrance (0, 17.5) to all 6 default booths', () => {
+  it('places Central Plaza spawn at a valid walkable central position and oriented 6 booths facing inward', () => {
+    // 1. Central spawn & all multiplayer central spawn slots are walkable and near center (0, 0)
+    expect(isPointWalkable(CENTRAL_SPAWN_POINT.x, CENTRAL_SPAWN_POINT.z, DEFAULT_BOOTHS)).toBe(true);
+    expect(Math.hypot(CENTRAL_SPAWN_POINT.x, CENTRAL_SPAWN_POINT.z)).toBeLessThanOrEqual(4.5);
+
+    for (const slot of CENTRAL_SPAWN_SLOTS) {
+      expect(isPointWalkable(slot.x, slot.z, DEFAULT_BOOTHS)).toBe(true);
+      expect(Math.hypot(slot.x, slot.z)).toBeLessThanOrEqual(4.5);
+    }
+
+    // 2. All 6 booths surround the Central Plaza (0, 0) and face inward toward (0, 0)
+    expect(DEFAULT_BOOTHS).toHaveLength(6);
+    const boxes = DEFAULT_BOOTHS.map(getBoothObstacleBox);
+
+    for (let i = 0; i < DEFAULT_BOOTHS.length; i++) {
+      const booth = DEFAULT_BOOTHS[i];
+      const distFromCenter = Math.hypot(booth.positionX, booth.positionZ);
+      expect(distFromCenter).toBeGreaterThanOrEqual(11);
+      expect(distFromCenter).toBeLessThanOrEqual(17);
+
+      // Forward vector of booth in Three.js: (sin(rotationY), cos(rotationY))
+      const forwardX = Math.sin(booth.rotationY);
+      const forwardZ = Math.cos(booth.rotationY);
+
+      // Unit vector from booth toward Central Plaza origin (0, 0)
+      const toCenterX = -booth.positionX / distFromCenter;
+      const toCenterZ = -booth.positionZ / distFromCenter;
+
+      const dotTowardCenter = forwardX * toCenterX + forwardZ * toCenterZ;
+      expect(dotTowardCenter).toBeGreaterThan(0.999);
+
+      // Ensure no two booths overlap
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+        const overlaps =
+          a.minX <= b.maxX && a.maxX >= b.minX && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
+        expect(overlaps).toBe(false);
+      }
+    }
+  });
+
+  it('finds valid walkable paths from Central Plaza spawn (0, 3.6) to all 6 default booths', () => {
     for (const booth of DEFAULT_BOOTHS) {
-      const frontZ = booth.positionZ + booth.depth / 2 + 1.4;
-      const path = findPathAStar(0, 17.5, booth.positionX, frontZ, DEFAULT_BOOTHS);
+      const approach = getBoothApproachPoint(booth);
+      expect(isPointWalkable(approach.x, approach.z, DEFAULT_BOOTHS)).toBe(true);
+
+      const path = findPathAStar(
+        CENTRAL_SPAWN_POINT.x,
+        CENTRAL_SPAWN_POINT.z,
+        approach.x,
+        approach.z,
+        DEFAULT_BOOTHS
+      );
       expect(path.length).toBeGreaterThan(0);
 
       const dest = path[path.length - 1];
-      expect(dest.x).toBeCloseTo(booth.positionX, 1);
-      expect(dest.z).toBeCloseTo(frontZ, 1);
+      expect(dest.x).toBeCloseTo(approach.x, 1);
+      expect(dest.z).toBeCloseTo(approach.z, 1);
 
       for (const wp of path) {
         expect(isPointWalkable(wp.x, wp.z, DEFAULT_BOOTHS)).toBe(true);
@@ -151,9 +208,15 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     const samples: number[] = [];
     for (let i = 0; i < 100; i++) {
       const targetBooth = DEFAULT_BOOTHS[i % DEFAULT_BOOTHS.length];
-      const frontZ = targetBooth.positionZ + targetBooth.depth / 2 + 1.4;
+      const approach = getBoothApproachPoint(targetBooth);
       const t0 = performance.now();
-      const path = findPathAStar(0, 17.5, targetBooth.positionX, frontZ, DEFAULT_BOOTHS);
+      const path = findPathAStar(
+        CENTRAL_SPAWN_POINT.x,
+        CENTRAL_SPAWN_POINT.z,
+        approach.x,
+        approach.z,
+        DEFAULT_BOOTHS
+      );
       const t1 = performance.now();
       expect(path.length).toBeGreaterThan(0);
       samples.push(t1 - t0);
@@ -208,18 +271,22 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
       color: '#0ea5e9',
       selected: true,
     });
+    const tex7 = createPlazaTileTexture();
+    const tex8 = createPlazaMedallionTexture();
 
-    expect(getActiveCanvasTextureCount()).toBe(baseline + 6);
+    expect(getActiveCanvasTextureCount()).toBe(baseline + 8);
 
     tex1.dispose();
     tex1.dispose(); // idempotent double-dispose check
-    expect(getActiveCanvasTextureCount()).toBe(baseline + 5);
+    expect(getActiveCanvasTextureCount()).toBe(baseline + 7);
 
     tex2.dispose();
     tex3.dispose();
     tex4.dispose();
     tex5.dispose();
     tex6.dispose();
+    tex7.dispose();
+    tex8.dispose();
     expect(getActiveCanvasTextureCount()).toBe(baseline);
   });
 

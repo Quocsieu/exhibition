@@ -16,6 +16,21 @@ export const PLAYER_SPEED = 7.0;
 export const MAX_SERVER_SPEED = 11.5;
 export const MOVE_EVENT_MIN_INTERVAL_MS = 30;
 
+export const CENTRAL_SPAWN_POINT = {
+  x: 0,
+  z: 3.8,
+  rotationY: Math.PI,
+} as const;
+
+export const CENTRAL_SPAWN_SLOTS: ReadonlyArray<{ x: number; z: number; rotationY: number }> = [
+  { x: 0, z: 3.8, rotationY: Math.PI },
+  { x: -1.2, z: 3.8, rotationY: Math.PI },
+  { x: 1.2, z: 3.8, rotationY: Math.PI },
+  { x: -2.2, z: 3.6, rotationY: Math.PI },
+  { x: 2.2, z: 3.6, rotationY: Math.PI },
+  { x: 0, z: -3.8, rotationY: 0 },
+];
+
 export interface ObstacleBox {
   id: string;
   minX: number;
@@ -158,14 +173,20 @@ export interface BoothFootprint {
   id: string;
   positionX: number;
   positionZ: number;
+  rotationY?: number;
   width: number;
   depth: number;
   name?: string;
 }
 
 export function getBoothObstacleBox(booth: BoothFootprint): ObstacleBox {
-  const halfW = (booth.width || 4.8) / 2;
-  const halfD = (booth.depth || 3.8) / 2;
+  const w = booth.width || 4.8;
+  const d = booth.depth || 3.8;
+  const ry = booth.rotationY || 0;
+  const cos = Math.abs(Math.cos(ry));
+  const sin = Math.abs(Math.sin(ry));
+  const halfW = (w * cos + d * sin) / 2;
+  const halfD = (w * sin + d * cos) / 2;
   return {
     id: `booth-${booth.id}`,
     minX: booth.positionX - halfW,
@@ -173,6 +194,25 @@ export function getBoothObstacleBox(booth: BoothFootprint): ObstacleBox {
     minZ: booth.positionZ - halfD,
     maxZ: booth.positionZ + halfD,
     label: booth.name || booth.id,
+  };
+}
+
+export function getBoothApproachPoint(
+  booth: BoothFootprint,
+  clearance = 0.85
+): { x: number; z: number } {
+  const box = getBoothObstacleBox(booth);
+  const halfW = (box.maxX - box.minX) / 2;
+  const halfD = (box.maxZ - box.minZ) / 2;
+  const ry = booth.rotationY ?? Math.atan2(-booth.positionX, -booth.positionZ);
+  const fx = Math.sin(ry);
+  const fz = Math.cos(ry);
+  const tx = (halfW + PLAYER_RADIUS) / Math.max(Math.abs(fx), 0.0001);
+  const tz = (halfD + PLAYER_RADIUS) / Math.max(Math.abs(fz), 0.0001);
+  const dist = Math.min(tx, tz) + clearance;
+  return {
+    x: Number((booth.positionX + fx * dist).toFixed(2)),
+    z: Number((booth.positionZ + fz * dist).toFixed(2)),
   };
 }
 
@@ -188,7 +228,7 @@ function computeBoothsSignature(booths: BoothFootprint[]): string {
   let sig = '';
   for (let i = 0; i < booths.length; i++) {
     const b = booths[i];
-    sig += `${b.id}:${b.positionX},${b.positionZ},${b.width || 4.8},${b.depth || 3.8};`;
+    sig += `${b.id}:${b.positionX},${b.positionZ},${b.rotationY || 0},${b.width || 4.8},${b.depth || 3.8};`;
   }
   return sig;
 }
@@ -614,9 +654,9 @@ export const DEFAULT_BOOTHS: Booth[] = [
     bannerUrl: '',
     contactEmail: 'contact@aethertech.example.com',
     contactUrl: 'https://example.com/aether-tech',
-    positionX: -12,
-    positionZ: -10,
-    rotationY: 0,
+    positionX: -12.5,
+    positionZ: -9,
+    rotationY: Number(Math.atan2(12.5, 9).toFixed(4)),
     width: 4.8,
     depth: 3.8,
   },
@@ -650,9 +690,9 @@ export const DEFAULT_BOOTHS: Booth[] = [
     bannerUrl: '',
     contactEmail: 'export@ecovita.example.com',
     contactUrl: 'https://example.com/ecovita',
-    positionX: 12,
-    positionZ: -10,
-    rotationY: 0,
+    positionX: 12.5,
+    positionZ: -9,
+    rotationY: Number(Math.atan2(-12.5, 9).toFixed(4)),
     width: 4.8,
     depth: 3.8,
   },
@@ -668,9 +708,9 @@ export const DEFAULT_BOOTHS: Booth[] = [
     bannerUrl: '',
     contactEmail: 'sales@kinetix.example.com',
     contactUrl: 'https://example.com/kinetix-robotics',
-    positionX: -12,
-    positionZ: 8,
-    rotationY: 0,
+    positionX: -12.5,
+    positionZ: 9,
+    rotationY: Number(Math.atan2(12.5, -9).toFixed(4)),
     width: 4.8,
     depth: 3.8,
   },
@@ -686,9 +726,9 @@ export const DEFAULT_BOOTHS: Booth[] = [
     bannerUrl: '',
     contactEmail: 'studio@luminadesign.example.com',
     contactUrl: 'https://example.com/lumina-design',
-    positionX: 12,
-    positionZ: 8,
-    rotationY: 0,
+    positionX: 12.5,
+    positionZ: 9,
+    rotationY: Number(Math.atan2(-12.5, -9).toFixed(4)),
     width: 4.8,
     depth: 3.8,
   },
@@ -705,8 +745,8 @@ export const DEFAULT_BOOTHS: Booth[] = [
     contactEmail: 'info@solarisenergy.example.com',
     contactUrl: 'https://example.com/solaris-energy',
     positionX: 0,
-    positionZ: 12,
-    rotationY: 0,
+    positionZ: 13,
+    rotationY: Number(Math.PI.toFixed(4)),
     width: 5.2,
     depth: 3.8,
   },

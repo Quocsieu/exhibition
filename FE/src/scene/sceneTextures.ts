@@ -452,3 +452,120 @@ export function createBannerSignTexture(options: {
 
   return registerTrackedTexture(canvas);
 }
+
+/**
+ * Creates a seamless, tileable Stylized 3D City architectural stone paving texture
+ * for the main exhibition courtyard (1 draw call for the entire ground plane).
+ */
+export function createPlazaTileTexture(): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 512);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    // Warm architectural limestone base
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillRect(0, 0, 512, 512);
+
+    const tileSize = 128;
+    const tones = ['#e8eef5', '#dde5ef', '#e4ebf3', '#d8e1ec'];
+
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 4; col++) {
+        const x = col * tileSize;
+        const y = row * tileSize;
+        ctx.fillStyle = tones[(row * 3 + col) % tones.length];
+        ctx.fillRect(x + 3, y + 3, tileSize - 6, tileSize - 6);
+
+        // Subtle sunlit top/left bevel highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+        ctx.fillRect(x + 3, y + 3, tileSize - 6, 3);
+        ctx.fillRect(x + 3, y + 3, 3, tileSize - 6);
+
+        // Subtle bottom/right recess shadow
+        ctx.fillStyle = 'rgba(100, 116, 139, 0.28)';
+        ctx.fillRect(x + 3, y + tileSize - 6, tileSize - 6, 3);
+        ctx.fillRect(x + tileSize - 6, y + 3, 3, tileSize - 6);
+
+        // Architectural corner inlay dot
+        ctx.fillStyle = 'rgba(148, 163, 184, 0.45)';
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Grout lines
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 3;
+    for (let i = 0; i <= 4; i++) {
+      const p = i * tileSize;
+      ctx.beginPath();
+      ctx.moveTo(p, 0);
+      ctx.lineTo(p, 512);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(0, p);
+      ctx.lineTo(512, p);
+      ctx.stroke();
+    }
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(14, 14);
+  return texture;
+}
+
+/**
+ * Creates a decorative compass-rose & mosaic floor medallion texture for the Central Plaza.
+ */
+export function createPlazaMedallionTexture(): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 512);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    const cx = 256;
+    const cy = 256;
+    ctx.clearRect(0, 0, 512, 512);
+
+    // Outer stone ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, 248, 0, Math.PI * 2);
+    ctx.fillStyle = '#f1f5f9';
+    ctx.fill();
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = '#0ea5e9';
+    ctx.stroke();
+
+    // Radial 12-segment plaza paving lines
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 12; i++) {
+      const angle = (i * Math.PI) / 6;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(angle) * 76, cy + Math.sin(angle) * 76);
+      ctx.lineTo(cx + Math.cos(angle) * 240, cy + Math.sin(angle) * 240);
+      ctx.stroke();
+    }
+
+    // Golden compass ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, 172, 0, Math.PI * 2);
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = '#f59e0b';
+    ctx.stroke();
+
+    // Inner azure ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, 118, 0, Math.PI * 2);
+    ctx.fillStyle = '#e0f2fe';
+    ctx.fill();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = '#0284c7';
+    ctx.stroke();
+  }
+
+  return registerTrackedTexture(canvas);
+}
