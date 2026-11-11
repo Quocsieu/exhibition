@@ -7,11 +7,13 @@ import {
   createAsphaltBumpTexture,
   createAsphaltRoadTexture,
   createBannerSignTexture,
+  createCityBuildingFacadeTexture,
   createCrosswalkTexture,
   createPlazaMedallionTexture,
   createPlazaTileBumpTexture,
   createPlazaTileTexture,
   createSidewalkPaverTexture,
+  createSkyDomeTexture,
 } from './sceneTextures';
 import { cloneCachedAsset, type GlbAssetId } from './assetLoader';
 
@@ -250,6 +252,51 @@ const LOUNGE_TABLE_BASE_GEOM = new THREE.CylinderGeometry(0.12, 0.34, 0.72, 12);
 const FLAG_POLE_GEOM = new THREE.CylinderGeometry(0.04, 0.06, 3.6, 10);
 const FLAG_BANNER_GEOM = new THREE.BoxGeometry(0.04, 1.45, 0.58);
 
+// Instanced Exhibition Street Furniture: Illuminated Bollards, Recycling Bins & Wayfinding Posts
+const BOLLARD_BODY_GEOM = new THREE.CylinderGeometry(0.11, 0.13, 0.78, 12);
+const BOLLARD_GLOW_GEOM = new THREE.CylinderGeometry(0.115, 0.115, 0.14, 12);
+const BIN_BODY_GEOM = new THREE.CylinderGeometry(0.2, 0.17, 0.64, 12);
+const BIN_TOP_GEOM = new THREE.CylinderGeometry(0.22, 0.21, 0.08, 12);
+const SIGNPOST_POLE_GEOM = new THREE.CylinderGeometry(0.055, 0.07, 2.05, 10);
+
+const PLAZA_BOLLARD_POSITIONS: [number, number][] = [
+  [-3.1, 18.4],
+  [3.1, 18.4],
+  [-3.1, 13.8],
+  [3.1, 13.8],
+  [-3.1, 10.6],
+  [3.1, 10.6],
+  [-11.8, -2.9],
+  [-11.8, 2.9],
+  [11.8, -2.9],
+  [11.8, 2.9],
+  [-17.4, -18.2],
+  [17.4, -18.2],
+];
+
+const EXHIBITION_BIN_POSITIONS: [number, number][] = [
+  [-6.85, -4.35],
+  [6.85, -4.35],
+  [-6.85, 4.35],
+  [6.85, 4.35],
+  [-17.6, -15.5],
+  [17.6, -15.5],
+  [-17.6, 14.8],
+  [17.6, 14.8],
+];
+
+const BOLLARD_GLOW_MAT = new THREE.MeshBasicMaterial({ color: '#38bdf8' });
+const BIN_BODY_MAT = new THREE.MeshStandardMaterial({
+  color: '#334155',
+  roughness: 0.42,
+  metalness: 0.35,
+});
+const BIN_TOP_MAT = new THREE.MeshStandardMaterial({
+  color: '#10b981',
+  roughness: 0.35,
+  metalness: 0.2,
+});
+
 const TREE_MID_MAT = new THREE.MeshStandardMaterial({
   color: '#10b981',
   roughness: 0.6,
@@ -301,11 +348,6 @@ const LAMP_POOL_MAT = new THREE.MeshBasicMaterial({
 const CITY_TOWER_GEOM = new THREE.BoxGeometry(1, 1, 1);
 const CITY_CROWN_GEOM = new THREE.ConeGeometry(0.72, 0.42, 4);
 const HORIZON_HILL_GEOM = new THREE.IcosahedronGeometry(1, 2);
-const CITY_TOWER_MAT = new THREE.MeshStandardMaterial({
-  color: '#e2e8f0',
-  roughness: 0.62,
-  metalness: 0.15,
-});
 const CITY_CROWN_MAT = new THREE.MeshStandardMaterial({
   color: '#475569',
   roughness: 0.48,
@@ -385,6 +427,31 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const asphaltRoadTexture = useMemo(() => createAsphaltRoadTexture(4), []);
     const asphaltBumpTexture = useMemo(() => createAsphaltBumpTexture(4), []);
     const crosswalkTexture = useMemo(() => createCrosswalkTexture(), []);
+    const cityFacadeTexture = useMemo(() => createCityBuildingFacadeTexture(), []);
+    const skyDomeTexture = useMemo(() => createSkyDomeTexture(), []);
+
+    const cityTowerTexturedMat = useMemo(
+      () =>
+        new THREE.MeshStandardMaterial({
+          map: cityFacadeTexture,
+          color: '#f8fafc',
+          roughness: 0.52,
+          metalness: 0.18,
+        }),
+      [cityFacadeTexture]
+    );
+
+    const islandSignTextures = useMemo(
+      () =>
+        CENTRAL_PLANTER_ISLANDS.map((island) =>
+          createBannerSignTexture({
+            title: island.signText?.title || 'KHU TRIỂN LÃM',
+            subtitle: island.signText?.subtitle || 'Virtual Expo Plaza',
+            accentColor: island.signText?.color || '#0ea5e9',
+          })
+        ),
+      []
+    );
 
     const treeClones = useMemo(
       () => ALL_TREES.map((t) => ({ ...t, object: cloneCachedAsset(t.assetId) })),
@@ -453,6 +520,10 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         asphaltRoadTexture.dispose();
         asphaltBumpTexture.dispose();
         crosswalkTexture.dispose();
+        cityFacadeTexture.dispose();
+        skyDomeTexture.dispose();
+        cityTowerTexturedMat.dispose();
+        islandSignTextures.forEach((tex) => tex.dispose());
         plazaBannerTexture.dispose();
         entranceBannerTexture.dispose();
         directoryKioskTexture.dispose();
@@ -465,6 +536,10 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       asphaltRoadTexture,
       asphaltBumpTexture,
       crosswalkTexture,
+      cityFacadeTexture,
+      skyDomeTexture,
+      cityTowerTexturedMat,
+      islandSignTextures,
       plazaBannerTexture,
       entranceBannerTexture,
       directoryKioskTexture,
@@ -489,8 +564,13 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     return (
       <group>
         {/* ================================================================
-            0. STYLIZED 3D CITY PARKLAND & SKYLINE BACKDROP (Zero Collision)
+            0. STYLIZED 3D CITY PARKLAND, SKY DOME & SKYLINE BACKDROP (Zero Collision)
            ================================================================ */}
+        <mesh position={[0, -4, 0]}>
+          <sphereGeometry args={[148, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.56]} />
+          <meshBasicMaterial map={skyDomeTexture} side={THREE.BackSide} fog={false} />
+        </mesh>
+
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.75, 0]}>
           <planeGeometry args={[156, 156]} />
           <meshStandardMaterial color="#bbf7d0" roughness={0.92} />
@@ -507,8 +587,8 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           ))}
         </Instances>
 
-        {/* Instanced Stylized 3D City Background Buildings */}
-        <Instances geometry={CITY_TOWER_GEOM} material={CITY_TOWER_MAT}>
+        {/* Instanced Stylized 3D City Background Buildings with Architectural Facade Texture */}
+        <Instances geometry={CITY_TOWER_GEOM} material={cityTowerTexturedMat}>
           {STYLIZED_CITY_BUILDINGS.map((b, i) => (
             <Instance
               key={`ctower-${i}`}
@@ -829,7 +909,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         </group>
 
         {/* ================================================================
-            5. LOW-PROFILE ORNAMENTAL FLOWER PLANTER BEDS (Zero Sightline Obstruction)
+            5. LOW-PROFILE ORNAMENTAL FLOWER PLANTER BEDS & WAYFINDING SIGNS
            ================================================================ */}
         {CENTRAL_PLANTER_ISLANDS.map((island, idx) => (
           <group key={`planter-island-${idx}`} position={[island.x, 0, island.z]}>
@@ -845,8 +925,49 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
               material={PLANTER_SOIL_MAT}
               position={[0, 0.37, 0]}
             />
+            <mesh
+              geometry={SIGNPOST_POLE_GEOM}
+              material={LAMP_POLE_MAT}
+              position={[0, 1.38, 0]}
+              castShadow
+            />
+            {islandSignTextures[idx] && (
+              <Billboard position={[0, 2.58, 0]}>
+                <mesh>
+                  <planeGeometry args={[2.65, 0.56]} />
+                  <meshBasicMaterial
+                    map={islandSignTextures[idx]}
+                    transparent
+                    depthWrite={false}
+                    toneMapped={false}
+                  />
+                </mesh>
+              </Billboard>
+            )}
           </group>
         ))}
+
+        {/* Instanced Illuminated Plaza Bollards & Modern Recycling Bins */}
+        <Instances geometry={BOLLARD_BODY_GEOM} material={LAMP_POLE_MAT} castShadow receiveShadow>
+          {PLAZA_BOLLARD_POSITIONS.map(([bx, bz], i) => (
+            <Instance key={`bollard-body-${i}`} position={[bx, 0.39, bz]} />
+          ))}
+        </Instances>
+        <Instances geometry={BOLLARD_GLOW_GEOM} material={BOLLARD_GLOW_MAT}>
+          {PLAZA_BOLLARD_POSITIONS.map(([bx, bz], i) => (
+            <Instance key={`bollard-glow-${i}`} position={[bx, 0.68, bz]} />
+          ))}
+        </Instances>
+        <Instances geometry={BIN_BODY_GEOM} material={BIN_BODY_MAT} castShadow receiveShadow>
+          {EXHIBITION_BIN_POSITIONS.map(([rx, rz], i) => (
+            <Instance key={`bin-body-${i}`} position={[rx, 0.32, rz]} />
+          ))}
+        </Instances>
+        <Instances geometry={BIN_TOP_GEOM} material={BIN_TOP_MAT}>
+          {EXHIBITION_BIN_POSITIONS.map(([rx, rz], i) => (
+            <Instance key={`bin-top-${i}`} position={[rx, 0.66, rz]} />
+          ))}
+        </Instances>
 
         {/* ================================================================
             6. ASSET-DRIVEN TREES (`env-tree-*.glb`), BENCHES (`env-park-bench.glb`),

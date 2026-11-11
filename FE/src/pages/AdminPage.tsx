@@ -14,37 +14,51 @@ import { formatCurrency } from '../components/ProductPanel';
 export interface AdminPageProps {
   initialBoothId?: string | null;
   onNavigateBoothSlots?: (boothId: string | null) => void;
-  onBackToExpo: () => void;
+  onBackToExpo: (previewBoothId?: string | null) => void;
 }
-
-const SAMPLE_IMPORT_JSON = JSON.stringify(
-  [
-    {
-      name: 'Cảm biến nhiệt ẩm không dây SmartNode S2',
-      price: 1450000,
-      currency: 'VND',
-      description: 'Cảm biến Zigbee 3.0 pin 3 năm, cảnh báo qua ứng dụng di động.',
-      images: ['https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80'],
-      sourceUrl: 'https://example.com/products/smartnode-s2',
-      sku: 'SN-S2',
-    },
-  ],
-  null,
-  2
-);
-
-const SAMPLE_IMPORT_CSV = `name,price,currency,description,imageUrl,sourceUrl,sku
-"Đèn bàn thông minh Lumina Desk Pro",1890000,VND,"Đèn LED chống cận CRI 98 cảm ứng không chạm","https://images.unsplash.com/photo-1513506003901-1e6a229e2d15?auto=format&fit=crop&w=900&q=80","https://example.com/products/lumina-desk-pro","LUM-DP-01"`;
 
 function getZoneDisplayName(zone: 'counter' | 'left-shelf' | 'right-shelf'): string {
   switch (zone) {
     case 'counter':
-      return 'Quầy trưng bày phía trước';
+      return 'Quầy chính phía trước';
     case 'left-shelf':
       return 'Kệ trưng bày bên trái';
     case 'right-shelf':
       return 'Kệ trưng bày bên phải';
   }
+}
+
+function formatSlotNumberLabel(slotId: string): string {
+  const num = slotId.replace(/^slot[_\s-]*/i, '');
+  return `Slot ${num.padStart(2, '0')}`;
+}
+
+function getFriendlySlotPositionName(slotId: string, fallbackLabel: string): string {
+  switch (slotId) {
+    case 'slot_01':
+      return 'Quầy chính — Bên trái';
+    case 'slot_02':
+      return 'Quầy chính — Bên phải';
+    case 'slot_03':
+      return 'Kệ trái — Tầng trên';
+    case 'slot_04':
+      return 'Kệ trái — Tầng dưới';
+    case 'slot_05':
+      return 'Kệ phải — Tầng trên';
+    case 'slot_06':
+      return 'Kệ phải — Tầng dưới';
+    default:
+      return fallbackLabel;
+  }
+}
+
+function getBoothMonogram(booth: Booth): string {
+  const source = (booth.companyName || booth.name || 'GH').trim();
+  const words = source.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return `${words[0][0] || ''}${words[1][0] || ''}`.toUpperCase();
+  }
+  return source.slice(0, 2).toUpperCase();
 }
 
 export const AdminPage: React.FC<AdminPageProps> = ({
@@ -59,7 +73,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'slots' | 'booths' | 'products' | 'import'>('slots');
+  const [activeTab, setActiveTab] = useState<'slots' | 'booths' | 'products'>('slots');
   const [booths, setBooths] = useState<Booth[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [slotAssignments, setSlotAssignments] = useState<BoothSlotAssignment[]>([]);
@@ -67,10 +81,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Booth & Slot Manager State
+  const [slotSubView, setSlotSubView] = useState<'list' | 'detail'>(
+    initialBoothId ? 'detail' : 'list'
+  );
   const [selectedSlotBoothId, setSelectedSlotBoothId] = useState<string>(initialBoothId || '');
   const [activeSlotId, setActiveSlotId] = useState<string>('slot_01');
+  const [pickerModalSlotId, setPickerModalSlotId] = useState<string | null>(null);
+  const [pendingProductIdForSlot, setPendingProductIdForSlot] = useState<string>('');
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [confirmClearSlotId, setConfirmClearSlotId] = useState<string | null>(null);
   const [productSearchQuery, setProductSearchQuery] = useState<string>('');
   const [savingSlotId, setSavingSlotId] = useState<string | null>(null);
+  const [returnToSlotContext, setReturnToSlotContext] = useState<{
+    boothId: string;
+    slotId: string;
+    newlyCreatedProductId?: string;
+  } | null>(null);
 
   const [editingBoothId, setEditingBoothId] = useState<string | null>(null);
   const [boothForm, setBoothForm] = useState<CreateBoothInput>({
@@ -108,15 +134,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   });
   const [imagesInput, setImagesInput] = useState('');
 
-  const [extractUrlInput, setExtractUrlInput] = useState('');
-  const [extractingUrl, setExtractingUrl] = useState(false);
-  const [extractionNotes, setExtractionNotes] = useState<string[]>([]);
-
-  const [batchBoothId, setBatchBoothId] = useState('');
-  const [batchFormat, setBatchFormat] = useState<'json' | 'csv'>('json');
-  const [batchContent, setBatchContent] = useState(SAMPLE_IMPORT_JSON);
-  const [importingBatch, setImportingBatch] = useState(false);
-
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -142,7 +159,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           ...prev,
           boothId: prev.boothId || fetchedBooths[0].id,
         }));
-        setBatchBoothId((prev) => prev || fetchedBooths[0].id);
       }
     } catch (err) {
       setStatusMessage({
@@ -157,7 +173,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   useEffect(() => {
     if (initialBoothId && booths.some((b) => b.id === initialBoothId)) {
       setSelectedSlotBoothId(initialBoothId);
+      setSlotSubView('detail');
       setActiveTab('slots');
+    } else if (!initialBoothId) {
+      setSlotSubView('list');
     }
   }, [initialBoothId, booths]);
 
@@ -201,12 +220,28 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     [selectedBoothForSlots, slotsByBooth]
   );
 
-  const activeSlotView = useMemo(
+  const selectedBoothIndex = useMemo(
     () =>
-      currentBoothSlotViews.find((s) => s.slot.slotId === activeSlotId) ||
-      currentBoothSlotViews[0] ||
-      null,
-    [currentBoothSlotViews, activeSlotId]
+      selectedBoothForSlots
+        ? Math.max(0, booths.findIndex((b) => b.id === selectedBoothForSlots.id))
+        : 0,
+    [booths, selectedBoothForSlots]
+  );
+
+  const pickerSlotView = useMemo(
+    () =>
+      pickerModalSlotId
+        ? currentBoothSlotViews.find((s) => s.slot.slotId === pickerModalSlotId) || null
+        : null,
+    [currentBoothSlotViews, pickerModalSlotId]
+  );
+
+  const confirmClearSlotView = useMemo(
+    () =>
+      confirmClearSlotId
+        ? currentBoothSlotViews.find((s) => s.slot.slotId === confirmClearSlotId) || null
+        : null,
+    [currentBoothSlotViews, confirmClearSlotId]
   );
 
   const boothProductsForSelector = useMemo(() => {
@@ -218,7 +253,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         if (!q) return true;
         return (
           p.name.toLowerCase().includes(q) ||
-          p.id.toLowerCase().includes(q) ||
           (p.sku || '').toLowerCase().includes(q)
         );
       });
@@ -227,42 +261,98 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const handleSelectBoothForSlotManager = (boothId: string) => {
     setSelectedSlotBoothId(boothId);
     setActiveSlotId('slot_01');
+    setSlotSubView('detail');
     setActiveTab('slots');
     onNavigateBoothSlots?.(boothId);
   };
 
-  const handleAssignProductToSlot = async (boothId: string, slotId: string, productId: string) => {
+  const handleBackToBoothList = () => {
+    setSlotSubView('list');
+    setPickerModalSlotId(null);
+    setConfirmClearSlotId(null);
+    onNavigateBoothSlots?.(null);
+  };
+
+  const handleOpenProductPickerModal = (slotView: BoothSlotView) => {
+    setActiveSlotId(slotView.slot.slotId);
+    setPickerModalSlotId(slotView.slot.slotId);
+    setPendingProductIdForSlot(slotView.product?.id || '');
+    setProductSearchQuery('');
+    setModalError(null);
+  };
+
+  const handleCloseProductPickerModal = () => {
+    if (savingSlotId) return;
+    setPickerModalSlotId(null);
+    setPendingProductIdForSlot('');
+    setModalError(null);
+  };
+
+  const handleConfirmAssignProduct = async () => {
+    if (!selectedBoothForSlots || !pickerSlotView || !pendingProductIdForSlot || savingSlotId) {
+      return;
+    }
+    const boothId = selectedBoothForSlots.id;
+    const slotId = pickerSlotView.slot.slotId;
+    const productId = pendingProductIdForSlot;
+    const slotFriendly = `${formatSlotNumberLabel(slotId)} (${getFriendlySlotPositionName(
+      slotId,
+      pickerSlotView.slot.label
+    )})`;
+
     setSavingSlotId(slotId);
+    setModalError(null);
     setStatusMessage(null);
     try {
       await apiClient.assignProductToSlot(boothId, slotId, productId);
       const updatedSlots = await apiClient.getSlots();
       setSlotAssignments(updatedSlots.assignments);
       const product = products.find((p) => p.id === productId);
+      setPickerModalSlotId(null);
+      setPendingProductIdForSlot('');
       setStatusMessage({
         type: 'success',
-        text: `Đã gán sản phẩm "${product?.name || productId}" vào vị trí ${slotId.toUpperCase()} của gian hàng!`,
+        text: `Đã lưu sản phẩm "${product?.name || ''}" vào vị trí ${slotFriendly} của ${
+          selectedBoothForSlots.companyName || selectedBoothForSlots.name
+        }!`,
       });
     } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Không thể lưu sản phẩm vào vị trí trưng bày. Vui lòng thử lại.';
+      setModalError(msg);
       setStatusMessage({
         type: 'error',
-        text: err instanceof Error ? err.message : 'Lỗi khi gán sản phẩm vào vị trí trưng bày.',
+        text: msg,
       });
     } finally {
       setSavingSlotId(null);
     }
   };
 
-  const handleClearSlot = async (boothId: string, slotId: string) => {
+  const handleConfirmClearSlot = async () => {
+    if (!selectedBoothForSlots || !confirmClearSlotView || savingSlotId) {
+      return;
+    }
+    const boothId = selectedBoothForSlots.id;
+    const slotId = confirmClearSlotView.slot.slotId;
+    const removedProductName = confirmClearSlotView.product?.name || 'sản phẩm';
+    const slotFriendly = `${formatSlotNumberLabel(slotId)} (${getFriendlySlotPositionName(
+      slotId,
+      confirmClearSlotView.slot.label
+    )})`;
+
     setSavingSlotId(slotId);
     setStatusMessage(null);
     try {
       await apiClient.clearBoothSlot(boothId, slotId);
       const updatedSlots = await apiClient.getSlots();
       setSlotAssignments(updatedSlots.assignments);
+      setConfirmClearSlotId(null);
       setStatusMessage({
         type: 'success',
-        text: `Đã gỡ sản phẩm khỏi vị trí ${slotId.toUpperCase()}.`,
+        text: `Đã gỡ "${removedProductName}" khỏi vị trí ${slotFriendly}. Sản phẩm vẫn được giữ trong kho của gian hàng.`,
       });
     } catch (err) {
       setStatusMessage({
@@ -373,12 +463,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
-  const resetProductForm = () => {
+  const resetProductForm = (preferredBoothId?: string) => {
     setEditingProductId(null);
     setImagesInput('');
-    setExtractionNotes([]);
     setProductForm({
-      boothId: selectedBoothForSlots?.id || booths[0]?.id || '',
+      boothId:
+        preferredBoothId ||
+        returnToSlotContext?.boothId ||
+        selectedBoothForSlots?.id ||
+        booths[0]?.id ||
+        '',
       name: '',
       price: 0,
       currency: 'VND',
@@ -391,6 +485,36 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       sku: '',
       inStock: true,
     });
+  };
+
+  const handleNavigateToCreateProductFromSlot = (boothId: string, slotId: string) => {
+    setReturnToSlotContext({ boothId, slotId });
+    setPickerModalSlotId(null);
+    setModalError(null);
+    resetProductForm(boothId);
+    setActiveTab('products');
+  };
+
+  const handleReturnToSlotFromProductStock = (overrideProductId?: string) => {
+    if (!returnToSlotContext) return;
+    const { boothId, slotId, newlyCreatedProductId } = returnToSlotContext;
+    const candidateProductId = overrideProductId || newlyCreatedProductId || '';
+    setSelectedSlotBoothId(boothId);
+    setSlotSubView('detail');
+    setActiveSlotId(slotId);
+    setProductSearchQuery('');
+    setModalError(null);
+    setPickerModalSlotId(slotId);
+    if (candidateProductId) {
+      setPendingProductIdForSlot(candidateProductId);
+    } else {
+      const existingSlotProd = (slotsByBooth[boothId] || []).find(
+        (s) => s.slot.slotId === slotId
+      )?.product;
+      setPendingProductIdForSlot(existingSlotProd?.id || '');
+    }
+    setActiveTab('slots');
+    setReturnToSlotContext(null);
   };
 
   const handleEditProduct = (product: Product) => {
@@ -430,12 +554,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       if (editingProductId) {
         await apiClient.updateProduct(editingProductId, payload);
         setStatusMessage({ type: 'success', text: 'Đã cập nhật sản phẩm thành công!' });
+        resetProductForm(payload.boothId);
+        await loadData();
       } else {
-        await apiClient.createProduct(payload);
-        setStatusMessage({ type: 'success', text: 'Đã tạo sản phẩm mới thành công!' });
+        const created = await apiClient.createProduct(payload);
+        resetProductForm(payload.boothId);
+        await loadData();
+        if (returnToSlotContext && returnToSlotContext.boothId === payload.boothId) {
+          setReturnToSlotContext((prev) =>
+            prev ? { ...prev, newlyCreatedProductId: created.id } : null
+          );
+          setStatusMessage({
+            type: 'success',
+            text: `Đã tạo sản phẩm "${created.name}" thành công! Bấm "Quay lại chọn sản phẩm cho ${formatSlotNumberLabel(returnToSlotContext.slotId)}" để gán vào kệ.`,
+          });
+        } else {
+          setStatusMessage({ type: 'success', text: 'Đã tạo sản phẩm mới thành công!' });
+        }
       }
-      resetProductForm();
-      await loadData();
     } catch (err) {
       setStatusMessage({
         type: 'error',
@@ -455,84 +591,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         type: 'error',
         text: err instanceof Error ? err.message : 'Lỗi khi xóa sản phẩm',
       });
-    }
-  };
-
-  const handleExtractFromUrl = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!extractUrlInput.trim()) return;
-    setExtractingUrl(true);
-    setStatusMessage(null);
-    setExtractionNotes([]);
-
-    try {
-      const draft = await apiClient.extractProductFromUrl(extractUrlInput.trim());
-      setEditingProductId(null);
-      setProductForm({
-        boothId: productForm.boothId || booths[0]?.id || '',
-        name: draft.name || '',
-        price: draft.price || 0,
-        currency: draft.currency || 'VND',
-        description: draft.description || '',
-        images: draft.images || [],
-        videoUrl: draft.videoUrl || '',
-        modelUrl: '',
-        sourceUrl: draft.sourceUrl || extractUrlInput.trim(),
-        contactUrl: '',
-        sku: draft.sku || '',
-        inStock: draft.inStock ?? true,
-      });
-      setImagesInput((draft.images || []).join('\n'));
-      setExtractionNotes([
-        `Phương thức trích xuất: ${draft.extractionMethod.toUpperCase()}`,
-        ...(draft.warnings || []),
-      ]);
-      setActiveTab('products');
-      setStatusMessage({
-        type: 'success',
-        text: 'Đã trích xuất thông tin từ URL! Vui lòng kiểm tra/chỉnh sửa dữ liệu bên dưới trước khi lưu.',
-      });
-    } catch (err) {
-      setEditingProductId(null);
-      setProductForm((prev) => ({
-        ...prev,
-        boothId: prev.boothId || booths[0]?.id || '',
-        sourceUrl: extractUrlInput.trim(),
-      }));
-      setActiveTab('products');
-      setStatusMessage({
-        type: 'error',
-        text: `${
-          err instanceof Error ? err.message : 'Không thể tự động trích xuất URL này.'
-        } — Đã chuyển sang biểu mẫu nhập thủ công với URL nguồn được điền sẵn.`,
-      });
-    } finally {
-      setExtractingUrl(false);
-    }
-  };
-
-  const handleBatchImport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!batchBoothId) {
-      setStatusMessage({ type: 'error', text: 'Vui lòng chọn gian hàng đích.' });
-      return;
-    }
-    setImportingBatch(true);
-    setStatusMessage(null);
-    try {
-      const result = await apiClient.importProductsBatch(batchBoothId, batchFormat, batchContent);
-      setStatusMessage({
-        type: 'success',
-        text: `Đã import thành công ${result.importedCount} sản phẩm vào gian hàng!`,
-      });
-      await loadData();
-    } catch (err) {
-      setStatusMessage({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Lỗi khi import dữ liệu hàng loạt.',
-      });
-    } finally {
-      setImportingBatch(false);
     }
   };
 
@@ -592,7 +650,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             </div>
 
             <div className="dashboard-form__actions">
-              <button type="button" className="btn btn--ghost" onClick={onBackToExpo}>
+              <button type="button" className="btn btn--ghost" onClick={() => onBackToExpo(null)}>
                 ← Quay lại Triển lãm 3D
               </button>
               <button type="submit" className="btn btn--primary">
@@ -609,16 +667,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     <main className="dashboard-page">
       <header className="dashboard-header">
         <div>
-          <h1>⚙️ Bảng Điều Khiển Quản Trị — Gian Hàng & Vị Trí Trưng Bày (Slots)</h1>
+          <h1>⚙️ Trung Tâm Quản Lý Trưng Bày Gian Hàng 3D</h1>
           <p>
-            Tổng cộng: <strong>{booths.length}</strong> gian hàng ·{' '}
-            <strong>{booths.length * BOOTH_SLOT_DEFINITIONS.length}</strong> vị trí slot (
-            <strong>{slotAssignments.length}</strong> vị trí đang trưng bày) ·{' '}
-            <strong>{products.length}</strong> sản phẩm trong cơ sở dữ liệu SQLite
+            Đang hoạt động: <strong>{booths.length}</strong> gian hàng doanh nghiệp ·{' '}
+            <strong>{slotAssignments.length} / {booths.length * BOOTH_SLOT_DEFINITIONS.length}</strong> vị trí đang trưng bày sản phẩm ·{' '}
+            <strong>{products.length}</strong> sản phẩm trong kho
           </p>
         </div>
         <div className="dashboard-header__actions">
-          <button type="button" className="btn btn--secondary" onClick={onBackToExpo}>
+          <button type="button" className="btn btn--secondary" onClick={() => onBackToExpo(null)}>
             🌐 Xem trực tiếp Khuôn viên 3D
           </button>
           <button type="button" className="btn btn--ghost" onClick={handleLogout}>
@@ -653,17 +710,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           className={`dashboard-tab ${activeTab === 'slots' ? 'dashboard-tab--active' : ''}`}
           onClick={() => {
             setActiveTab('slots');
-            onNavigateBoothSlots?.(selectedSlotBoothId || null);
+            setSlotSubView('list');
+            onNavigateBoothSlots?.(null);
           }}
         >
-          🗂️ Quản lý Gian hàng & Slot ({slotAssignments.length}/{booths.length * BOOTH_SLOT_DEFINITIONS.length})
+          🗂️ Quản lý Trưng bày Gian hàng ({slotAssignments.length}/{booths.length * BOOTH_SLOT_DEFINITIONS.length} vị trí)
         </button>
         <button
           type="button"
           className={`dashboard-tab ${activeTab === 'booths' ? 'dashboard-tab--active' : ''}`}
           onClick={() => setActiveTab('booths')}
         >
-          🏛️ Cấu hình Gian hàng ({booths.length})
+          🏛️ Thông tin Doanh nghiệp & Gian hàng ({booths.length})
         </button>
         <button
           type="button"
@@ -671,13 +729,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           onClick={() => setActiveTab('products')}
         >
           📦 Kho Sản phẩm ({products.length})
-        </button>
-        <button
-          type="button"
-          className={`dashboard-tab ${activeTab === 'import' ? 'dashboard-tab--active' : ''}`}
-          onClick={() => setActiveTab('import')}
-        >
-          🔗 Import Sản phẩm (URL / JSON / CSV)
         </button>
       </nav>
 
@@ -688,508 +739,937 @@ export const AdminPage: React.FC<AdminPageProps> = ({
          ==================================================================== */}
       {activeTab === 'slots' && (
         <div className="slot-manager-container">
-          {/* 1. Danh sách 6 gian hàng kèm trạng thái lấp đầy Slot */}
-          <section className="dashboard-card">
-            <div className="slot-section-header">
-              <div>
-                <h2>1. Danh sách Gian hàng Triển lãm (/admin/booths)</h2>
-                <p className="card-help">
-                  Chọn một gian hàng bên dưới để quản lý 6 vị trí trưng bày sản phẩm cố định (2 vị trí Quầy trước, 2 vị trí Kệ trái, 2 vị trí Kệ phải).
-                </p>
+          {/* MÀN HÌNH 1: DANH SÁCH 6 GIAN HÀNG DƯỚI DẠNG CARD TRỰC QUAN (/admin/booths) */}
+          {slotSubView === 'list' && (
+            <section className="dashboard-card">
+              <div className="slot-section-header">
+                <div>
+                  <h2>Danh sách 6 Gian hàng Triển lãm</h2>
+                  <p className="card-help">
+                    Chọn <strong>&ldquo;Quản lý sản phẩm trưng bày&rdquo;</strong> trên gian hàng bạn muốn sắp xếp. Mỗi gian hàng có <strong>6 vị trí trưng bày cố định</strong> trên quầy chính và hai kệ 3D.
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Màu</th>
-                    <th>Tên doanh nghiệp</th>
-                    <th>Tên gian hàng</th>
-                    <th>Booth ID</th>
-                    <th>Tổng số Slot</th>
-                    <th>Slot đã trưng bày</th>
-                    <th>Thao tác</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {booths.map((b) => {
-                    const bSlots = slotsByBooth[b.id] || [];
-                    const occupiedCount = bSlots.filter((s) => Boolean(s.product)).length;
-                    const isSelected = selectedBoothForSlots?.id === b.id;
-                    return (
-                      <tr
-                        key={b.id}
-                        className={isSelected ? 'admin-table__row--selected' : ''}
-                      >
-                        <td>
-                          <span className="color-pill" style={{ backgroundColor: b.color }} />
-                        </td>
-                        <td>
-                          <strong>{b.companyName || b.name}</strong>
-                          <div className="table-sub">{b.category}</div>
-                        </td>
-                        <td>{b.name}</td>
-                        <td>
-                          <code>{b.id}</code>
-                        </td>
-                        <td>{BOOTH_SLOT_DEFINITIONS.length} vị trí</td>
-                        <td>
-                          <span
-                            className={`badge ${
-                              occupiedCount > 0 ? 'badge--success' : 'badge--neutral'
-                            }`}
-                          >
-                            {occupiedCount} / {BOOTH_SLOT_DEFINITIONS.length} có sản phẩm
-                          </span>
-                        </td>
-                        <td className="table-actions">
+              <div className="admin-booth-card-grid">
+                {booths.map((b, index) => {
+                  const bSlots = slotsByBooth[b.id] || [];
+                  const occupiedCount = bSlots.filter((s) => Boolean(s.product)).length;
+                  const totalSlots = BOOTH_SLOT_DEFINITIONS.length;
+                  const fillPercent = Math.round((occupiedCount / totalSlots) * 100);
+                  const totalBoothProducts = products.filter((p) => p.boothId === b.id).length;
+
+                  return (
+                    <article
+                      key={b.id}
+                      className="admin-booth-card"
+                      style={{ '--booth-accent': b.color } as React.CSSProperties}
+                    >
+                      <div
+                        className="admin-booth-card__top-bar"
+                        style={{ backgroundColor: b.color }}
+                      />
+                      <div className="admin-booth-card__body">
+                        <div className="admin-booth-card__header">
+                          {b.logoUrl ? (
+                            <img
+                              src={b.logoUrl}
+                              alt={b.companyName || b.name}
+                              className="admin-booth-card__avatar-img"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div
+                              className="admin-booth-card__avatar"
+                              style={{ backgroundColor: b.color }}
+                            >
+                              {getBoothMonogram(b)}
+                            </div>
+                          )}
+                          <div className="admin-booth-card__titles">
+                            <div className="admin-booth-card__badges">
+                              <span
+                                className="admin-booth-card__number-badge"
+                                style={{ backgroundColor: b.color }}
+                              >
+                                Gian hàng {index + 1}
+                              </span>
+                              <span className="admin-booth-card__category-badge">
+                                {b.category}
+                              </span>
+                            </div>
+                            <h3 className="admin-booth-card__company">
+                              {b.companyName || b.name}
+                            </h3>
+                            <p className="admin-booth-card__booth-name">
+                              Tên gian hàng: <strong>{b.name}</strong>
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Trạng thái lấp đầy 6 vị trí trưng bày */}
+                        <div className="admin-booth-card__progress-box">
+                          <div className="admin-booth-card__progress-row">
+                            <strong>
+                              {occupiedCount} / {totalSlots} vị trí đang trưng bày
+                            </strong>
+                            <span>{totalBoothProducts} sản phẩm trong kho</span>
+                          </div>
+                          <div className="admin-booth-card__progress-track">
+                            <div
+                              className="admin-booth-card__progress-fill"
+                              style={{
+                                width: `${fillPercent}%`,
+                                backgroundColor: occupiedCount > 0 ? b.color : '#94a3b8',
+                              }}
+                            />
+                          </div>
+
+                          {/* Dải xem trước 6 vị trí Slot 01..06 */}
+                          <div className="admin-booth-card__slot-strip">
+                            {bSlots.map((sv) => (
+                              <div
+                                key={sv.slot.slotId}
+                                className={`admin-booth-card__slot-pill ${
+                                  sv.product
+                                    ? 'admin-booth-card__slot-pill--occupied'
+                                    : 'admin-booth-card__slot-pill--empty'
+                                }`}
+                                title={`${formatSlotNumberLabel(sv.slot.slotId)} — ${getFriendlySlotPositionName(
+                                  sv.slot.slotId,
+                                  sv.slot.label
+                                )}: ${sv.product ? sv.product.name : 'Chưa có sản phẩm'}`}
+                              >
+                                {sv.product?.images?.[0] ? (
+                                  <img
+                                    src={sv.product.images[0]}
+                                    alt={sv.product.name}
+                                    className="admin-booth-card__slot-pill-img"
+                                  />
+                                ) : (
+                                  <span>{formatSlotNumberLabel(sv.slot.slotId).replace('Slot ', 'S')}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="admin-booth-card__actions">
                           <button
                             type="button"
-                            className={`btn btn--sm ${
-                              isSelected ? 'btn--primary' : 'btn--secondary'
-                            }`}
+                            className="btn btn--primary admin-booth-card__main-btn"
                             onClick={() => handleSelectBoothForSlotManager(b.id)}
                           >
-                            {isSelected ? '✓ Đang quản lý Slot' : '🗂️ Quản lý Slot'}
+                            🗂️ Quản lý sản phẩm trưng bày
                           </button>
-                        </td>
-                      </tr>
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--sm"
+                            onClick={() => onBackToExpo(b.id)}
+                            title="Mở không gian 3D và xem trực tiếp gian hàng này"
+                          >
+                            👁️ Xem 3D
+                          </button>
+                        </div>
+
+                        <div className="admin-booth-card__sub-meta">
+                          Mã hệ thống: {b.id}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* MÀN HÌNH 2: QUẢN LÝ 6 SLOT CỦA MỘT GIAN HÀNG (/admin/booths/:boothId/slots) */}
+          {slotSubView === 'detail' && selectedBoothForSlots && (
+            <div className="slot-detail-view">
+              {/* Thanh điều hướng quay lại & chuyển nhanh giữa 6 gian hàng */}
+              <div className="slot-detail-topbar">
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={handleBackToBoothList}
+                >
+                  ← Quay lại danh sách gian hàng
+                </button>
+
+                <div className="slot-detail-Ordered-pills" role="navigation" aria-label="Chuyển nhanh gian hàng">
+                  {booths.map((b, idx) => {
+                    const active = b.id === selectedBoothForSlots.id;
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        className={`slot-booth-switch-pill ${
+                          active ? 'slot-booth-switch-pill--active' : ''
+                        }`}
+                        style={
+                          active
+                            ? { backgroundColor: b.color, borderColor: b.color, color: '#ffffff' }
+                            : undefined
+                        }
+                        onClick={() => handleSelectBoothForSlotManager(b.id)}
+                      >
+                        Gian hàng {idx + 1}: {b.name}
+                      </button>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                </div>
+              </div>
 
-          {/* 2. Sơ đồ trực quan & Quản lý từng Slot của gian hàng đang chọn */}
-          {selectedBoothForSlots && (
-            <div className="dashboard-grid slot-manager-detail-grid">
-              {/* Cột Trái: Sơ đồ 2D Gian hàng + Danh sách 6 Slot */}
-              <section className="dashboard-card">
-                <div className="slot-booth-banner" style={{ borderLeftColor: selectedBoothForSlots.color }}>
-                  <div>
-                    <span className="badge badge--neutral">{selectedBoothForSlots.id}</span>
-                    <h2>
-                      {selectedBoothForSlots.companyName || selectedBoothForSlots.name} —{' '}
-                      {selectedBoothForSlots.name}
-                    </h2>
-                    <p className="card-help">
-                      Sơ đồ vị trí trưng bày 3D chuẩn hội chợ triển lãm. Bấm vào một ô vị trí (Slot) để gán, thay thế hoặc gỡ sản phẩm.
+              {/* PHẦN A: THÔNG TIN GIAN HÀNG (HEADER) */}
+              <section
+                className="dashboard-card slot-detail-header-card"
+                style={{ borderTop: `5px solid ${selectedBoothForSlots.color}` }}
+              >
+                <div className="slot-detail-header-card__main">
+                  <div
+                    className="admin-booth-card__avatar admin-booth-card__avatar--lg"
+                    style={{ backgroundColor: selectedBoothForSlots.color }}
+                  >
+                    {getBoothMonogram(selectedBoothForSlots)}
+                  </div>
+                  <div className="slot-detail-header-card__info">
+                    <div className="admin-booth-card__badges">
+                      <span
+                        className="admin-booth-card__number-badge"
+                        style={{ backgroundColor: selectedBoothForSlots.color }}
+                      >
+                        Gian hàng {selectedBoothIndex + 1}
+                      </span>
+                      <span className="admin-booth-card__category-badge">
+                        {selectedBoothForSlots.category}
+                      </span>
+                      <span className="badge badge--success">
+                        Đang trưng bày{' '}
+                        {currentBoothSlotViews.filter((s) => Boolean(s.product)).length} /{' '}
+                        {BOOTH_SLOT_DEFINITIONS.length} vị trí
+                      </span>
+                    </div>
+                    <h2>{selectedBoothForSlots.companyName || selectedBoothForSlots.name}</h2>
+                    <p className="slot-detail-header-card__subtitle">
+                      Gian hàng: <strong>{selectedBoothForSlots.name}</strong> · Khẩu hiệu:{' '}
+                      <em>&ldquo;{selectedBoothForSlots.tagline}&rdquo;</em>
                     </p>
                   </div>
                 </div>
 
-                {/* Sơ đồ trực quan 2D mô phỏng Gian hàng hội chợ (Backdrop + Kệ trái/phải + Quầy trước) */}
-                <div className="booth-schematic" aria-label="Sơ đồ bố trí 6 vị trí trưng bày trong gian hàng">
+                <div className="slot-detail-header-card__actions">
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => {
+                      resetProductForm();
+                      setProductForm((prev) => ({
+                        ...prev,
+                        boothId: selectedBoothForSlots.id,
+                      }));
+                      setActiveTab('products');
+                    }}
+                  >
+                    ＋ Tạo sản phẩm mới vào kho
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => onBackToExpo(selectedBoothForSlots.id)}
+                  >
+                    👁️ Xem trước gian hàng 3D
+                  </button>
+                </div>
+              </section>
+
+              {/* PHẦN B: SƠ ĐỒ GIAN HÀNG TRỰC QUAN 2D */}
+              <section className="dashboard-card">
+                <div className="slot-section-header">
+                  <div>
+                    <h2>Sơ đồ Bố trí Trưng bày trong Gian hàng 3D</h2>
+                    <p className="card-help">
+                      Sơ đồ bên dưới mô phỏng đúng vị trí các kệ và quầy trong không gian 3D. Bấm vào bất kỳ vị trí nào để <strong>thêm</strong> hoặc <strong>thay đổi</strong> sản phẩm.
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  className="booth-schematic"
+                  aria-label="Sơ đồ bố trí 6 vị trí trưng bày trong gian hàng"
+                >
+                  {/* Backdrop phía sau */}
                   <div
                     className="booth-schematic__backdrop"
                     style={{ borderColor: selectedBoothForSlots.color }}
                   >
-                    <span className="booth-schematic__backdrop-badge">BACKDROP PHÍA SAU</span>
-                    <strong>{selectedBoothForSlots.companyName || selectedBoothForSlots.name}</strong>
+                    <span className="booth-schematic__backdrop-badge">
+                      TƯỜNG BACKDROP THƯƠNG HIỆU PHÍA SAU
+                    </span>
+                    <strong>
+                      {selectedBoothForSlots.companyName || selectedBoothForSlots.name}
+                    </strong>
                     <span>{selectedBoothForSlots.tagline}</span>
                   </div>
 
+                  {/* Hàng giữa: Kệ trái 2 tầng — Không gian trung tâm — Kệ phải 2 tầng */}
                   <div className="booth-schematic__middle">
-                    {/* Kệ Trái (slot_03, slot_04) */}
+                    {/* Kệ Trái 2 Tầng (Slot 03, Slot 04) */}
                     <div className="booth-schematic__zone">
-                      <span className="booth-schematic__zone-title">KỆ TRÁI 2 TẦNG</span>
+                      <span className="booth-schematic__zone-title">
+                        KỆ TRƯNG BÀY BÊN TRÁI (2 TẦNG)
+                      </span>
                       {['slot_03', 'slot_04'].map((sid) => {
                         const sv = currentBoothSlotViews.find((s) => s.slot.slotId === sid);
                         if (!sv) return null;
                         const active = activeSlotId === sid;
+                        const friendlyPos = getFriendlySlotPositionName(sid, sv.slot.label);
                         return (
-                          <button
+                          <div
                             key={sid}
-                            type="button"
+                            role="button"
+                            tabIndex={0}
                             className={`slot-schematic-box ${
-                              sv.product ? 'slot-schematic-box--occupied' : 'slot-schematic-box--empty'
+                              sv.product
+                                ? 'slot-schematic-box--occupied'
+                                : 'slot-schematic-box--empty'
                             } ${active ? 'slot-schematic-box--active' : ''}`}
-                            onClick={() => setActiveSlotId(sid)}
+                            onClick={() => handleOpenProductPickerModal(sv)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleOpenProductPickerModal(sv);
+                              }
+                            }}
                           >
                             <div className="slot-schematic-box__header">
-                              <code>{sid}</code>
-                              <span>{sv.slot.label}</span>
+                              <span className="slot-schematic-box__slot-tag">
+                                {formatSlotNumberLabel(sid)} · {friendlyPos}
+                              </span>
+                              <span
+                                className={`slot-status-pill ${
+                                  sv.product
+                                    ? 'slot-status-pill--occupied'
+                                    : 'slot-status-pill--empty'
+                                }`}
+                              >
+                                {sv.product ? 'Đã có sản phẩm' : 'Chưa có sản phẩm'}
+                              </span>
                             </div>
-                            <div className="slot-schematic-box__body">
-                              {sv.product ? (
-                                <>
+
+                            {sv.product ? (
+                              <div className="slot-schematic-box__product">
+                                {sv.product.images?.[0] ? (
+                                  <img
+                                    src={sv.product.images[0]}
+                                    alt={sv.product.name}
+                                    className="slot-schematic-box__thumb"
+                                  />
+                                ) : (
+                                  <div className="slot-schematic-box__thumb slot-schematic-box__thumb--empty">
+                                    Chưa có ảnh
+                                  </div>
+                                )}
+                                <div className="slot-schematic-box__meta">
                                   <strong>{sv.product.name}</strong>
-                                  <span>{formatCurrency(sv.product.price, sv.product.currency)}</span>
-                                </>
-                              ) : (
-                                <span className="slot-schematic-box__empty-label">○ Vị trí trống</span>
-                              )}
-                            </div>
-                          </button>
+                                  <span>
+                                    {formatCurrency(sv.product.price, sv.product.currency)}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="slot-schematic-box__empty-cta">
+                                <span>Chưa có sản phẩm trưng bày</span>
+                                <span className="slot-schematic-box__add-btn">
+                                  ＋ Thêm sản phẩm
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
 
-                    {/* Lối vào & Không gian trung tâm */}
+                    {/* Không gian trung tâm */}
                     <div className="booth-schematic__center-floor">
-                      <span>KHÔNG GIAN TRƯNG BÀY 3D</span>
-                      <small>Không dùng sidebar phải · Click trực tiếp vào 3D</small>
+                      <strong>LỐI VÀO GIAN HÀNG 3D</strong>
+                      <span>Khách tham quan nhìn trực diện vào Quầy chính và 2 Kệ trưng bày</span>
+                      <small>Bấm vào sản phẩm trên kệ 3D sẽ mở bảng chi tiết sản phẩm</small>
                     </div>
 
-                    {/* Kệ Phải (slot_05, slot_06) */}
+                    {/* Kệ Phải 2 Tầng (Slot 05, Slot 06) */}
                     <div className="booth-schematic__zone">
-                      <span className="booth-schematic__zone-title">KỆ PHẢI 2 TẦNG</span>
+                      <span className="booth-schematic__zone-title">
+                        KỆ TRƯNG BÀY BÊN PHẢI (2 TẦNG)
+                      </span>
                       {['slot_05', 'slot_06'].map((sid) => {
                         const sv = currentBoothSlotViews.find((s) => s.slot.slotId === sid);
                         if (!sv) return null;
                         const active = activeSlotId === sid;
+                        const friendlyPos = getFriendlySlotPositionName(sid, sv.slot.label);
                         return (
-                          <button
+                          <div
                             key={sid}
-                            type="button"
+                            role="button"
+                            tabIndex={0}
                             className={`slot-schematic-box ${
-                              sv.product ? 'slot-schematic-box--occupied' : 'slot-schematic-box--empty'
+                              sv.product
+                                ? 'slot-schematic-box--occupied'
+                                : 'slot-schematic-box--empty'
                             } ${active ? 'slot-schematic-box--active' : ''}`}
-                            onClick={() => setActiveSlotId(sid)}
+                            onClick={() => handleOpenProductPickerModal(sv)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleOpenProductPickerModal(sv);
+                              }
+                            }}
                           >
                             <div className="slot-schematic-box__header">
-                              <code>{sid}</code>
-                              <span>{sv.slot.label}</span>
+                              <span className="slot-schematic-box__slot-tag">
+                                {formatSlotNumberLabel(sid)} · {friendlyPos}
+                              </span>
+                              <span
+                                className={`slot-status-pill ${
+                                  sv.product
+                                    ? 'slot-status-pill--occupied'
+                                    : 'slot-status-pill--empty'
+                                }`}
+                              >
+                                {sv.product ? 'Đã có sản phẩm' : 'Chưa có sản phẩm'}
+                              </span>
                             </div>
-                            <div className="slot-schematic-box__body">
-                              {sv.product ? (
-                                <>
+
+                            {sv.product ? (
+                              <div className="slot-schematic-box__product">
+                                {sv.product.images?.[0] ? (
+                                  <img
+                                    src={sv.product.images[0]}
+                                    alt={sv.product.name}
+                                    className="slot-schematic-box__thumb"
+                                  />
+                                ) : (
+                                  <div className="slot-schematic-box__thumb slot-schematic-box__thumb--empty">
+                                    Chưa có ảnh
+                                  </div>
+                                )}
+                                <div className="slot-schematic-box__meta">
                                   <strong>{sv.product.name}</strong>
-                                  <span>{formatCurrency(sv.product.price, sv.product.currency)}</span>
-                                </>
-                              ) : (
-                                <span className="slot-schematic-box__empty-label">○ Vị trí trống</span>
-                              )}
-                            </div>
-                          </button>
+                                  <span>
+                                    {formatCurrency(sv.product.price, sv.product.currency)}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="slot-schematic-box__empty-cta">
+                                <span>Chưa có sản phẩm trưng bày</span>
+                                <span className="slot-schematic-box__add-btn">
+                                  ＋ Thêm sản phẩm
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
                   </div>
 
-                  {/* Quầy Trưng Bày Phía Trước (slot_01, slot_02) */}
+                  {/* Quầy Trưng Bày Phía Trước (Slot 01, Slot 02) */}
                   <div className="booth-schematic__counter">
                     <span className="booth-schematic__zone-title">
-                      QUẦY TRƯNG BÀY PHÍA TRƯỚC (FRONT COUNTER)
+                      QUẦY TRƯNG BÀY CHÍNH PHÍA TRƯỚC (MẶT TIỀN GIAN HÀNG)
                     </span>
                     <div className="booth-schematic__counter-slots">
                       {['slot_01', 'slot_02'].map((sid) => {
                         const sv = currentBoothSlotViews.find((s) => s.slot.slotId === sid);
                         if (!sv) return null;
                         const active = activeSlotId === sid;
+                        const friendlyPos = getFriendlySlotPositionName(sid, sv.slot.label);
                         return (
-                          <button
+                          <div
                             key={sid}
-                            type="button"
+                            role="button"
+                            tabIndex={0}
                             className={`slot-schematic-box ${
-                              sv.product ? 'slot-schematic-box--occupied' : 'slot-schematic-box--empty'
+                              sv.product
+                                ? 'slot-schematic-box--occupied'
+                                : 'slot-schematic-box--empty'
                             } ${active ? 'slot-schematic-box--active' : ''}`}
-                            onClick={() => setActiveSlotId(sid)}
+                            onClick={() => handleOpenProductPickerModal(sv)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleOpenProductPickerModal(sv);
+                              }
+                            }}
                           >
                             <div className="slot-schematic-box__header">
-                              <code>{sid}</code>
-                              <span>{sv.slot.label}</span>
+                              <span className="slot-schematic-box__slot-tag">
+                                {formatSlotNumberLabel(sid)} · {friendlyPos}
+                              </span>
+                              <span
+                                className={`slot-status-pill ${
+                                  sv.product
+                                    ? 'slot-status-pill--occupied'
+                                    : 'slot-status-pill--empty'
+                                }`}
+                              >
+                                {sv.product ? 'Đã có sản phẩm' : 'Chưa có sản phẩm'}
+                              </span>
                             </div>
-                            <div className="slot-schematic-box__body">
-                              {sv.product ? (
-                                <>
+
+                            {sv.product ? (
+                              <div className="slot-schematic-box__product">
+                                {sv.product.images?.[0] ? (
+                                  <img
+                                    src={sv.product.images[0]}
+                                    alt={sv.product.name}
+                                    className="slot-schematic-box__thumb"
+                                  />
+                                ) : (
+                                  <div className="slot-schematic-box__thumb slot-schematic-box__thumb--empty">
+                                    Chưa có ảnh
+                                  </div>
+                                )}
+                                <div className="slot-schematic-box__meta">
                                   <strong>{sv.product.name}</strong>
-                                  <span>{formatCurrency(sv.product.price, sv.product.currency)}</span>
-                                </>
-                              ) : (
-                                <span className="slot-schematic-box__empty-label">○ Vị trí trống</span>
-                              )}
-                            </div>
-                          </button>
+                                  <span>
+                                    {formatCurrency(sv.product.price, sv.product.currency)}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="slot-schematic-box__empty-cta">
+                                <span>Chưa có sản phẩm trưng bày</span>
+                                <span className="slot-schematic-box__add-btn">
+                                  ＋ Thêm sản phẩm
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
                   </div>
                 </div>
-
-                {/* Bảng danh sách 6 Slot của gian hàng */}
-                <h3>Danh sách 6 Vị trí Trưng bày ({selectedBoothForSlots.id})</h3>
-                <div className="admin-table-wrap">
-                  <table className="admin-table">
-                    <thead>
-                      <tr>
-                        <th>Slot ID</th>
-                        <th>Vị trí trên quầy/kệ</th>
-                        <th>Trạng thái</th>
-                        <th>Sản phẩm đang gán</th>
-                        <th>Thao tác</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {currentBoothSlotViews.map((sv) => {
-                        const isCurrentSlot = activeSlotId === sv.slot.slotId;
-                        const isBusy = savingSlotId === sv.slot.slotId;
-                        return (
-                          <tr
-                            key={sv.slot.slotId}
-                            className={isCurrentSlot ? 'admin-table__row--selected' : ''}
-                          >
-                            <td>
-                              <code>{sv.slot.slotId}</code>
-                            </td>
-                            <td>
-                              <strong>{sv.slot.label}</strong>
-                              <div className="table-sub">
-                                Tọa độ 3D: ({sv.slot.position.join(', ')})
-                              </div>
-                            </td>
-                            <td>
-                              {sv.product ? (
-                                <span className="badge badge--success">Đang trưng bày</span>
-                              ) : (
-                                <span className="badge badge--neutral">Trống</span>
-                              )}
-                            </td>
-                            <td>
-                              {sv.product ? (
-                                <div>
-                                  <strong>{sv.product.name}</strong>
-                                  <div className="table-sub">
-                                    ID: <code>{sv.product.id}</code> ·{' '}
-                                    {formatCurrency(sv.product.price, sv.product.currency)}
-                                  </div>
-                                </div>
-                              ) : (
-                                <span className="table-sub">Chưa gán sản phẩm</span>
-                              )}
-                            </td>
-                            <td className="table-actions">
-                              <button
-                                type="button"
-                                className={`btn btn--sm ${
-                                  isCurrentSlot ? 'btn--primary' : 'btn--secondary'
-                                }`}
-                                onClick={() => setActiveSlotId(sv.slot.slotId)}
-                              >
-                                {sv.product ? 'Đổi SP' : '＋ Gán SP'}
-                              </button>
-                              {sv.product && (
-                                <button
-                                  type="button"
-                                  className="btn btn--danger btn--sm"
-                                  disabled={isBusy}
-                                  onClick={() =>
-                                    handleClearSlot(selectedBoothForSlots.id, sv.slot.slotId)
-                                  }
-                                >
-                                  Gỡ
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
               </section>
 
-              {/* Cột Phải: Bộ chọn Sản phẩm để gán vào Slot đang chọn */}
+              {/* PHẦN C: DANH SÁCH 6 VỊ TRÍ TRƯNG BÀY DẠNG CARD TRỰC QUAN */}
               <section className="dashboard-card">
-                {activeSlotView && (
-                  <>
-                    <div className="slot-selector-header">
-                      <span className="badge badge--success">
-                        ĐANG CHỌN: {activeSlotView.slot.slotId.toUpperCase()}
-                      </span>
-                      <h2>Gán Sản phẩm vào {activeSlotView.slot.label}</h2>
-                      <p className="card-help">
-                        Khu vực: <strong>{getZoneDisplayName(activeSlotView.slot.zone)}</strong> ·
-                        Kích thước tối đa (Rộng × Cao × Sâu):{' '}
-                        <code>{activeSlotView.slot.maxSize.join('m × ')}m</code>
-                      </p>
-                    </div>
+                <div className="slot-section-header">
+                  <div>
+                    <h2>Danh sách 6 Vị trí Trưng bày ({selectedBoothForSlots.name})</h2>
+                    <p className="card-help">
+                      Quản lý chi tiết từng vị trí trên kệ 3D. Hình ảnh sản phẩm bạn chọn sẽ được hiển thị trực tiếp lên khung trưng bày tại đúng vị trí đó.
+                    </p>
+                  </div>
+                </div>
 
-                    {/* Trạng thái hiện tại của Slot đang chọn */}
-                    <div className="slot-current-card">
-                      <div className="slot-current-card__label">Sản phẩm đang đặt tại vị trí này:</div>
-                      {activeSlotView.product ? (
-                        <div className="slot-current-card__content">
-                          {activeSlotView.product.images[0] ? (
-                            <img
-                              src={activeSlotView.product.images[0]}
-                              alt={activeSlotView.product.name}
-                              className="slot-product-thumb"
-                            />
-                          ) : (
-                            <div className="slot-product-thumb slot-product-thumb--placeholder">
-                              📦
-                            </div>
-                          )}
-                          <div className="slot-current-card__info">
-                            <strong>{activeSlotView.product.name}</strong>
-                            <span>
-                              Mã ID: <code>{activeSlotView.product.id}</code>
-                              {activeSlotView.product.sku
-                                ? ` · SKU: ${activeSlotView.product.sku}`
-                                : ''}
-                            </span>
-                            <span className="slot-current-card__price">
-                              {formatCurrency(
-                                activeSlotView.product.price,
-                                activeSlotView.product.currency
-                              )}
-                            </span>
+                <div className="admin-slot-cards-grid">
+                  {currentBoothSlotViews.map((sv) => {
+                    const sid = sv.slot.slotId;
+                    const slotNumLabel = formatSlotNumberLabel(sid);
+                    const friendlyPos = getFriendlySlotPositionName(sid, sv.slot.label);
+                    const zoneLabel = getZoneDisplayName(sv.slot.zone);
+                    const isBusy = savingSlotId === sid;
+
+                    return (
+                      <article
+                        key={sid}
+                        className={`admin-slot-card ${
+                          sv.product ? 'admin-slot-card--occupied' : 'admin-slot-card--empty'
+                        } ${activeSlotId === sid ? 'admin-slot-card--selected' : ''}`}
+                      >
+                        <div className="admin-slot-card__header">
+                          <div>
+                            <span className="admin-slot-card__number">{slotNumLabel}</span>
+                            <h3 className="admin-slot-card__position">{friendlyPos}</h3>
+                            <span className="admin-slot-card__zone">{zoneLabel}</span>
                           </div>
-                          <button
-                            type="button"
-                            className="btn btn--danger btn--sm"
-                            disabled={savingSlotId === activeSlotView.slot.slotId}
-                            onClick={() =>
-                              handleClearSlot(
-                                selectedBoothForSlots.id,
-                                activeSlotView.slot.slotId
-                              )
-                            }
+                          <span
+                            className={`badge ${
+                              sv.product ? 'badge--success' : 'badge--neutral'
+                            }`}
                           >
-                            🗑️ Gỡ khỏi slot
-                          </button>
+                            {sv.product ? 'Đã có sản phẩm' : 'Chưa có sản phẩm'}
+                          </span>
                         </div>
-                      ) : (
-                        <div className="slot-current-card__empty">
-                          Vị trí <code>{activeSlotView.slot.slotId}</code> hiện đang trống. Hãy chọn một sản phẩm bên dưới để đặt lên kệ 3D.
-                        </div>
-                      )}
-                    </div>
 
-                    {/* Tìm kiếm & Danh sách sản phẩm thuộc Gian hàng */}
-                    <div className="form-field" style={{ marginTop: '1rem' }}>
-                      <label htmlFor={`${formIdPrefix}-slot-search`}>
-                        Tìm kiếm sản phẩm thuộc gian hàng {selectedBoothForSlots.name}
+                        {sv.product ? (
+                          <div className="admin-slot-card__product-body">
+                            <div className="admin-slot-card__image-frame">
+                              {sv.product.images?.[0] ? (
+                                <img
+                                  src={sv.product.images[0]}
+                                  alt={sv.product.name}
+                                  className="admin-slot-card__image"
+                                />
+                              ) : (
+                                <div className="admin-slot-card__no-image">
+                                  <span>🖼️</span>
+                                  <small>Chưa có ảnh sản phẩm</small>
+                                </div>
+                              )}
+                            </div>
+                            <div className="admin-slot-card__product-info">
+                              <h4>{sv.product.name}</h4>
+                              <div className="admin-slot-card__price">
+                                {formatCurrency(sv.product.price, sv.product.currency)}
+                              </div>
+                              {sv.product.sku && (
+                                <span className="admin-slot-card__sku">
+                                  Mã SKU: {sv.product.sku}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="admin-slot-card__empty-body">
+                            <div className="admin-slot-card__empty-icon">📦</div>
+                            <strong>Vị trí này chưa có sản phẩm</strong>
+                            <p>
+                              Bấm nút bên dưới để chọn một sản phẩm của gian hàng và đặt lên kệ 3D tại vị trí <strong>{friendlyPos}</strong>.
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="admin-slot-card__actions">
+                          {sv.product ? (
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn--secondary admin-slot-card__action-btn"
+                                disabled={isBusy}
+                                onClick={() => handleOpenProductPickerModal(sv)}
+                              >
+                                🔄 Thay đổi
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--danger admin-slot-card__action-btn"
+                                disabled={isBusy}
+                                onClick={() => setConfirmClearSlotId(sid)}
+                              >
+                                🗑️ Gỡ sản phẩm
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn--primary admin-slot-card__action-btn"
+                              disabled={isBusy}
+                              onClick={() => handleOpenProductPickerModal(sv)}
+                            >
+                              ＋ Thêm sản phẩm
+                            </button>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* MODAL CHỌN SẢN PHẨM CHO SLOT (GÁN MỚI HOẶC THAY ĐỔI) */}
+          {pickerSlotView && selectedBoothForSlots && (
+            <div
+              className="admin-modal-backdrop"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={`${formIdPrefix}-picker-modal-title`}
+              onClick={handleCloseProductPickerModal}
+            >
+              <div
+                className="admin-modal-card"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <header className="admin-modal-card__header">
+                  <div>
+                    <span
+                      className="admin-booth-card__number-badge"
+                      style={{ backgroundColor: selectedBoothForSlots.color }}
+                    >
+                      Gian hàng {selectedBoothIndex + 1} · {selectedBoothForSlots.name}
+                    </span>
+                    <h2 id={`${formIdPrefix}-picker-modal-title`}>
+                      {pickerSlotView.product ? 'Thay đổi sản phẩm tại ' : 'Chọn sản phẩm trưng bày cho '}
+                      {formatSlotNumberLabel(pickerSlotView.slot.slotId)} —{' '}
+                      {getFriendlySlotPositionName(
+                        pickerSlotView.slot.slotId,
+                        pickerSlotView.slot.label
+                      )}
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    className="admin-modal-card__close"
+                    onClick={handleCloseProductPickerModal}
+                    aria-label="Đóng cửa sổ chọn sản phẩm"
+                  >
+                    ✕
+                  </button>
+                </header>
+
+                <div className="admin-modal-card__body">
+                  {pickerSlotView.product && (
+                    <div className="admin-modal-current-banner">
+                      <span>Sản phẩm đang trưng bày hiện tại:</span>
+                      <strong>{pickerSlotView.product.name}</strong>
+                      <span>
+                        ({formatCurrency(pickerSlotView.product.price, pickerSlotView.product.currency)})
+                      </span>
+                    </div>
+                  )}
+
+                  {modalError && (
+                    <div className="alert alert--error" role="alert">
+                      <span>{modalError}</span>
+                    </div>
+                  )}
+
+                  <div className="admin-modal-search-toolbar">
+                    <div className="form-field admin-modal-search-toolbar__field">
+                      <label htmlFor={`${formIdPrefix}-modal-search`}>
+                        Tìm kiếm sản phẩm thuộc gian hàng {selectedBoothForSlots.companyName || selectedBoothForSlots.name}
                       </label>
                       <input
-                        id={`${formIdPrefix}-slot-search`}
+                        id={`${formIdPrefix}-modal-search`}
                         type="search"
-                        placeholder="Nhập tên sản phẩm, mã SKU hoặc ID..."
+                        placeholder="Nhập tên sản phẩm hoặc mã SKU để lọc nhanh..."
                         value={productSearchQuery}
                         onChange={(e) => setProductSearchQuery(e.target.value)}
                       />
                     </div>
-
-                    <div className="slot-product-picker-list">
-                      {boothProductsForSelector.length === 0 ? (
-                        <div className="empty-state">
-                          <p>Không tìm thấy sản phẩm phù hợp trong gian hàng này.</p>
-                          <button
-                            type="button"
-                            className="btn btn--secondary btn--sm"
-                            onClick={() => {
-                              resetProductForm();
-                              setProductForm((prev) => ({
-                                ...prev,
-                                boothId: selectedBoothForSlots.id,
-                              }));
-                              setActiveTab('products');
-                            }}
-                          >
-                            ＋ Tạo sản phẩm mới cho gian hàng này
-                          </button>
-                        </div>
-                      ) : (
-                        boothProductsForSelector.map((prod) => {
-                          const isAssignedHere = activeSlotView.product?.id === prod.id;
-                          const assignedInOtherSlot = currentBoothSlotViews.find(
-                            (s) =>
-                              s.product?.id === prod.id &&
-                              s.slot.slotId !== activeSlotView.slot.slotId
-                          );
-                          const isSaving = savingSlotId === activeSlotView.slot.slotId;
-
-                          return (
-                            <div
-                              key={prod.id}
-                              className={`slot-product-picker-item ${
-                                isAssignedHere ? 'slot-product-picker-item--active' : ''
-                              }`}
-                            >
-                              {prod.images[0] ? (
-                                <img
-                                  src={prod.images[0]}
-                                  alt={prod.name}
-                                  className="slot-product-thumb"
-                                />
-                              ) : (
-                                <div className="slot-product-thumb slot-product-thumb--placeholder">
-                                  📦
-                                </div>
-                              )}
-
-                              <div className="slot-product-picker-item__info">
-                                <strong>{prod.name}</strong>
-                                <div className="table-sub">
-                                  ID: <code>{prod.id}</code>
-                                  {prod.sku ? ` · SKU: ${prod.sku}` : ''} ·{' '}
-                                  <strong>{formatCurrency(prod.price, prod.currency)}</strong>
-                                </div>
-                                {assignedInOtherSlot && (
-                                  <span className="badge badge--neutral">
-                                    Đang đặt tại {assignedInOtherSlot.slot.slotId} (
-                                    {assignedInOtherSlot.slot.label})
-                                  </span>
-                                )}
-                              </div>
-
-                              <div className="slot-product-picker-item__actions">
-                                {isAssignedHere ? (
-                                  <span className="badge badge--success">✓ Đang ở slot này</span>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    className="btn btn--primary btn--sm"
-                                    disabled={isSaving}
-                                    onClick={() =>
-                                      handleAssignProductToSlot(
-                                        selectedBoothForSlots.id,
-                                        activeSlotView.slot.slotId,
-                                        prod.id
-                                      )
-                                    }
-                                  >
-                                    {activeSlotView.product
-                                      ? `Thay vào ${activeSlotView.slot.slotId}`
-                                      : `Gán vào ${activeSlotView.slot.slotId}`}
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-
-                    <div className="dashboard-form__actions" style={{ marginTop: '1.25rem' }}>
+                    <div className="admin-modal-search-toolbar__actions">
                       <button
                         type="button"
                         className="btn btn--secondary btn--sm"
-                        onClick={() => {
-                          resetProductForm();
-                          setProductForm((prev) => ({
-                            ...prev,
-                            boothId: selectedBoothForSlots.id,
-                          }));
-                          setActiveTab('products');
-                        }}
+                        onClick={() =>
+                          handleNavigateToCreateProductFromSlot(
+                            selectedBoothForSlots.id,
+                            pickerSlotView.slot.slotId
+                          )
+                        }
+                        title="Đi đến Kho Sản phẩm để tạo sản phẩm mới cho gian hàng và vị trí này"
                       >
-                        ＋ Thêm sản phẩm mới cho {selectedBoothForSlots.name}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--primary btn--sm"
-                        onClick={onBackToExpo}
-                      >
-                        👁️ Xem kết quả trong Không gian 3D
+                        ＋ Tạo sản phẩm mới
                       </button>
                     </div>
-                  </>
-                )}
-              </section>
+                  </div>
+
+                  <div className="admin-modal-product-list">
+                    {boothProductsForSelector.length === 0 ? (
+                      <div className="empty-state">
+                        <p>Không tìm thấy sản phẩm phù hợp trong kho.</p>
+                        <button
+                          type="button"
+                          className="btn btn--primary btn--sm"
+                          onClick={() =>
+                            handleNavigateToCreateProductFromSlot(
+                              selectedBoothForSlots.id,
+                              pickerSlotView.slot.slotId
+                            )
+                          }
+                        >
+                          ＋ Tạo sản phẩm trong Kho
+                        </button>
+                      </div>
+                    ) : (
+                      boothProductsForSelector.map((prod) => {
+                        const isSelectedChoice = pendingProductIdForSlot === prod.id;
+                        const isCurrentlyInThisSlot = pickerSlotView.product?.id === prod.id;
+                        const assignedInOtherSlot = currentBoothSlotViews.find(
+                          (s) =>
+                            s.product?.id === prod.id &&
+                            s.slot.slotId !== pickerSlotView.slot.slotId
+                        );
+
+                        return (
+                          <label
+                            key={prod.id}
+                            className={`admin-modal-product-option ${
+                              isSelectedChoice ? 'admin-modal-product-option--selected' : ''
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="slotProductChoice"
+                              value={prod.id}
+                              checked={isSelectedChoice}
+                              onChange={() => setPendingProductIdForSlot(prod.id)}
+                            />
+
+                            {prod.images?.[0] ? (
+                              <img
+                                src={prod.images[0]}
+                                alt={prod.name}
+                                className="slot-product-thumb"
+                              />
+                            ) : (
+                              <div className="slot-product-thumb slot-product-thumb--placeholder">
+                                🖼️
+                              </div>
+                            )}
+
+                            <div className="admin-modal-product-option__info">
+                              <strong>{prod.name}</strong>
+                              <div className="admin-modal-product-option__meta">
+                                <span className="admin-modal-product-option__price">
+                                  {formatCurrency(prod.price, prod.currency)}
+                                </span>
+                                {prod.sku && <span>· Mã SKU: {prod.sku}</span>}
+                              </div>
+                              <div className="admin-modal-product-option__badges">
+                                {isCurrentlyInThisSlot && (
+                                  <span className="badge badge--success">
+                                    Đang trưng bày ở vị trí này
+                                  </span>
+                                )}
+                                {assignedInOtherSlot && (
+                                  <span className="badge badge--neutral">
+                                    Đang đặt tại {formatSlotNumberLabel(assignedInOtherSlot.slot.slotId)} (
+                                    {getFriendlySlotPositionName(
+                                      assignedInOtherSlot.slot.slotId,
+                                      assignedInOtherSlot.slot.label
+                                    )}
+                                    )
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="admin-modal-product-option__check">
+                              {isSelectedChoice ? '✓ Đã chọn' : 'Chọn'}
+                            </div>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                <footer className="admin-modal-card__footer">
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    disabled={savingSlotId !== null}
+                    onClick={handleCloseProductPickerModal}
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={!pendingProductIdForSlot || savingSlotId !== null}
+                    onClick={handleConfirmAssignProduct}
+                  >
+                    {savingSlotId === pickerSlotView.slot.slotId
+                      ? '⏳ Đang lưu lên kệ 3D...'
+                      : '✓ Xác nhận lưu'}
+                  </button>
+                </footer>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL XÁC NHẬN GỠ SẢN PHẨM KHỎI SLOT */}
+          {confirmClearSlotView && selectedBoothForSlots && (
+            <div
+              className="admin-modal-backdrop"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={`${formIdPrefix}-confirm-clear-title`}
+              onClick={() => {
+                if (!savingSlotId) setConfirmClearSlotId(null);
+              }}
+            >
+              <div
+                className="admin-modal-card admin-modal-card--compact"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <header className="admin-modal-card__header">
+                  <div>
+                    <h2 id={`${formIdPrefix}-confirm-clear-title`}>
+                      Xác nhận gỡ sản phẩm khỏi kệ trưng bày
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    className="admin-modal-card__close"
+                    onClick={() => setConfirmClearSlotId(null)}
+                    aria-label="Đóng hộp thoại xác nhận"
+                  >
+                    ✕
+                  </button>
+                </header>
+
+                <div className="admin-modal-card__body">
+                  <p style={{ margin: '0 0 12px' }}>
+                    Bạn có chắc muốn gỡ sản phẩm bên dưới khỏi vị trí{' '}
+                    <strong>
+                      {formatSlotNumberLabel(confirmClearSlotView.slot.slotId)} —{' '}
+                      {getFriendlySlotPositionName(
+                        confirmClearSlotView.slot.slotId,
+                        confirmClearSlotView.slot.label
+                      )}
+                    </strong>{' '}
+                    của <strong>{selectedBoothForSlots.name}</strong>?
+                  </p>
+
+                  {confirmClearSlotView.product && (
+                    <div className="slot-current-card__content" style={{ background: '#f8fafc', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                      {confirmClearSlotView.product.images?.[0] ? (
+                        <img
+                          src={confirmClearSlotView.product.images[0]}
+                          alt={confirmClearSlotView.product.name}
+                          className="slot-product-thumb"
+                        />
+                      ) : (
+                        <div className="slot-product-thumb slot-product-thumb--placeholder">
+                          📦
+                        </div>
+                      )}
+                      <div className="slot-current-card__info">
+                        <strong>{confirmClearSlotView.product.name}</strong>
+                        <span className="slot-current-card__price">
+                          {formatCurrency(
+                            confirmClearSlotView.product.price,
+                            confirmClearSlotView.product.currency
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="card-help" style={{ marginTop: '12px', marginBottom: 0 }}>
+                    💡 <em>Lưu ý:</em> Thao tác này chỉ lấy sản phẩm xuống khỏi kệ trưng bày 3D để vị trí trống trở lại. Sản phẩm <strong>không bị xóa</strong> khỏi Kho sản phẩm của gian hàng.
+                  </p>
+                </div>
+
+                <footer className="admin-modal-card__footer">
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    disabled={savingSlotId !== null}
+                    onClick={() => setConfirmClearSlotId(null)}
+                  >
+                    Giữ lại trên kệ
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--danger"
+                    disabled={savingSlotId !== null}
+                    onClick={handleConfirmClearSlot}
+                  >
+                    {savingSlotId === confirmClearSlotView.slot.slotId
+                      ? '⏳ Đang gỡ sản phẩm...'
+                      : '🗑️ Xác nhận gỡ khỏi kệ'}
+                  </button>
+                </footer>
+              </div>
             </div>
           )}
         </div>
@@ -1448,351 +1928,259 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           TAB 3: QUẢN LÝ KHO SẢN PHẨM
          ==================================================================== */}
       {activeTab === 'products' && (
-        <div className="dashboard-grid">
-          <section className="dashboard-card">
-            <h2>{editingProductId ? 'Chỉnh sửa Sản phẩm' : 'Thêm / Lưu Sản phẩm'}</h2>
-
-            {extractionNotes.length > 0 && (
-              <div className="extraction-notes">
-                <strong>Kết quả trích xuất tự động:</strong>
-                <ul>
-                  {extractionNotes.map((n, idx) => (
-                    <li key={idx}>{n}</li>
-                  ))}
-                </ul>
+        <div className="admin-products-view">
+          {returnToSlotContext && (
+            <div className="admin-slot-return-banner" role="region" aria-label="Ngữ cảnh quay lại chọn sản phẩm cho Slot">
+              <div className="admin-slot-return-banner__info">
+                <span className="badge badge--success">
+                  🎯 Đang tạo sản phẩm cho {formatSlotNumberLabel(returnToSlotContext.slotId)} —{' '}
+                  {getFriendlySlotPositionName(returnToSlotContext.slotId, '')}
+                </span>
+                <strong>
+                  Gian hàng:{' '}
+                  {booths.find((b) => b.id === returnToSlotContext.boothId)?.name ||
+                    returnToSlotContext.boothId}
+                </strong>
+                <span>
+                  Sau khi lưu sản phẩm vào Kho bên dưới, bấm nút bên phải để quay lại đúng popup chọn sản phẩm của{' '}
+                  <strong>{formatSlotNumberLabel(returnToSlotContext.slotId)}</strong>.
+                </span>
               </div>
-            )}
-
-            <form onSubmit={handleSaveProduct} className="dashboard-form">
-              <div className="form-field">
-                <label htmlFor={`${formIdPrefix}-pbooth`}>Thuộc Gian hàng *</label>
-                <select
-                  id={`${formIdPrefix}-pbooth`}
-                  name="boothId"
-                  required
-                  value={productForm.boothId}
-                  onChange={(e) => setProductForm({ ...productForm, boothId: e.target.value })}
-                >
-                  {booths.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} ({b.companyName || b.category})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-field">
-                <label htmlFor={`${formIdPrefix}-pname`}>Tên sản phẩm *</label>
-                <input
-                  id={`${formIdPrefix}-pname`}
-                  name="productName"
-                  type="text"
-                  required
-                  value={productForm.name}
-                  onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
-                />
-              </div>
-
-              <div className="form-row-3">
-                <div className="form-field">
-                  <label htmlFor={`${formIdPrefix}-pprice`}>Giá bán *</label>
-                  <input
-                    id={`${formIdPrefix}-pprice`}
-                    name="price"
-                    type="number"
-                    min={0}
-                    step="any"
-                    required
-                    value={productForm.price}
-                    onChange={(e) =>
-                      setProductForm({ ...productForm, price: Number(e.target.value) })
-                    }
-                  />
-                </div>
-                <div className="form-field">
-                  <label htmlFor={`${formIdPrefix}-pcurr`}>Đơn vị tiền tệ</label>
-                  <input
-                    id={`${formIdPrefix}-pcurr`}
-                    name="currency"
-                    type="text"
-                    value={productForm.currency}
-                    onChange={(e) => setProductForm({ ...productForm, currency: e.target.value })}
-                  />
-                </div>
-                <div className="form-field">
-                  <label htmlFor={`${formIdPrefix}-psku`}>Mã SKU</label>
-                  <input
-                    id={`${formIdPrefix}-psku`}
-                    name="sku"
-                    type="text"
-                    autoCorrect="off"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    value={productForm.sku || ''}
-                    onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="form-field">
-                <label htmlFor={`${formIdPrefix}-psource`}>URL Website nguồn (Mua hàng) *</label>
-                <input
-                  id={`${formIdPrefix}-psource`}
-                  name="sourceUrl"
-                  type="url"
-                  required
-                  autoCorrect="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  value={productForm.sourceUrl}
-                  onChange={(e) => setProductForm({ ...productForm, sourceUrl: e.target.value })}
-                />
-              </div>
-
-              <div className="form-field">
-                <label htmlFor={`${formIdPrefix}-pimgs`}>
-                  Danh sách URL hình ảnh (Mỗi dòng 1 URL)
-                </label>
-                <textarea
-                  id={`${formIdPrefix}-pimgs`}
-                  name="images"
-                  rows={3}
-                  value={imagesInput}
-                  onChange={(e) => setImagesInput(e.target.value)}
-                />
-              </div>
-
-              <div className="form-field">
-                <label htmlFor={`${formIdPrefix}-pvideo`}>Video URL (MP4 tùy chọn)</label>
-                <input
-                  id={`${formIdPrefix}-pvideo`}
-                  name="videoUrl"
-                  type="url"
-                  autoCorrect="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  value={productForm.videoUrl || ''}
-                  onChange={(e) => setProductForm({ ...productForm, videoUrl: e.target.value })}
-                />
-              </div>
-
-              <div className="form-field">
-                <label htmlFor={`${formIdPrefix}-pdesc`}>Mô tả sản phẩm</label>
-                <textarea
-                  id={`${formIdPrefix}-pdesc`}
-                  name="productDescription"
-                  rows={4}
-                  value={productForm.description}
-                  onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
-                />
-              </div>
-
-              <div className="dashboard-form__actions">
-                {editingProductId && (
-                  <button type="button" className="btn btn--ghost" onClick={resetProductForm}>
-                    Hủy chỉnh sửa
-                  </button>
-                )}
-                <button type="submit" className="btn btn--primary">
-                  {editingProductId ? 'Lưu cập nhật sản phẩm' : '＋ Lưu sản phẩm vào gian hàng'}
-                </button>
-              </div>
-            </form>
-          </section>
-
-          <section className="dashboard-card">
-            <h2>Danh sách Sản phẩm ({products.length})</h2>
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Sản phẩm</th>
-                    <th>Gian hàng</th>
-                    <th>Vị trí Slot</th>
-                    <th>Giá</th>
-                    <th>Thao tác</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {products.map((p) => {
-                    const booth = booths.find((b) => b.id === p.boothId);
-                    const assignedSlot = slotAssignments.find(
-                      (a) => a.boothId === p.boothId && a.productId === p.id
-                    );
-                    return (
-                      <tr key={p.id}>
-                        <td>
-                          <strong>{p.name}</strong>
-                          <div className="table-sub">
-                            <code>{p.id}</code> ·{' '}
-                            <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer">
-                              Nguồn ↗
-                            </a>
-                          </div>
-                        </td>
-                        <td>{booth?.name || p.boothId}</td>
-                        <td>
-                          {assignedSlot ? (
-                            <span className="badge badge--success">
-                              {assignedSlot.slotId}
-                            </span>
-                          ) : (
-                            <span className="badge badge--neutral">Chưa gán slot</span>
-                          )}
-                        </td>
-                        <td>{formatCurrency(p.price, p.currency)}</td>
-                        <td className="table-actions">
-                          <button
-                            type="button"
-                            className="btn btn--secondary btn--sm"
-                            onClick={() => handleEditProduct(p)}
-                          >
-                            Sửa
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--danger btn--sm"
-                            onClick={() => handleDeleteProduct(p.id, p.name)}
-                          >
-                            Xóa
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
-      )}
-
-      {/* ====================================================================
-          TAB 4: IMPORT SẢN PHẨM ĐA NGUỒN
-         ==================================================================== */}
-      {activeTab === 'import' && (
-        <div className="dashboard-grid">
-          <section className="dashboard-card">
-            <h2>1. Trích xuất sản phẩm từ URL Website bên ngoài</h2>
-            <p className="card-help">
-              Hệ thống đọc dữ liệu có cấu trúc <code>schema.org/Product</code> (JSON-LD) và thẻ{' '}
-              <code>Open Graph</code> từ URL công khai. Có kiểm soát bảo mật chống SSRF (chặn
-              localhost/private IP, giới hạn dung lượng và thời gian chờ).
-            </p>
-
-            <form onSubmit={handleExtractFromUrl} className="dashboard-form">
-              <div className="form-field">
-                <label htmlFor={`${formIdPrefix}-extract-url`}>
-                  Dán URL trang sản phẩm (HTTP/HTTPS công khai) *
-                </label>
-                <input
-                  id={`${formIdPrefix}-extract-url`}
-                  name="extractUrl"
-                  type="url"
-                  required
-                  autoCorrect="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  value={extractUrlInput}
-                  onChange={(e) => setExtractUrlInput(e.target.value)}
-                />
-              </div>
-
-              <div className="dashboard-form__actions">
+              <div className="admin-slot-return-banner__actions">
                 <button
-                  type="submit"
-                  className="btn btn--primary"
-                  disabled={extractingUrl}
+                  type="button"
+                  className="btn btn--primary btn--sm"
+                  onClick={() => handleReturnToSlotFromProductStock()}
                 >
-                  {extractingUrl ? '⏳ Đang phân tích URL...' : '🔍 Trích xuất & Chỉnh sửa trước khi lưu'}
+                  ← Quay lại chọn sản phẩm cho {formatSlotNumberLabel(returnToSlotContext.slotId)}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={() => setReturnToSlotContext(null)}
+                >
+                  Đóng ngữ cảnh
                 </button>
               </div>
-            </form>
-          </section>
+            </div>
+          )}
 
-          <section className="dashboard-card">
-            <h2>2. Import hàng loạt qua JSON hoặc CSV</h2>
-            <p className="card-help">
-              Dành cho danh mục sản phẩm xuất từ Shopify, WooCommerce, Sapo, Haravan hoặc file dữ
-              liệu chuẩn.
-            </p>
+          <div className="dashboard-grid">
+            <section className="dashboard-card">
+              <h2>{editingProductId ? 'Chỉnh sửa Sản phẩm' : 'Thêm / Lưu Sản phẩm'}</h2>
 
-            <form onSubmit={handleBatchImport} className="dashboard-form">
-              <div className="form-row-2">
+              <form onSubmit={handleSaveProduct} className="dashboard-form">
                 <div className="form-field">
-                  <label htmlFor={`${formIdPrefix}-batch-booth`}>Gán vào Gian hàng *</label>
+                  <label htmlFor={`${formIdPrefix}-pbooth`}>Thuộc Gian hàng *</label>
                   <select
-                    id={`${formIdPrefix}-batch-booth`}
-                    name="batchBoothId"
+                    id={`${formIdPrefix}-pbooth`}
+                    name="boothId"
                     required
-                    value={batchBoothId}
-                    onChange={(e) => setBatchBoothId(e.target.value)}
+                    value={productForm.boothId}
+                    onChange={(e) => setProductForm({ ...productForm, boothId: e.target.value })}
                   >
                     {booths.map((b) => (
                       <option key={b.id} value={b.id}>
-                        {b.name}
+                        {b.name} ({b.companyName || b.category})
                       </option>
                     ))}
                   </select>
                 </div>
 
-                <fieldset className="form-fieldset">
-                  <legend>Định dạng dữ liệu</legend>
-                  <div className="radio-inline-group">
-                    <input
-                      id={`${formIdPrefix}-fmt-json`}
-                      type="radio"
-                      name="batchFormat"
-                      value="json"
-                      checked={batchFormat === 'json'}
-                      onChange={() => {
-                        setBatchFormat('json');
-                        setBatchContent(SAMPLE_IMPORT_JSON);
-                      }}
-                    />
-                    <label htmlFor={`${formIdPrefix}-fmt-json`}>JSON Array</label>
+                <div className="form-field">
+                  <label htmlFor={`${formIdPrefix}-pname`}>Tên sản phẩm *</label>
+                  <input
+                    id={`${formIdPrefix}-pname`}
+                    name="productName"
+                    type="text"
+                    required
+                    value={productForm.name}
+                    onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                  />
+                </div>
 
+                <div className="form-row-3">
+                  <div className="form-field">
+                    <label htmlFor={`${formIdPrefix}-pprice`}>Giá bán *</label>
                     <input
-                      id={`${formIdPrefix}-fmt-csv`}
-                      type="radio"
-                      name="batchFormat"
-                      value="csv"
-                      checked={batchFormat === 'csv'}
-                      onChange={() => {
-                        setBatchFormat('csv');
-                        setBatchContent(SAMPLE_IMPORT_CSV);
-                      }}
+                      id={`${formIdPrefix}-pprice`}
+                      name="price"
+                      type="number"
+                      min={0}
+                      step="any"
+                      required
+                      value={productForm.price}
+                      onChange={(e) =>
+                        setProductForm({ ...productForm, price: Number(e.target.value) })
+                      }
                     />
-                    <label htmlFor={`${formIdPrefix}-fmt-csv`}>CSV</label>
                   </div>
-                </fieldset>
-              </div>
+                  <div className="form-field">
+                    <label htmlFor={`${formIdPrefix}-pcurr`}>Đơn vị tiền tệ</label>
+                    <input
+                      id={`${formIdPrefix}-pcurr`}
+                      name="currency"
+                      type="text"
+                      value={productForm.currency}
+                      onChange={(e) => setProductForm({ ...productForm, currency: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor={`${formIdPrefix}-psku`}>Mã SKU</label>
+                    <input
+                      id={`${formIdPrefix}-psku`}
+                      name="sku"
+                      type="text"
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      value={productForm.sku || ''}
+                      onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })}
+                    />
+                  </div>
+                </div>
 
-              <div className="form-field">
-                <label htmlFor={`${formIdPrefix}-batch-content`}>
-                  Nội dung {batchFormat.toUpperCase()} *
-                </label>
-                <textarea
-                  id={`${formIdPrefix}-batch-content`}
-                  name="batchContent"
-                  rows={8}
-                  required
-                  value={batchContent}
-                  onChange={(e) => setBatchContent(e.target.value)}
-                />
-              </div>
+                <div className="form-field">
+                  <label htmlFor={`${formIdPrefix}-psource`}>URL Website nguồn (Mua hàng) *</label>
+                  <input
+                    id={`${formIdPrefix}-psource`}
+                    name="sourceUrl"
+                    type="url"
+                    required
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    value={productForm.sourceUrl}
+                    onChange={(e) => setProductForm({ ...productForm, sourceUrl: e.target.value })}
+                  />
+                </div>
 
-              <div className="dashboard-form__actions">
-                <button
-                  type="submit"
-                  className="btn btn--primary"
-                  disabled={importingBatch}
-                >
-                  {importingBatch ? '⏳ Đang import...' : '📥 Thực hiện Import vào Gian hàng'}
-                </button>
+                <div className="form-field">
+                  <label htmlFor={`${formIdPrefix}-pimgs`}>
+                    Danh sách URL hình ảnh (Mỗi dòng 1 URL)
+                  </label>
+                  <textarea
+                    id={`${formIdPrefix}-pimgs`}
+                    name="images"
+                    rows={3}
+                    value={imagesInput}
+                    onChange={(e) => setImagesInput(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-field">
+                  <label htmlFor={`${formIdPrefix}-pvideo`}>Video URL (MP4 tùy chọn)</label>
+                  <input
+                    id={`${formIdPrefix}-pvideo`}
+                    name="videoUrl"
+                    type="url"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    value={productForm.videoUrl || ''}
+                    onChange={(e) => setProductForm({ ...productForm, videoUrl: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-field">
+                  <label htmlFor={`${formIdPrefix}-pdesc`}>Mô tả sản phẩm</label>
+                  <textarea
+                    id={`${formIdPrefix}-pdesc`}
+                    name="productDescription"
+                    rows={4}
+                    value={productForm.description}
+                    onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+                  />
+                </div>
+
+                <div className="dashboard-form__actions">
+                  {editingProductId && (
+                    <button type="button" className="btn btn--ghost" onClick={() => resetProductForm()}>
+                      Hủy chỉnh sửa
+                    </button>
+                  )}
+                  <button type="submit" className="btn btn--primary">
+                    {editingProductId ? 'Lưu cập nhật sản phẩm' : '＋ Lưu sản phẩm vào gian hàng'}
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section className="dashboard-card">
+              <h2>Danh sách Sản phẩm ({products.length})</h2>
+              <div className="admin-table-wrap">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Sản phẩm</th>
+                      <th>Gian hàng</th>
+                      <th>Vị trí Slot</th>
+                      <th>Giá</th>
+                      <th>Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {products.map((p) => {
+                      const booth = booths.find((b) => b.id === p.boothId);
+                      const assignedSlot = slotAssignments.find(
+                        (a) => a.boothId === p.boothId && a.productId === p.id
+                      );
+                      return (
+                        <tr key={p.id}>
+                          <td>
+                            <strong>{p.name}</strong>
+                            <div className="table-sub">
+                              <code>{p.id}</code> ·{' '}
+                              <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer">
+                                Nguồn ↗
+                              </a>
+                            </div>
+                          </td>
+                          <td>{booth?.name || p.boothId}</td>
+                          <td>
+                            {assignedSlot ? (
+                              <span className="badge badge--success">
+                                {assignedSlot.slotId}
+                              </span>
+                            ) : (
+                              <span className="badge badge--neutral">Chưa gán slot</span>
+                            )}
+                          </td>
+                          <td>{formatCurrency(p.price, p.currency)}</td>
+                          <td className="table-actions">
+                            {returnToSlotContext && returnToSlotContext.boothId === p.boothId && (
+                              <button
+                                type="button"
+                                className="btn btn--primary btn--sm"
+                                onClick={() => handleReturnToSlotFromProductStock(p.id)}
+                                title="Quay lại popup chọn sản phẩm của Slot với sản phẩm này được chọn sẵn"
+                              >
+                                Chọn cho {formatSlotNumberLabel(returnToSlotContext.slotId)}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="btn btn--secondary btn--sm"
+                              onClick={() => handleEditProduct(p)}
+                            >
+                              Sửa
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--danger btn--sm"
+                              onClick={() => handleDeleteProduct(p.id, p.name)}
+                            >
+                              Xóa
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            </form>
-          </section>
+            </section>
+          </div>
         </div>
       )}
     </main>

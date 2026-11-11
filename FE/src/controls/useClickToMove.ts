@@ -20,6 +20,7 @@ export interface UseClickToMoveOptions {
   booths: Booth[];
   initialPosition?: { x: number; z: number; rotationY?: number };
   disabled?: boolean;
+  cameraYawRef?: React.MutableRefObject<number | null>;
   onTransformChange?: (transform: PlayerTransform) => void;
   onReachBooth?: (booth: Booth) => void;
 }
@@ -28,6 +29,7 @@ export function useClickToMove({
   booths,
   initialPosition = CENTRAL_SPAWN_POINT,
   disabled = false,
+  cameraYawRef,
   onTransformChange,
   onReachBooth,
 }: UseClickToMoveOptions) {
@@ -137,8 +139,25 @@ export function useClickToMove({
       let nextState: 'idle' | 'walk' = 'idle';
 
       if (manualLen > 0.05) {
-        const normX = moveX / Math.max(1, manualLen);
-        const normZ = moveZ / Math.max(1, manualLen);
+        const localX = moveX / Math.max(1, manualLen);
+        const localZ = moveZ / Math.max(1, manualLen);
+        let normX = localX;
+        let normZ = localZ;
+
+        const activeCamYaw = cameraYawRef?.current;
+        if (typeof activeCamYaw === 'number' && Number.isFinite(activeCamYaw)) {
+          // Camera-relative movement in Third-Person Explore Mode:
+          // Forward unit vector: (sin(yaw), cos(yaw)), Right unit vector: (-cos(yaw), sin(yaw))
+          const fwdX = Math.sin(activeCamYaw);
+          const fwdZ = Math.cos(activeCamYaw);
+          const rightX = -Math.cos(activeCamYaw);
+          const rightZ = Math.sin(activeCamYaw);
+          const forwardAmount = -localZ;
+          const rightAmount = localX;
+          normX = forwardAmount * fwdX + rightAmount * rightX;
+          normZ = forwardAmount * fwdZ + rightAmount * rightZ;
+        }
+
         const desiredX = current.x + normX * PLAYER_SPEED * dt;
         const desiredZ = current.z + normZ * PLAYER_SPEED * dt;
 
@@ -230,7 +249,7 @@ export function useClickToMove({
         });
       }
     },
-    [keysPressedRef]
+    [keysPressedRef, cameraYawRef]
   );
 
   return {

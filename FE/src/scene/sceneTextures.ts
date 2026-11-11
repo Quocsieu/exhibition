@@ -23,6 +23,7 @@ function createCanvasElement(width: number, height: number): HTMLCanvasElement {
 function registerTrackedTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
   texture.needsUpdate = true;
   activeCanvasTextureCount++;
 
@@ -159,7 +160,7 @@ export function createBoothSignTexture(options: {
   active: boolean;
   theme?: BoothVisualTheme;
 }): THREE.CanvasTexture {
-  const canvas = createCanvasElement(768, 256);
+  const canvas = createCanvasElement(896, 288);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
@@ -167,36 +168,36 @@ export function createBoothSignTexture(options: {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
-    createRoundRectPath(ctx, 14, 14, 740, 228, 32);
+    createRoundRectPath(ctx, 16, 16, 864, 256, 36);
     ctx.fillStyle = options.active ? pal.bgActive : pal.bg;
     ctx.fill();
-    ctx.lineWidth = options.active ? 10 : 6;
+    ctx.lineWidth = options.active ? 11 : 7;
     ctx.strokeStyle = options.active ? '#fbbf24' : pal.border;
     ctx.stroke();
     ctx.restore();
 
     // Decorative top accent bar
     ctx.save();
-    createRoundRectPath(ctx, 38, 28, 692, 12, 6);
+    createRoundRectPath(ctx, 44, 32, 808, 12, 6);
     ctx.fillStyle = pal.border;
     ctx.fill();
     ctx.restore();
 
-    ctx.font = '700 24px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '800 26px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = pal.textSub;
     ctx.fillText(
-      truncateText(`${pal.icon} ${options.category.toUpperCase()}`, 38),
+      truncateText(`${pal.icon} ${options.category.toUpperCase()}`, 40),
       canvas.width / 2,
-      80
+      88
     );
 
-    ctx.font = '800 42px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '900 48px Inter, Segoe UI, Arial, sans-serif';
     ctx.fillStyle = pal.textMain;
-    ctx.fillText(truncateText(options.name, 26), canvas.width / 2, 136);
+    ctx.fillText(truncateText(options.name.toUpperCase(), 26), canvas.width / 2, 152);
 
     ctx.save();
-    createRoundRectPath(ctx, 134, 160, 500, 52, 26);
+    createRoundRectPath(ctx, 158, 182, 580, 58, 29);
     ctx.fillStyle = options.active ? pal.border : pal.badgeBg;
     ctx.fill();
     ctx.lineWidth = 2.5;
@@ -204,16 +205,18 @@ export function createBoothSignTexture(options: {
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '700 23px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '800 25px Inter, Segoe UI, Arial, sans-serif';
     ctx.fillStyle = pal.badgeText;
     ctx.fillText(
-      `📦 ${options.productCount} sản phẩm · Bấm để vào Cửa hàng`,
+      `📦 ${options.productCount} sản phẩm · Bấm để xem Gian hàng`,
       canvas.width / 2,
-      194
+      220
     );
   }
 
-  return registerTrackedTexture(canvas);
+  const texture = registerTrackedTexture(canvas);
+  texture.anisotropy = 8;
+  return texture;
 }
 
 export function createBoothFasciaTexture(options: {
@@ -222,7 +225,7 @@ export function createBoothFasciaTexture(options: {
   color: string;
   theme?: BoothVisualTheme;
 }): THREE.CanvasTexture {
-  const canvas = createCanvasElement(960, 160);
+  const canvas = createCanvasElement(1024, 192);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
@@ -231,26 +234,28 @@ export function createBoothFasciaTexture(options: {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.fillStyle = pal.border;
-    ctx.fillRect(0, 0, 42, canvas.height);
-    ctx.fillRect(canvas.width - 42, 0, 42, canvas.height);
-    ctx.fillRect(0, 0, canvas.width, 10);
-    ctx.fillRect(0, canvas.height - 12, canvas.width, 12);
+    ctx.fillRect(0, 0, 44, canvas.height);
+    ctx.fillRect(canvas.width - 44, 0, 44, canvas.height);
+    ctx.fillRect(0, 0, canvas.width, 12);
+    ctx.fillRect(0, canvas.height - 14, canvas.width, 14);
 
-    ctx.font = '800 46px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '900 52px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = pal.textMain;
     ctx.fillText(
       truncateText(`${pal.icon} ${options.name.toUpperCase()}`, 28),
       canvas.width / 2,
-      78
+      94
     );
 
-    ctx.font = '700 25px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '800 28px Inter, Segoe UI, Arial, sans-serif';
     ctx.fillStyle = pal.textSub;
-    ctx.fillText(truncateText(`★ ${options.category.toUpperCase()} ★`, 42), canvas.width / 2, 122);
+    ctx.fillText(truncateText(`★ ${options.category.toUpperCase()} ★`, 44), canvas.width / 2, 148);
   }
 
-  return registerTrackedTexture(canvas);
+  const texture = registerTrackedTexture(canvas);
+  texture.anisotropy = 8;
+  return texture;
 }
 
 export function createBoothPosterTexture(options: {
@@ -955,9 +960,46 @@ export function createEnterpriseBackdropTexture(options: {
   return texture;
 }
 
+const productImageCache = new Map<string, HTMLImageElement>();
+
+function rememberCachedProductImage(url: string, img: HTMLImageElement): void {
+  if (productImageCache.size >= 64) {
+    const oldestKey = productImageCache.keys().next().value;
+    if (oldestKey) {
+      productImageCache.delete(oldestKey);
+    }
+  }
+  productImageCache.set(url, img);
+}
+
+/**
+ * Draws an HTMLImageElement inside a target box while strictly preserving its natural
+ * aspect ratio (object-contain), with a soft studio backdrop so photos are never stretched.
+ */
+export function computeAspectFitRect(
+  srcWidth: number,
+  srcHeight: number,
+  boxX: number,
+  boxY: number,
+  boxWidth: number,
+  boxHeight: number,
+  padding = 0
+): { x: number; y: number; width: number; height: number } {
+  const safeSrcW = Math.max(1, srcWidth);
+  const safeSrcH = Math.max(1, srcHeight);
+  const availW = Math.max(1, boxWidth - padding * 2);
+  const availH = Math.max(1, boxHeight - padding * 2);
+  const scale = Math.min(availW / safeSrcW, availH / safeSrcH);
+  const width = Math.max(1, Math.round(safeSrcW * scale));
+  const height = Math.max(1, Math.round(safeSrcH * scale));
+  const x = Math.round(boxX + (boxWidth - width) / 2);
+  const y = Math.round(boxY + (boxHeight - height) / 2);
+  return { x, y, width, height };
+}
+
 /**
  * Creates a high-contrast 3D Product Display Stand Card texture for a product assigned to a slot.
- * Automatically draws the product's primary image when available.
+ * Renders the real product photo prominently while preserving its true aspect ratio.
  */
 export function createProductDisplayCardTexture(options: {
   slotLabel: string;
@@ -968,72 +1010,118 @@ export function createProductDisplayCardTexture(options: {
   accentColor: string;
   selected: boolean;
 }): THREE.CanvasTexture {
-  const canvas = createCanvasElement(512, 384);
+  const W = 1024;
+  const H = 768;
+  const canvas = createCanvasElement(W, H);
   const ctx = canvas.getContext('2d');
   const texture = registerTrackedTexture(canvas);
+  texture.anisotropy = 8;
+  const trimmedUrl = (options.imageUrl || '').trim();
 
-  const renderCard = (loadedImg?: HTMLImageElement) => {
-    if (!ctx) return;
-    ctx.clearRect(0, 0, 512, 384);
+  let isDisposed = false;
+  const baseDispose = texture.dispose.bind(texture);
+  texture.dispose = () => {
+    isDisposed = true;
+    baseDispose();
+  };
 
-    // Card background
+  const slotCodeMatch = options.slotLabel.match(/SLOT[_\s-]*(\d+)/i);
+  const shortSlotBadge = slotCodeMatch ? `SLOT ${slotCodeMatch[1]}` : truncateText(options.slotLabel, 12);
+
+  const renderCard = (
+    loadedImg?: HTMLImageElement,
+    imageStatus: 'loaded' | 'loading' | 'missing' | 'error' = 'missing'
+  ) => {
+    if (!ctx || isDisposed) return;
+    ctx.clearRect(0, 0, W, H);
+
+    // 1. Outer Display Stand Frame Background
     ctx.save();
-    createRoundRectPath(ctx, 10, 10, 492, 364, 24);
-    ctx.fillStyle = options.selected ? '#0f172a' : '#111827';
+    createRoundRectPath(ctx, 4, 4, W - 8, H - 8, 28);
+    ctx.fillStyle = '#0f172a';
     ctx.fill();
-    ctx.lineWidth = options.selected ? 10 : 6;
+    ctx.lineWidth = options.selected ? 12 : 7;
     ctx.strokeStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
     ctx.stroke();
     ctx.restore();
 
-    // Top slot header strip
+    // 2. Enlarged Prominent Studio Photo Viewport (Occupies ~83% of the entire display board height)
+    const frameX = 16;
+    const frameY = 14;
+    const frameW = W - 32; // 992
+    const frameH = 636;
+
     ctx.save();
-    createRoundRectPath(ctx, 26, 24, 460, 44, 12);
-    ctx.fillStyle = options.selected ? '#fbbf24' : options.accentColor || '#0ea5e9';
+    createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 20);
+    const studioGrad = ctx.createLinearGradient(frameX, frameY, frameX, frameY + frameH);
+    studioGrad.addColorStop(0, '#ffffff');
+    studioGrad.addColorStop(1, '#f1f5f9');
+    ctx.fillStyle = studioGrad;
     ctx.fill();
     ctx.restore();
 
-    ctx.font = '800 22px Inter, Segoe UI, Arial, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillStyle = options.selected ? '#0f172a' : '#ffffff';
-    ctx.fillText(truncateText(options.slotLabel.toUpperCase(), 26), 44, 54);
+    if (loadedImg && imageStatus === 'loaded') {
+      const natW = loadedImg.naturalWidth || loadedImg.width || 800;
+      const natH = loadedImg.naturalHeight || loadedImg.height || 600;
 
-    if (options.sku) {
-      ctx.textAlign = 'right';
-      ctx.font = '700 18px Inter, Segoe UI, Arial, sans-serif';
-      ctx.fillText(truncateText(options.sku, 14), 470, 53);
-    }
-
-    // Center visual preview frame
-    ctx.save();
-    createRoundRectPath(ctx, 26, 80, 460, 176, 16);
-    const frameGrad = ctx.createLinearGradient(26, 80, 486, 256);
-    frameGrad.addColorStop(0, '#1e293b');
-    frameGrad.addColorStop(1, '#0f172a');
-    ctx.fillStyle = frameGrad;
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
-    ctx.stroke();
-    ctx.restore();
-
-    if (loadedImg) {
       ctx.save();
-      createRoundRectPath(ctx, 28, 82, 456, 172, 14);
+      createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 20);
       ctx.clip();
-      ctx.drawImage(loadedImg, 28, 82, 456, 172);
+
+      // Subtle studio backdrop fill so portrait/square photos never leave harsh blank bars
+      ctx.save();
+      ctx.globalAlpha = 0.24;
+      const coverScale = Math.max(frameW / Math.max(1, natW), frameH / Math.max(1, natH));
+      const coverW = natW * coverScale;
+      const coverH = natH * coverScale;
+      ctx.drawImage(
+        loadedImg,
+        frameX + (frameW - coverW) / 2,
+        frameY + (frameH - coverH) / 2,
+        coverW,
+        coverH
+      );
+      ctx.restore();
+
+      // Minimal 6px padding so the true-aspect-ratio product photo fills the maximum viewport area
+      const fit = computeAspectFitRect(natW, natH, frameX, frameY, frameW, frameH, 6);
+      ctx.save();
+      ctx.shadowColor = 'rgba(15, 23, 42, 0.26)';
+      ctx.shadowBlur = 18;
+      ctx.shadowOffsetY = 4;
+      createRoundRectPath(ctx, fit.x, fit.y, fit.width, fit.height, 14);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.restore();
+
+      // True aspect-ratio product photo (100% unstretched, uncropped)
+      ctx.save();
+      createRoundRectPath(ctx, fit.x, fit.y, fit.width, fit.height, 14);
+      ctx.clip();
+      ctx.drawImage(loadedImg, fit.x, fit.y, fit.width, fit.height);
+      ctx.restore();
+
       ctx.restore();
     } else {
-      // Stylized product showcase graphic placeholder
+      // Honest non-deceptive fallback when image is loading, missing, or broken
+      ctx.save();
+      createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 20);
+      const fallbackGrad = ctx.createLinearGradient(frameX, frameY, frameX + frameW, frameY + frameH);
+      fallbackGrad.addColorStop(0, '#1e293b');
+      fallbackGrad.addColorStop(1, '#0f172a');
+      ctx.fillStyle = fallbackGrad;
+      ctx.fill();
+      ctx.restore();
+
       ctx.save();
       ctx.beginPath();
-      ctx.arc(256, 168, 54, 0, Math.PI * 2);
+      ctx.arc(W / 2, frameY + frameH / 2 - 28, 64, 0, Math.PI * 2);
       ctx.fillStyle = options.accentColor || '#0ea5e9';
       ctx.globalAlpha = 0.22;
       ctx.fill();
       ctx.restore();
 
-      ctx.font = '800 44px Inter, Segoe UI, Arial, sans-serif';
+      ctx.font = '800 46px Inter, Segoe UI, Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#f8fafc';
       const initials = options.name
@@ -1042,47 +1130,93 @@ export function createProductDisplayCardTexture(options: {
         .slice(0, 2)
         .map((w) => w[0]?.toUpperCase())
         .join('');
-      ctx.fillText(initials || '3D', 256, 184);
+      ctx.fillText(initials || 'SP', W / 2, frameY + frameH / 2 - 12);
+
+      ctx.font = '700 28px Inter, Segoe UI, Arial, sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      const statusText =
+        imageStatus === 'loading'
+          ? 'Đang tải ảnh sản phẩm...'
+          : imageStatus === 'error'
+            ? 'Không tải được ảnh sản phẩm'
+            : 'Chưa có ảnh sản phẩm';
+      ctx.fillText(statusText, W / 2, frameY + frameH / 2 + 72);
     }
 
-    // Product Name
-    ctx.font = '800 26px Inter, Segoe UI, Arial, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(truncateText(options.name, 26), 30, 294);
-
-    // Price & CTA pill
+    // Frame border & compact corner Slot Badge
     ctx.save();
-    createRoundRectPath(ctx, 26, 312, 460, 46, 14);
-    ctx.fillStyle = 'rgba(30, 41, 59, 0.95)';
+    createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 20);
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = options.selected ? '#fbbf24' : 'rgba(148, 163, 184, 0.5)';
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    createRoundRectPath(ctx, frameX + 12, frameY + 12, 134, 40, 11);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.84)';
     ctx.fill();
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.5;
     ctx.strokeStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '800 23px Inter, Segoe UI, Arial, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#fde68a';
-    ctx.fillText(truncateText(options.priceText, 18), 44, 343);
+    ctx.font = '800 21px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillText(shortSlotBadge.toUpperCase(), frameX + 79, frameY + 39);
 
-    ctx.font = '700 19px Inter, Segoe UI, Arial, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#38bdf8';
-    ctx.fillText('BẤM XEM →', 470, 342);
+    // 3. Compact High-Contrast Bottom Product Caption Strip (Product Name + Price + Action Pill)
+    ctx.font = '900 34px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(truncateText(options.name, 28), 28, 696);
+
+    ctx.font = '800 32px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillText(truncateText(options.priceText, 22), 28, 742);
+
+    // Action badge on bottom-right
+    ctx.save();
+    createRoundRectPath(ctx, W - 246, 676, 220, 62, 16);
+    ctx.fillStyle = options.selected ? '#fbbf24' : options.accentColor || '#0ea5e9';
+    ctx.fill();
+    ctx.restore();
+
+    ctx.font = '900 24px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = options.selected ? '#0f172a' : '#ffffff';
+    ctx.fillText('XEM CHI TIẾT', W - 136, 715);
 
     texture.needsUpdate = true;
   };
 
-  renderCard();
+  if (!trimmedUrl) {
+    renderCard(undefined, 'missing');
+    return texture;
+  }
 
-  if (typeof Image !== 'undefined' && options.imageUrl) {
+  const cachedImg = productImageCache.get(trimmedUrl);
+  if (cachedImg && cachedImg.complete && cachedImg.naturalWidth > 0) {
+    renderCard(cachedImg, 'loaded');
+    return texture;
+  }
+
+  renderCard(undefined, 'loading');
+
+  if (typeof Image !== 'undefined') {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      renderCard(img);
+      if (isDisposed) return;
+      rememberCachedProductImage(trimmedUrl, img);
+      renderCard(img, 'loaded');
     };
-    img.src = options.imageUrl;
+    img.onerror = () => {
+      if (isDisposed) return;
+      renderCard(undefined, 'error');
+    };
+    img.src = trimmedUrl;
   }
 
   return texture;
@@ -1234,5 +1368,118 @@ export function createPlazaMedallionTexture(): THREE.CanvasTexture {
 
   const texture = registerTrackedTexture(canvas);
   texture.anisotropy = 8;
+  return texture;
+}
+
+/**
+ * Creates a stylized architectural glass & warm masonry facade texture for the
+ * surrounding skyline buildings, giving depth and realism in third-person perspective.
+ */
+export function createCityBuildingFacadeTexture(): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 512);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    // Warm architectural facade base
+    const baseGrad = ctx.createLinearGradient(0, 0, 0, 512);
+    baseGrad.addColorStop(0, '#e2e8f0');
+    baseGrad.addColorStop(0.5, '#cbd5e1');
+    baseGrad.addColorStop(1, '#94a3b8');
+    ctx.fillStyle = baseGrad;
+    ctx.fillRect(0, 0, 512, 512);
+
+    // Horizontal floor spandrel bands
+    const floors = 8;
+    const cols = 6;
+    const floorH = 512 / floors;
+    const colW = 512 / cols;
+
+    for (let r = 0; r < floors; r++) {
+      const fy = r * floorH;
+      // Floor cornice / spandrel beam
+      ctx.fillStyle = '#64748b';
+      ctx.fillRect(0, fy, 512, 8);
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(0, fy + 8, 512, 3);
+
+      for (let c = 0; c < cols; c++) {
+        const cx = c * colW;
+        // Vertical mullion pilaster
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillRect(cx, fy + 11, 8, floorH - 11);
+
+        // Recessed window pane
+        const winX = cx + 10;
+        const winY = fy + 14;
+        const winW = colW - 16;
+        const winH = floorH - 20;
+
+        const isWarmLit = ((r * 7 + c * 5) % 5) === 0;
+        const winGrad = ctx.createLinearGradient(winX, winY, winX + winW, winY + winH);
+        if (isWarmLit) {
+          winGrad.addColorStop(0, '#bae6fd');
+          winGrad.addColorStop(1, '#fef08a');
+        } else {
+          winGrad.addColorStop(0, '#38bdf8');
+          winGrad.addColorStop(0.5, '#0284c7');
+          winGrad.addColorStop(1, '#1e3a8a');
+        }
+        ctx.fillStyle = winGrad;
+        ctx.fillRect(winX, winY, winW, winH);
+
+        // Diagonal sky reflection streak
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+        ctx.fillRect(winX + 3, winY + 3, Math.max(4, winW * 0.28), winH - 6);
+      }
+    }
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1, 2);
+  texture.anisotropy = 4;
+  return texture;
+}
+
+/**
+ * Creates a stylized sunlit daytime sky dome texture with soft horizon warmth
+ * and subtle layered clouds for low-angle third-person views.
+ */
+export function createSkyDomeTexture(): THREE.CanvasTexture {
+  const canvas = createCanvasElement(1024, 512);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, 512);
+    skyGrad.addColorStop(0, '#0284c7');
+    skyGrad.addColorStop(0.38, '#38bdf8');
+    skyGrad.addColorStop(0.72, '#bae6fd');
+    skyGrad.addColorStop(0.92, '#f0f9ff');
+    skyGrad.addColorStop(1, '#fef3c7');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, 1024, 512);
+
+    // Soft stylized cumulus cloud bands along the mid-horizon
+    const clouds = [
+      { x: 140, y: 270, rx: 110, ry: 34 },
+      { x: 220, y: 258, rx: 85, ry: 42 },
+      { x: 460, y: 242, rx: 130, ry: 38 },
+      { x: 540, y: 232, rx: 92, ry: 44 },
+      { x: 810, y: 264, rx: 120, ry: 36 },
+      { x: 890, y: 252, rx: 84, ry: 40 },
+    ];
+    ctx.save();
+    for (const c of clouds) {
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, c.rx, c.ry, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.anisotropy = 4;
   return texture;
 }

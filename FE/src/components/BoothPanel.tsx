@@ -18,7 +18,6 @@ export const BoothPanel: React.FC<BoothPanelProps> = ({
   selectedProduct: controlledSelectedProduct,
   onSelectProduct,
   onClose,
-  onWalkToBooth,
 }) => {
   const modalTitleId = useId();
   const [internalSelectedProduct, setInternalSelectedProduct] = useState<Product | null>(null);
@@ -74,62 +73,41 @@ export const BoothPanel: React.FC<BoothPanelProps> = ({
       className="shop-showcase-overlay"
       style={{ '--booth-accent': booth.color } as React.CSSProperties}
     >
-      {/* Compact Top Stage HUD Bar — Zero Right-Side Product List Sidebar */}
-      <div className="shop-showcase-stage-hud" aria-label="Điều khiển góc nhìn gian hàng 3D">
-        <div className="shop-showcase-stage-hud__top">
-          <button
-            type="button"
-            className="shop-showcase-back-btn"
-            onClick={onClose}
-            title="Đóng giao diện gian hàng và quay lại khu triển lãm (Phím Esc)"
-          >
-            ↩ Quay lại Khu triển lãm <kbd>Esc</kbd>
-          </button>
+      {/* Minimal Top-Left Corner Control Bar — Unobstructed Full-Screen 3D Booth View */}
+      <div className="shop-showcase-corner-hud" aria-label="Điều khiển góc nhìn gian hàng 3D">
+        <button
+          type="button"
+          className="shop-showcase-back-btn"
+          onClick={onClose}
+          title="Đóng giao diện gian hàng và quay lại khu triển lãm (Phím Esc)"
+        >
+          ← Quay lại khu triển lãm <kbd>Esc</kbd>
+        </button>
 
-          <div className="shop-showcase-booth-banner">
-            <span className="expo-dialog__badge" style={{ backgroundColor: booth.color }}>
-              {booth.category}
-            </span>
-            <strong className="shop-showcase-booth-banner__title">
-              {booth.companyName || booth.name}
-            </strong>
-            <span className="shop-showcase-booth-banner__sub">
-              · {booth.name}
-              {occupiedSlotCount !== undefined ? ` (${occupiedSlotCount}/6 vị trí trưng bày)` : ''}
-            </span>
-          </div>
-
-          <div className="shop-showcase-stage-hud__actions">
-            {onWalkToBooth && (
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                onClick={() => onWalkToBooth(booth)}
-                title="Điều khiển nhân vật đi bộ tới trước cửa gian hàng này"
-              >
-                🚶 Đi tới gian hàng
-              </button>
-            )}
-            {booth.contactUrl && (
-              <a
-                href={booth.contactUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn--outline btn--sm"
-              >
-                🌐 Website ↗
-              </a>
-            )}
-          </div>
-        </div>
-
-        <div className="shop-showcase-hint-pill">
-          <span className="shop-showcase-live-dot" />
-          <span>
-            🖱️ Click trực tiếp vào sản phẩm trên <strong>Quầy trước</strong> hoặc{' '}
-            <strong>Kệ trưng bày 2 bên</strong> trong không gian 3D để xem thông tin chi tiết
+        <div className="shop-showcase-booth-banner">
+          <span className="expo-dialog__badge" style={{ backgroundColor: booth.color }}>
+            {booth.category}
           </span>
+          <strong className="shop-showcase-booth-banner__title">
+            {booth.companyName || booth.name}
+          </strong>
+          {occupiedSlotCount !== undefined && (
+            <span className="shop-showcase-booth-banner__sub">
+              · {occupiedSlotCount}/6 sản phẩm
+            </span>
+          )}
         </div>
+
+        {booth.contactUrl && (
+          <a
+            href={booth.contactUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn--outline btn--sm"
+          >
+            🌐 Website ↗
+          </a>
+        )}
       </div>
 
       {/* Centered Product Detail Modal — Only opens when a 3D slot product is clicked */}

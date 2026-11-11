@@ -21,6 +21,7 @@ import {
   createBoothPosterTexture,
   createEnterpriseBackdropTexture,
   createProductDisplayCardTexture,
+  computeAspectFitRect,
   createProductTagTexture,
   createAvatarNametagTexture,
   createPlazaTileTexture,
@@ -30,6 +31,8 @@ import {
   createAsphaltBumpTexture,
   createCrosswalkTexture,
   createSidewalkPaverTexture,
+  createCityBuildingFacadeTexture,
+  createSkyDomeTexture,
   getActiveCanvasTextureCount,
 } from '../scene/sceneTextures';
 import { buildBoothSlotViews } from '../services/api';
@@ -42,7 +45,10 @@ import {
   getCachedAssetStats,
 } from '../scene/assetLoader';
 import { resolveBoothTheme } from '../scene/Booth';
-import { computeShopShowcaseCameraTargets } from '../scene/ExhibitionScene';
+import {
+  computeShopShowcaseCameraTargets,
+  computeThirdPersonCameraTargets,
+} from '../scene/ExhibitionScene';
 import {
   DEFAULT_PRODUCTION_BACKEND_URL,
   normalizeBackendOrigin,
@@ -550,6 +556,97 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     expect(getActiveCanvasTextureCount()).toBe(baseline + 2);
     backdropTex.dispose();
     cardTex.dispose();
+    expect(getActiveCanvasTextureCount()).toBe(baseline);
+  });
+
+  it('preserves product image aspect ratio without stretching across square, landscape, and portrait photos', () => {
+    // 1. Square 1:1 image (800x800) inside a 728x428 frame with 10px padding
+    const squareFit = computeAspectFitRect(800, 800, 20, 20, 728, 428, 10);
+    expect(squareFit.width).toBe(408);
+    expect(squareFit.height).toBe(408);
+    expect(squareFit.width / squareFit.height).toBeCloseTo(1, 3);
+
+    // 2. Landscape 16:9 image (1600x900) inside a 728x428 frame with 10px padding
+    const wideFit = computeAspectFitRect(1600, 900, 20, 20, 728, 428, 10);
+    expect(wideFit.width).toBe(708);
+    expect(wideFit.height).toBe(398);
+    expect(wideFit.width / wideFit.height).toBeCloseTo(16 / 9, 2);
+
+    // 3. Portrait 3:4 image (600x800) inside a 728x428 frame with 10px padding
+    const portraitFit = computeAspectFitRect(600, 800, 20, 20, 728, 428, 10);
+    expect(portraitFit.height).toBe(408);
+    expect(portraitFit.width).toBe(306);
+    expect(portraitFit.width / portraitFit.height).toBeCloseTo(3 / 4, 3);
+
+    // Verify Product Display Card texture with real imageUrl and missing imageUrl both track & dispose cleanly
+    const baseline = getActiveCanvasTextureCount();
+    const withUrlTex = createProductDisplayCardTexture({
+      slotLabel: 'SLOT_01 · Quầy chính - Bên trái',
+      name: DEFAULT_PRODUCTS[0].name,
+      priceText: '6.850.000 ₫',
+      imageUrl: DEFAULT_PRODUCTS[0].images[0],
+      accentColor: '#0ea5e9',
+      selected: false,
+    });
+    const missingUrlTex = createProductDisplayCardTexture({
+      slotLabel: 'SLOT_02 · Quầy chính - Bên phải',
+      name: 'Sản phẩm chưa có ảnh',
+      priceText: '1.200.000 ₫',
+      imageUrl: '',
+      accentColor: '#10b981',
+      selected: true,
+    });
+    expect(getActiveCanvasTextureCount()).toBe(baseline + 2);
+    withUrlTex.dispose();
+    missingUrlTex.dispose();
+    expect(getActiveCanvasTextureCount()).toBe(baseline);
+  });
+
+  it('computes Low-Angle Third-Person Explore camera targets behind the character with obstacle avoidance and disposes sky/skyline textures cleanly', () => {
+    // 1. At Central Spawn Point (0, 3.8, yaw = PI facing North -Z)
+    const tpNorth = computeThirdPersonCameraTargets(
+      CENTRAL_SPAWN_POINT.x,
+      CENTRAL_SPAWN_POINT.z,
+      Math.PI,
+      34,
+      DEFAULT_BOOTHS
+    );
+
+    // Camera stands behind character (+Z > 3.8) at low third-person elevation (1.65..3.0m)
+    expect(tpNorth.cameraPosition.z).toBeGreaterThan(CENTRAL_SPAWN_POINT.z + 3.0);
+    expect(tpNorth.cameraPosition.y).toBeGreaterThanOrEqual(1.65);
+    expect(tpNorth.cameraPosition.y).toBeLessThanOrEqual(3.1);
+
+    // LookAt target is ahead of character (-Z < 3.8) at shoulder/eye level (~1.46m)
+    expect(tpNorth.lookAtTarget.z).toBeLessThan(CENTRAL_SPAWN_POINT.z - 2.0);
+    expect(tpNorth.lookAtTarget.y).toBeCloseTo(1.46, 2);
+
+    // 2. Obstacle avoidance when standing directly in front of a booth with the booth behind the character
+    const booth = DEFAULT_BOOTHS[1]; // North booth at (0, -14.8)
+    const box = getBoothObstacleBox(booth);
+    // Player stands just South of the booth (z = box.maxZ + 0.6) facing South (yaw = 0), so the booth is directly behind the player
+    const tpNearBooth = computeThirdPersonCameraTargets(
+      booth.positionX,
+      box.maxZ + 0.6,
+      0,
+      34,
+      DEFAULT_BOOTHS
+    );
+    expect(tpNearBooth.cameraPosition.y).toBeGreaterThanOrEqual(1.65);
+    // Camera pulls closer than default 5.2m distance so it does not sit deep inside the booth wall
+    const distFromPlayer = Math.hypot(
+      tpNearBooth.cameraPosition.x - booth.positionX,
+      tpNearBooth.cameraPosition.z - (box.maxZ + 0.6)
+    );
+    expect(distFromPlayer).toBeLessThan(5.0);
+
+    // 3. Verify City Facade & Sky Dome textures track and dispose deterministically
+    const baseline = getActiveCanvasTextureCount();
+    const facadeTex = createCityBuildingFacadeTexture();
+    const skyTex = createSkyDomeTexture();
+    expect(getActiveCanvasTextureCount()).toBe(baseline + 2);
+    facadeTex.dispose();
+    skyTex.dispose();
     expect(getActiveCanvasTextureCount()).toBe(baseline);
   });
 });

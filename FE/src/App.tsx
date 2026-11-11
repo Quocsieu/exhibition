@@ -5,6 +5,7 @@ import { AdminPage } from './pages/AdminPage';
 interface ParsedRoute {
   view: 'expo' | 'admin';
   adminBoothId: string | null;
+  previewBoothId?: string | null;
 }
 
 function parseCurrentLocation(): ParsedRoute {
@@ -68,12 +69,12 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  const openExpo = useCallback(() => {
+  const openExpo = useCallback((previewBoothId: string | null = null) => {
     if (window.location.pathname.startsWith('/admin')) {
       window.history.pushState({}, '', '/');
     }
     window.location.hash = '';
-    setRoute({ view: 'expo', adminBoothId: null });
+    setRoute({ view: 'expo', adminBoothId: null, previewBoothId });
   }, []);
 
   return route.view === 'admin' ? (
@@ -83,7 +84,10 @@ export const App: React.FC = () => {
       onBackToExpo={openExpo}
     />
   ) : (
-    <ExhibitionPage onOpenAdmin={() => openAdmin(null)} />
+    <ExhibitionPage
+      initialFocusBoothId={route.previewBoothId || null}
+      onOpenAdmin={() => openAdmin(null)}
+    />
   );
 };
 

@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Billboard } from '@react-three/drei';
+import { Billboard, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   type Booth as BoothType,
@@ -15,7 +15,6 @@ import {
   createBoothSignTexture,
   createEnterpriseBackdropTexture,
   createProductDisplayCardTexture,
-  createProductTagTexture,
 } from './sceneTextures';
 import { cloneCachedAsset, getBoothGlbAssetId } from './assetLoader';
 
@@ -83,26 +82,21 @@ const STEPPED_SHELF_BOARD_GEOM = new THREE.BoxGeometry(1.24, 0.06, 0.68);
 const STEPPED_SHELF_TRIM_GEOM = new THREE.BoxGeometry(1.26, 0.025, 0.7);
 const STEPPED_RACK_BACKBOARD_GEOM = new THREE.BoxGeometry(1.24, 0.72, 0.06);
 
-// Slot Product Stand Geometries (Strictly bounded inside slot.maxSize)
-const SLOT_EMPTY_MAT_GEOM = new THREE.BoxGeometry(0.68, 0.008, 0.46);
-const SLOT_PEDESTAL_BASE_GEOM = new THREE.CylinderGeometry(0.28, 0.32, 0.05, 18);
-const SLOT_PEDESTAL_RING_GEOM = new THREE.RingGeometry(0.28, 0.34, 24);
-const SLOT_CARD_FRAME_GEOM = new THREE.BoxGeometry(0.66, 0.48, 0.035);
-const SLOT_CARD_PLANE_GEOM = new THREE.PlaneGeometry(0.62, 0.44);
-const SLOT_CALLOUT_TAG_GEOM = new THREE.PlaneGeometry(1.52, 0.42);
-
-// 3D Product Category Artifact Geometries (placed in front of card on slot plinth)
-const PROD_TECH_ARTIFACT_GEOM = new THREE.OctahedronGeometry(0.11, 0);
-const PROD_LIVING_ARTIFACT_GEOM = new THREE.CylinderGeometry(0.11, 0.09, 0.18, 14);
-const PROD_COFFEE_ARTIFACT_GEOM = new THREE.BoxGeometry(0.16, 0.22, 0.12);
-const PROD_ROBOT_ARTIFACT_GEOM = new THREE.TorusKnotGeometry(0.085, 0.026, 24, 6);
-const PROD_ENERGY_ARTIFACT_GEOM = new THREE.BoxGeometry(0.2, 0.16, 0.12);
+// Slot Product Stand Geometries (Enlarged high-visibility 3D display boards sitting flush at y = 0)
+const SLOT_EMPTY_MAT_GEOM = new THREE.BoxGeometry(0.74, 0.008, 0.48);
+const SLOT_STAND_BASE_GEOM = new THREE.BoxGeometry(0.84, 0.038, 0.32);
+const SLOT_STAND_LED_TRIM_GEOM = new THREE.BoxGeometry(0.86, 0.01, 0.335);
+const SLOT_STAND_STRUT_GEOM = new THREE.BoxGeometry(0.22, 0.34, 0.045);
+const SLOT_CARD_FRAME_GEOM = new THREE.BoxGeometry(0.98, 0.76, 0.044);
+const SLOT_CARD_BEZEL_GEOM = new THREE.BoxGeometry(1.01, 0.79, 0.028);
+const SLOT_CARD_PLANE_GEOM = new THREE.PlaneGeometry(0.94, 0.72);
 
 const PERGOLA_RAFTER_GEOM = new THREE.BoxGeometry(0.16, 0.22, 4.6);
 const AWNING_SLAT_GEOM = new THREE.BoxGeometry(0.94, 0.1, 1.15);
 const LANTERN_BULB_GEOM = new THREE.SphereGeometry(0.13, 10, 10);
 const CEIL_LIGHT_GEOM = new THREE.BoxGeometry(1.45, 0.06, 0.18);
-const SIGN_BILLBOARD_GEOM = new THREE.PlaneGeometry(4.65, 1.54);
+const SIGN_BILLBOARD_GEOM = new THREE.PlaneGeometry(5.15, 1.66);
+const SIGN_CROWN_STRUT_GEOM = new THREE.CylinderGeometry(0.055, 0.055, 0.96, 8);
 
 const TOTEM_BODY_GEOM = new THREE.BoxGeometry(0.56, 1.92, 0.16);
 const TOTEM_BASE_GEOM = new THREE.BoxGeometry(0.68, 0.08, 0.36);
@@ -183,112 +177,131 @@ const EMERALD_GLOW_MAT = new THREE.MeshBasicMaterial({ color: '#34d399' });
 const WARM_BULB_MAT = new THREE.MeshBasicMaterial({ color: '#fde68a' });
 const WHITE_LIGHT_MAT = new THREE.MeshBasicMaterial({ color: '#f8fafc' });
 
+interface SlotGlbModelProps {
+  url: string;
+}
+
+const SlotGlbModel: React.FC<SlotGlbModelProps> = ({ url }) => {
+  const gltf = useGLTF(url);
+  const clonedScene = useMemo(() => {
+    const clone = gltf.scene.clone(true);
+    const box = new THREE.Box3().setFromObject(clone);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+    const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+    const scale = 0.56 / maxDim;
+    clone.scale.setScalar(scale);
+    clone.position.set(-center.x * scale, -box.min.y * scale + 0.04, -center.z * scale);
+    return clone;
+  }, [gltf.scene]);
+
+  return <primitive object={clonedScene} />;
+};
+
+class SlotModelErrorBoundary extends React.Component<
+  { fallback: React.ReactNode; children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { fallback: React.ReactNode; children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
+
 interface SlotProductDisplayProps {
-  slotIndex: number;
   slotView: BoothSlotView;
-  theme: BoothVisualTheme;
   accentColor: string;
   isSelected: boolean;
-  isBoothSelected: boolean;
   brandMat: THREE.Material;
   onSelectProduct?: (product: Product) => void;
 }
 
 const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
   ({
-    slotIndex,
     slotView,
-    theme,
     accentColor,
     isSelected,
-    isBoothSelected,
     brandMat,
     onSelectProduct,
   }) => {
     const [hovered, setHovered] = useState(false);
-    const artifactRef = useRef<THREE.Mesh>(null);
     const { slot, product } = slotView;
     const highlighted = isSelected || hovered;
 
-    const textures = useMemo(() => {
+    const cardTexture = useMemo(() => {
       if (!product) return null;
       const priceText = formatCurrency(product.price, product.currency);
       const imageUrl = product.images?.[0] || '';
-      return {
-        cardIdle: createProductDisplayCardTexture({
-          slotLabel: `${slot.slotId.toUpperCase()} · ${slot.label}`,
-          name: product.name,
-          priceText,
-          sku: product.sku,
-          imageUrl,
-          accentColor,
-          selected: false,
-        }),
-        cardActive: createProductDisplayCardTexture({
-          slotLabel: `${slot.slotId.toUpperCase()} · ${slot.label}`,
-          name: product.name,
-          priceText,
-          sku: product.sku,
-          imageUrl,
-          accentColor,
-          selected: true,
-        }),
-        tagIdle: createProductTagTexture({
-          index: slotIndex + 1,
-          name: product.name,
-          priceText,
-          color: accentColor,
-          selected: false,
-        }),
-        tagActive: createProductTagTexture({
-          index: slotIndex + 1,
-          name: product.name,
-          priceText,
-          color: accentColor,
-          selected: true,
-        }),
-      };
-    }, [product, slot.slotId, slot.label, accentColor, slotIndex]);
+      return createProductDisplayCardTexture({
+        slotLabel: `${slot.slotId.toUpperCase()} · ${slot.label}`,
+        name: product.name,
+        priceText,
+        sku: product.sku,
+        imageUrl,
+        accentColor,
+        selected: isSelected,
+      });
+    }, [product, slot.slotId, slot.label, accentColor, isSelected]);
 
     useEffect(() => {
       return () => {
-        if (textures) {
-          textures.cardIdle.dispose();
-          textures.cardActive.dispose();
-          textures.tagIdle.dispose();
-          textures.tagActive.dispose();
+        if (cardTexture) {
+          cardTexture.dispose();
         }
       };
-    }, [textures]);
+    }, [cardTexture]);
 
-    useFrame((_, delta) => {
-      if (artifactRef.current && product) {
-        artifactRef.current.rotation.y += delta * (highlighted ? 1.6 : 0.65);
-      }
-    });
+    // Zone-calibrated safe display scale: maximizes product photo visibility while
+    // guaranteeing zero overlap between adjacent slots (counter spacing = 1.36m, stepped shelves = 0.66m Y/Z offset)
+    const fitScale = slot.zone === 'counter' ? 1.08 : 0.98;
+    const facingYawOffset =
+      slot.zone === 'left-shelf' ? -0.14 : slot.zone === 'right-shelf' ? 0.14 : 0;
 
-    // Scale guard to guarantee the display fits strictly inside slot.maxSize
-    const [maxW, maxH, maxD] = slot.maxSize;
-    const scaleX = Math.min(1, maxW / 0.78);
-    const scaleY = Math.min(1, maxH / 0.62);
-    const scaleZ = Math.min(1, maxD / 0.56);
-    const fitScale = Math.min(scaleX, scaleY, scaleZ);
+    const hasValidModelUrl = Boolean(
+      product?.modelUrl && /\.(glb|gltf)(\?.*)?$/i.test(product.modelUrl.trim())
+    );
 
-    const artifactGeom =
-      theme === 'living'
-        ? PROD_LIVING_ARTIFACT_GEOM
-        : theme === 'coffee'
-          ? PROD_COFFEE_ARTIFACT_GEOM
-          : theme === 'robotics'
-            ? PROD_ROBOT_ARTIFACT_GEOM
-            : theme === 'energy'
-              ? PROD_ENERGY_ARTIFACT_GEOM
-              : PROD_TECH_ARTIFACT_GEOM;
+    const renderFramedPhotoStand = () => (
+      <group position={[0, 0.415, 0.024]} rotation={[-0.06, 0, 0]}>
+        {/* Outer highlight bezel */}
+        <mesh
+          position={[0, 0, -0.005]}
+          geometry={SLOT_CARD_BEZEL_GEOM}
+          material={highlighted ? GOLD_BASIC_MAT : brandMat}
+        />
+        {/* 3D Display Board Body with physical depth */}
+        <mesh
+          castShadow
+          receiveShadow
+          geometry={SLOT_CARD_FRAME_GEOM}
+          material={highlighted ? GOLD_SHOWCASE_MAT : DARK_NAVY_MAT}
+        />
+        {/* Crisp Front Product Photo Display Surface */}
+        {cardTexture && (
+          <mesh position={[0, 0, 0.024]} geometry={SLOT_CARD_PLANE_GEOM}>
+            <meshBasicMaterial map={cardTexture} toneMapped={false} />
+          </mesh>
+        )}
+      </group>
+    );
 
     return (
       <group
         position={slot.position}
-        rotation={slot.rotation}
+        rotation={[slot.rotation[0], slot.rotation[1] + facingYawOffset, slot.rotation[2]]}
         onClick={
           product && onSelectProduct
             ? (e) => {
@@ -319,61 +332,39 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
           /* Empty Slot: Clean natural recessed shelf pad — zero fake product */
           <mesh position={[0, 0.004, 0]} geometry={SLOT_EMPTY_MAT_GEOM} material={EMPTY_SLOT_MAT} />
         ) : (
-          /* Occupied Slot: Flush 3D Display Plinth + Product Display Stand + 3D Artifact */
-          <group scale={[fitScale, fitScale, fitScale]}>
-            {/* Flush Display Plinth sitting directly at y = 0 on the shelf/counter surface */}
+          /* Occupied Slot: Flush 3D Display Stand sitting directly on the shelf/counter at y = 0 */
+          <group scale={highlighted ? [fitScale * 1.04, fitScale * 1.04, fitScale * 1.04] : [fitScale, fitScale, fitScale]}>
+            {/* Flush Display Plinth Base sitting at y = 0..0.038 */}
             <mesh
-              position={[0, 0.025, 0]}
+              position={[0, 0.019, 0]}
               castShadow
               receiveShadow
-              geometry={SLOT_PEDESTAL_BASE_GEOM}
+              geometry={SLOT_STAND_BASE_GEOM}
               material={DARK_NAVY_MAT}
             />
             <mesh
-              position={[0, 0.052, 0]}
-              rotation={[-Math.PI / 2, 0, 0]}
-              geometry={SLOT_PEDESTAL_RING_GEOM}
-              material={highlighted ? GOLD_BASIC_MAT : CYAN_GLOW_MAT}
+              position={[0, 0.04, 0]}
+              geometry={SLOT_STAND_LED_TRIM_GEOM}
+              material={highlighted ? GOLD_BASIC_MAT : brandMat}
             />
-
-            {/* Framed 3D Product Visual Display Stand Card */}
-            <group position={[0, 0.29, -0.06]}>
-              <mesh
-                geometry={SLOT_CARD_FRAME_GEOM}
-                material={highlighted ? GOLD_SHOWCASE_MAT : DARK_NAVY_MAT}
-              />
-              {textures && (
-                <mesh position={[0, 0, 0.02]} geometry={SLOT_CARD_PLANE_GEOM}>
-                  <meshBasicMaterial
-                    map={highlighted ? textures.cardActive : textures.cardIdle}
-                  />
-                </mesh>
-              )}
-            </group>
-
-            {/* 3D Product Sculpture / Model on Front Half of Slot Plinth */}
+            {/* Rear 3D Easel Support Strut */}
             <mesh
-              ref={artifactRef}
-              position={[0, 0.16, 0.15]}
+              position={[0, 0.19, -0.075]}
+              rotation={[0.22, 0, 0]}
               castShadow
-              geometry={artifactGeom}
-              material={highlighted ? GOLD_SHOWCASE_MAT : brandMat}
+              geometry={SLOT_STAND_STRUT_GEOM}
+              material={SLATE_DARK_MAT}
             />
 
-            {/* Interactive Floating Callout Badge when in Shop Showcase or Hovered */}
-            {textures && (isBoothSelected || highlighted) && (
-              <Billboard position={[0, 0.68, 0]}>
-                <mesh
-                  geometry={SLOT_CALLOUT_TAG_GEOM}
-                  scale={highlighted ? [1.08, 1.08, 1] : [0.96, 0.96, 1]}
-                >
-                  <meshBasicMaterial
-                    map={highlighted ? textures.tagActive : textures.tagIdle}
-                    transparent
-                    depthWrite={false}
-                  />
-                </mesh>
-              </Billboard>
+            {/* Priority 1: 3D GLB/GLTF Model if valid modelUrl exists; Priority 2: 3D Product Photo Display Stand */}
+            {hasValidModelUrl && product.modelUrl ? (
+              <SlotModelErrorBoundary fallback={renderFramedPhotoStand()}>
+                <Suspense fallback={renderFramedPhotoStand()}>
+                  <SlotGlbModel url={product.modelUrl.trim()} />
+                </Suspense>
+              </SlotModelErrorBoundary>
+            ) : (
+              renderFramedPhotoStand()
             )}
           </group>
         )}
@@ -461,16 +452,21 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
     // Pre-generate and cache Fascia, Enterprise Backdrop, Idle Sign, and Active Sign textures
     const { fasciaTexture, backdropTexture, idleSignTexture, activeSignTexture } = useMemo(() => {
+      const enterpriseTitle = booth.companyName || booth.name;
+      const standSubtitle =
+        booth.companyName && booth.companyName !== booth.name
+          ? `${booth.name} · ${booth.category}`
+          : booth.category;
       return {
         fasciaTexture: createBoothFasciaTexture({
-          name: booth.companyName || booth.name,
-          category: booth.category,
+          name: enterpriseTitle,
+          category: standSubtitle,
           color: booth.color,
           theme,
         }),
         backdropTexture: createEnterpriseBackdropTexture({
           name: booth.name,
-          companyName: booth.companyName || booth.name,
+          companyName: enterpriseTitle,
           category: booth.category,
           tagline: booth.tagline,
           color: booth.color,
@@ -481,16 +477,16 @@ export const Booth: React.FC<BoothProps> = React.memo(
           theme,
         }),
         idleSignTexture: createBoothSignTexture({
-          name: booth.name,
-          category: booth.companyName || booth.category,
+          name: enterpriseTitle,
+          category: standSubtitle,
           productCount: occupiedSlotCount || productCount,
           color: booth.color,
           active: false,
           theme,
         }),
         activeSignTexture: createBoothSignTexture({
-          name: booth.name,
-          category: booth.companyName || booth.category,
+          name: enterpriseTitle,
+          category: standSubtitle,
           productCount: occupiedSlotCount || productCount,
           color: booth.color,
           active: true,
@@ -673,7 +669,7 @@ export const Booth: React.FC<BoothProps> = React.memo(
               material={brandBasicMat}
             />
             <mesh
-              position={[0, 1.88, -0.31]}
+              position={[0, 1.88, -0.34]}
               geometry={STEPPED_RACK_BACKBOARD_GEOM}
               material={DARK_NAVY_MAT}
             />
@@ -727,7 +723,7 @@ export const Booth: React.FC<BoothProps> = React.memo(
               material={brandBasicMat}
             />
             <mesh
-              position={[0, 1.88, -0.31]}
+              position={[0, 1.88, -0.34]}
               geometry={STEPPED_RACK_BACKBOARD_GEOM}
               material={DARK_NAVY_MAT}
             />
@@ -760,15 +756,12 @@ export const Booth: React.FC<BoothProps> = React.memo(
         {/* ================================================================
             3. DETERMINISTIC 3D SLOT PRODUCT RENDERING (`slot_01` .. `slot_06`)
            ================================================================ */}
-        {resolvedSlots.map((slotView, idx) => (
+        {resolvedSlots.map((slotView) => (
           <SlotProductDisplay
             key={slotView.slot.slotId}
-            slotIndex={idx}
             slotView={slotView}
-            theme={theme}
             accentColor={booth.color}
             isSelected={Boolean(slotView.product && selectedProductId === slotView.product.id)}
-            isBoothSelected={isSelected}
             brandMat={brandFlatMat}
             onSelectProduct={onSelectProduct}
           />
@@ -776,22 +769,23 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {/* ================================================================
             4. ARCHITECTURAL ROOF, FASCIA HEADER & FRONT PILLARS BY THEME
+               (Fascia advanced to z = vd/2 + 0.98, y = WALL_HEIGHT + 0.58 so roof eaves/awnings never occlude enterprise name)
            ================================================================ */}
         {theme === 'tech' && (
           <group>
-            <group position={[0, WALL_HEIGHT + 0.28, 0.08]}>
+            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
               <mesh position={[0, 0, vd / 2 + 0.06]} castShadow material={DARK_NAVY_MAT}>
-                <boxGeometry args={[vw + 0.44, 0.62, 0.42]} />
+                <boxGeometry args={[vw + 0.48, 0.66, 0.42]} />
               </mesh>
-              <mesh position={[0, 0.34, vd / 2 + 0.08]} material={CYAN_GLOW_MAT}>
-                <boxGeometry args={[vw + 0.48, 0.08, 0.46]} />
+              <mesh position={[0, 0.36, vd / 2 + 0.08]} material={CYAN_GLOW_MAT}>
+                <boxGeometry args={[vw + 0.52, 0.08, 0.46]} />
               </mesh>
               <mesh position={[0, 0, vd / 2 + 0.28]}>
-                <planeGeometry args={[vw + 0.2, 0.56]} />
-                <meshBasicMaterial map={fasciaTexture} />
+                <planeGeometry args={[vw + 0.26, 0.6]} />
+                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
               </mesh>
-              <mesh position={[-vw * 0.22, -0.12, 0]} geometry={CEIL_LIGHT_GEOM} material={CYAN_GLOW_MAT} />
-              <mesh position={[vw * 0.22, -0.12, 0]} geometry={CEIL_LIGHT_GEOM} material={WHITE_LIGHT_MAT} />
+              <mesh position={[-vw * 0.22, -0.14, -0.5]} geometry={CEIL_LIGHT_GEOM} material={CYAN_GLOW_MAT} />
+              <mesh position={[vw * 0.22, -0.14, -0.5]} geometry={CEIL_LIGHT_GEOM} material={WHITE_LIGHT_MAT} />
             </group>
 
             <group position={[vw / 2 - 0.18, 0.18, vd / 2 - 0.22]}>
@@ -808,18 +802,18 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {theme === 'living' && (
           <group>
-            <group position={[0, WALL_HEIGHT + 0.26, 0.06]}>
+            <group position={[0, WALL_HEIGHT + 0.56, 0.7]}>
               <mesh position={[0, 0, vd / 2 + 0.06]} castShadow material={WARM_OAK_MAT}>
-                <boxGeometry args={[vw + 0.42, 0.56, 0.38]} />
+                <boxGeometry args={[vw + 0.46, 0.62, 0.38]} />
               </mesh>
               <mesh position={[0, 0, vd / 2 + 0.26]}>
-                <planeGeometry args={[vw + 0.16, 0.52]} />
-                <meshBasicMaterial map={fasciaTexture} />
+                <planeGeometry args={[vw + 0.22, 0.58]} />
+                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
               </mesh>
               {[-2.4, -1.6, -0.8, 0, 0.8, 1.6, 2.4].map((rx, idx) => (
                 <mesh
                   key={`rafter-${idx}`}
-                  position={[rx, 0.06, 0]}
+                  position={[rx, -0.22, -0.62]}
                   geometry={PERGOLA_RAFTER_GEOM}
                   material={WARM_OAK_MAT}
                 />
@@ -838,19 +832,19 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {theme === 'coffee' && (
           <group>
-            <group position={[0, WALL_HEIGHT + 0.26, 0.08]}>
+            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
               <mesh position={[0, 0, vd / 2 + 0.06]} castShadow material={ESPRESSO_WOOD_MAT}>
-                <boxGeometry args={[vw + 0.46, 0.58, 0.4]} />
+                <boxGeometry args={[vw + 0.48, 0.64, 0.4]} />
               </mesh>
               <mesh position={[0, 0, vd / 2 + 0.27]}>
-                <planeGeometry args={[vw + 0.2, 0.54]} />
-                <meshBasicMaterial map={fasciaTexture} />
+                <planeGeometry args={[vw + 0.24, 0.58]} />
+                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
               </mesh>
               {[-2.4, -1.44, -0.48, 0.48, 1.44, 2.4].map((ax, idx) => (
                 <mesh
                   key={`cafe-awning-${idx}`}
-                  position={[ax, -0.34, vd / 2 + 0.56]}
-                  rotation={[0.34, 0, 0]}
+                  position={[ax, -0.72, vd / 2 - 0.08]}
+                  rotation={[0.32, 0, 0]}
                   geometry={AWNING_SLAT_GEOM}
                   material={idx % 2 === 0 ? COPPER_CRAFT_MAT : CREAM_WALL_MAT}
                 />
@@ -858,7 +852,7 @@ export const Booth: React.FC<BoothProps> = React.memo(
               {[-2.1, -1.05, 0, 1.05, 2.1].map((lx, idx) => (
                 <mesh
                   key={`cafe-bulb-${idx}`}
-                  position={[lx, -0.56, vd / 2 + 0.48]}
+                  position={[lx, -0.92, vd / 2 - 0.16]}
                   geometry={LANTERN_BULB_GEOM}
                   material={WARM_BULB_MAT}
                 />
@@ -877,16 +871,16 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {theme === 'robotics' && (
           <group>
-            <group position={[0, WALL_HEIGHT + 0.28, 0.08]}>
+            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
               <mesh position={[0, 0, vd / 2 + 0.06]} castShadow material={SLATE_DARK_MAT}>
-                <boxGeometry args={[vw + 0.46, 0.62, 0.44]} />
+                <boxGeometry args={[vw + 0.48, 0.66, 0.44]} />
               </mesh>
-              <mesh position={[0, 0.34, vd / 2 + 0.06]} material={GOLD_BASIC_MAT}>
-                <boxGeometry args={[vw + 0.48, 0.08, 0.46]} />
+              <mesh position={[0, 0.36, vd / 2 + 0.06]} material={GOLD_BASIC_MAT}>
+                <boxGeometry args={[vw + 0.52, 0.08, 0.46]} />
               </mesh>
               <mesh position={[0, 0, vd / 2 + 0.29]}>
-                <planeGeometry args={[vw + 0.2, 0.56]} />
-                <meshBasicMaterial map={fasciaTexture} />
+                <planeGeometry args={[vw + 0.26, 0.6]} />
+                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
               </mesh>
             </group>
 
@@ -903,19 +897,19 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {theme === 'design' && (
           <group>
-            <group position={[0, WALL_HEIGHT + 0.28, 0.08]}>
+            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
               <mesh position={[0, 0, vd / 2 + 0.06]} castShadow material={VIOLET_ART_MAT}>
-                <boxGeometry args={[vw + 0.44, 0.6, 0.4]} />
+                <boxGeometry args={[vw + 0.48, 0.64, 0.4]} />
               </mesh>
-              <mesh position={[0, 0.34, vd / 2 + 0.08]} material={MAGENTA_ART_MAT}>
-                <boxGeometry args={[vw + 0.48, 0.1, 0.44]} />
+              <mesh position={[0, 0.35, vd / 2 + 0.08]} material={MAGENTA_ART_MAT}>
+                <boxGeometry args={[vw + 0.52, 0.1, 0.44]} />
               </mesh>
               <mesh position={[0, 0, vd / 2 + 0.28]}>
-                <planeGeometry args={[vw + 0.2, 0.54]} />
-                <meshBasicMaterial map={fasciaTexture} />
+                <planeGeometry args={[vw + 0.24, 0.58]} />
+                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
               </mesh>
 
-              <group position={[0, -0.58, 0.1]}>
+              <group position={[0, -0.78, -0.5]}>
                 <mesh rotation={[Math.PI / 2, 0.12, 0]} geometry={HALO_RING_LARGE_GEOM} material={WHITE_LIGHT_MAT} />
                 <mesh
                   rotation={[Math.PI / 2, -0.18, 0]}
@@ -930,23 +924,23 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {theme === 'energy' && (
           <group>
-            <group position={[0, WALL_HEIGHT + 0.28, 0.08]}>
+            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
               <mesh position={[0, 0, vd / 2 + 0.06]} castShadow material={DARK_NAVY_MAT}>
-                <boxGeometry args={[vw + 0.44, 0.58, 0.4]} />
+                <boxGeometry args={[vw + 0.48, 0.64, 0.4]} />
               </mesh>
-              <mesh position={[0, 0.33, vd / 2 + 0.08]} material={EMERALD_GLOW_MAT}>
-                <boxGeometry args={[vw + 0.48, 0.09, 0.44]} />
+              <mesh position={[0, 0.35, vd / 2 + 0.08]} material={EMERALD_GLOW_MAT}>
+                <boxGeometry args={[vw + 0.52, 0.09, 0.44]} />
               </mesh>
               <mesh position={[0, 0, vd / 2 + 0.28]}>
-                <planeGeometry args={[vw + 0.2, 0.54]} />
-                <meshBasicMaterial map={fasciaTexture} />
+                <planeGeometry args={[vw + 0.24, 0.58]} />
+                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
               </mesh>
 
               {[-2.1, -0.7, 0.7, 2.1].map((sx, idx) => (
                 <mesh
                   key={`solar-pv-${idx}`}
-                  position={[sx, 0.48, 0.35]}
-                  rotation={[0.42, 0, 0]}
+                  position={[sx, 0.38, -0.65]}
+                  rotation={[0.38, 0, 0]}
                   geometry={SOLAR_PANEL_GEOM}
                   material={SOLAR_CELL_MAT}
                 />
@@ -970,14 +964,24 @@ export const Booth: React.FC<BoothProps> = React.memo(
         )}
 
         {/* ================================================================
-            5. GRAND STOREFRONT SIGNBOARD (Positioned on Front Roof Crown)
+            5. GRAND STOREFRONT CROWN SIGNBOARD (Elevated & Advanced Above Roof Eaves)
            ================================================================ */}
-        <Billboard position={[0, WALL_HEIGHT + 1.18, vd / 2 - 0.15]}>
+        <mesh
+          position={[-1.65, WALL_HEIGHT + 1.02, vd / 2 + 0.78]}
+          geometry={SIGN_CROWN_STRUT_GEOM}
+          material={CHROME_PILLAR_MAT}
+        />
+        <mesh
+          position={[1.65, WALL_HEIGHT + 1.02, vd / 2 + 0.78]}
+          geometry={SIGN_CROWN_STRUT_GEOM}
+          material={CHROME_PILLAR_MAT}
+        />
+        <Billboard position={[0, WALL_HEIGHT + 1.96, vd / 2 + 0.82]}>
           <mesh
             geometry={SIGN_BILLBOARD_GEOM}
             scale={active ? [1.06, 1.06, 1] : [1, 1, 1]}
           >
-            <meshBasicMaterial map={currentSignTexture} transparent depthWrite={false} />
+            <meshBasicMaterial map={currentSignTexture} transparent depthWrite={false} toneMapped={false} />
           </mesh>
         </Billboard>
       </group>

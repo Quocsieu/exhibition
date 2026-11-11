@@ -87,10 +87,14 @@ function getInitialVisitorSpawn(): {
 }
 
 export interface ExhibitionPageProps {
+  initialFocusBoothId?: string | null;
   onOpenAdmin: () => void;
 }
 
-export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) => {
+export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
+  initialFocusBoothId = null,
+  onOpenAdmin,
+}) => {
   const initialIdentity = useMemo(() => getStoredIdentity(), []);
   const initialSpawn = useMemo(() => getInitialVisitorSpawn(), []);
   const hasLockedPositionRef = useRef<boolean>(initialSpawn.restored);
@@ -109,6 +113,8 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [focusedBooth, setFocusedBooth] = useState<Booth | null>(null);
   const [cameraMode, setCameraMode] = useState<CameraViewMode>('explore');
+  const previousExteriorModeRef = useRef<'overview' | 'explore'>('explore');
+  const cameraYawRef = useRef<number | null>(null);
   const [zoom, setZoom] = useState(EXPLORE_DEFAULT_ZOOM);
   const [showHelp, setShowHelp] = useState(true);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -148,18 +154,36 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
   }, [loadExpoData]);
 
   const handleSelectBooth = useCallback((booth: Booth) => {
+    setCameraMode((prev) => {
+      if (prev === 'overview' || prev === 'explore') {
+        previousExteriorModeRef.current = prev;
+      }
+      return 'focus';
+    });
     setSelectedBooth(booth);
     setSelectedProduct(null);
     setFocusedBooth(booth);
-    setCameraMode('focus');
     setZoom(FOCUS_DEFAULT_ZOOM);
   }, []);
 
+  useEffect(() => {
+    if (!initialFocusBoothId || loadingData) return;
+    const targetBooth = booths.find((b) => b.id === initialFocusBoothId);
+    if (targetBooth) {
+      handleSelectBooth(targetBooth);
+    }
+  }, [initialFocusBoothId, loadingData, booths, handleSelectBooth]);
+
   const handleReachBooth = useCallback((booth: Booth) => {
+    setCameraMode((prev) => {
+      if (prev === 'overview' || prev === 'explore') {
+        previousExteriorModeRef.current = prev;
+      }
+      return 'focus';
+    });
     setSelectedBooth(booth);
     setSelectedProduct(null);
     setFocusedBooth(booth);
-    setCameraMode('focus');
     setZoom(FOCUS_DEFAULT_ZOOM);
   }, []);
 
@@ -212,6 +236,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
     booths,
     initialPosition: initialSpawn,
     disabled: false,
+    cameraYawRef,
     onTransformChange: handleTransformChange,
     onReachBooth: handleReachBooth,
   });
@@ -250,14 +275,16 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
   emitMovementRef.current = emitMovement;
 
   const handleReturnToExplore = useCallback(() => {
-    setCameraMode('explore');
+    const restoredMode = previousExteriorModeRef.current;
+    setCameraMode(restoredMode);
     setSelectedBooth(null);
     setSelectedProduct(null);
     setFocusedBooth(null);
-    setZoom(EXPLORE_DEFAULT_ZOOM);
+    setZoom(restoredMode === 'overview' ? OVERVIEW_DEFAULT_ZOOM : EXPLORE_DEFAULT_ZOOM);
   }, []);
 
   const handleSwitchToOverview = useCallback(() => {
+    previousExteriorModeRef.current = 'overview';
     setCameraMode('overview');
     setSelectedBooth(null);
     setSelectedProduct(null);
@@ -266,6 +293,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
   }, []);
 
   const handleSwitchToExplore = useCallback(() => {
+    previousExteriorModeRef.current = 'explore';
     setCameraMode('explore');
     setSelectedBooth(null);
     setSelectedProduct(null);
@@ -417,88 +445,92 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
     [playerName, playerColor, transformRef]
   );
 
+  const isBoothShowcaseActive = cameraMode === 'focus' && Boolean(selectedBooth || focusedBooth);
+
   return (
     <main className="expo-viewport">
-      {/* Top Bar HUD */}
-      <header className="expo-hud-top">
-        <div className="expo-hud-top__brand">
-          <div className="expo-hud-top__logo">2.5D</div>
-          <div>
-            <h1 className="expo-hud-top__title">Virtual Expo Plaza</h1>
-            <div className="expo-hud-top__status">
-              <span
-                className={`status-dot ${
-                  isConnected ? 'status-dot--online' : 'status-dot--offline'
-                }`}
-              />
-              <span>
-                {isConnected
-                  ? `${onlineCount} khách đang trực tuyến`
-                  : 'Chế độ ngoại tuyến / Đang kết nối...'}
-              </span>
+      {/* Top Bar HUD — Hidden during close-up Booth Showcase mode */}
+      {!isBoothShowcaseActive && (
+        <header className="expo-hud-top">
+          <div className="expo-hud-top__brand">
+            <div className="expo-hud-top__logo">3D</div>
+            <div>
+              <h1 className="expo-hud-top__title">Virtual Expo Plaza</h1>
+              <div className="expo-hud-top__status">
+                <span
+                  className={`status-dot ${
+                    isConnected ? 'status-dot--online' : 'status-dot--offline'
+                  }`}
+                />
+                <span>
+                  {isConnected
+                    ? `${onlineCount} khách đang trực tuyến`
+                    : 'Chế độ ngoại tuyến / Đang kết nối...'}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="expo-hud-top__nav">
-          <div className="hud-booth-picker">
-            <label htmlFor={boothSelectId} className="visually-hidden">
-              Chọn gian hàng để di chuyển tới
-            </label>
-            <select
-              id={boothSelectId}
-              name="boothQuickNav"
-              className="hud-select"
-              defaultValue=""
-              onChange={(e) => {
-                const booth = booths.find((b) => b.id === e.target.value);
-                if (booth) {
-                  handleWalkToBooth(booth);
-                  e.target.value = '';
-                }
+          <div className="expo-hud-top__nav">
+            <div className="hud-booth-picker">
+              <label htmlFor={boothSelectId} className="visually-hidden">
+                Chọn gian hàng để di chuyển tới
+              </label>
+              <select
+                id={boothSelectId}
+                name="boothQuickNav"
+                className="hud-select"
+                defaultValue=""
+                onChange={(e) => {
+                  const booth = booths.find((b) => b.id === e.target.value);
+                  if (booth) {
+                    handleWalkToBooth(booth);
+                    e.target.value = '';
+                  }
+                }}
+              >
+                <option value="" disabled>
+                  📍 Đi nhanh tới gian hàng ({booths.length})...
+                </option>
+                {booths.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} — {b.category}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={() => {
+                setDraftName(playerName);
+                setDraftColor(playerColor);
+                setEditingProfile((v) => !v);
               }}
             >
-              <option value="" disabled>
-                📍 Đi nhanh tới gian hàng ({booths.length})...
-              </option>
-              {booths.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name} — {b.category}
-                </option>
-              ))}
-            </select>
+              <span className="avatar-dot" style={{ backgroundColor: playerColor }} />
+              {playerName} ✎
+            </button>
+
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => setShowHelp((v) => !v)}
+              aria-expanded={showHelp}
+            >
+              ❓ Hướng dẫn
+            </button>
+
+            <button type="button" className="btn btn--primary btn--sm" onClick={onOpenAdmin}>
+              ⚙️ Quản trị (Dashboard)
+            </button>
           </div>
-
-          <button
-            type="button"
-            className="btn btn--secondary btn--sm"
-            onClick={() => {
-              setDraftName(playerName);
-              setDraftColor(playerColor);
-              setEditingProfile((v) => !v);
-            }}
-          >
-            <span className="avatar-dot" style={{ backgroundColor: playerColor }} />
-            {playerName} ✎
-          </button>
-
-          <button
-            type="button"
-            className="btn btn--ghost btn--sm"
-            onClick={() => setShowHelp((v) => !v)}
-            aria-expanded={showHelp}
-          >
-            ❓ Hướng dẫn
-          </button>
-
-          <button type="button" className="btn btn--primary btn--sm" onClick={onOpenAdmin}>
-            ⚙️ Quản trị (Dashboard)
-          </button>
-        </div>
-      </header>
+        </header>
+      )}
 
       {/* Profile Editor Popover */}
-      {editingProfile && (
+      {!isBoothShowcaseActive && editingProfile && (
         <div className="hud-profile-card" role="region" aria-label="Đổi tên và màu nhân vật">
           <form onSubmit={handleProfileSubmit} className="hud-profile-form">
             <div className="form-field">
@@ -552,99 +584,88 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
         </div>
       )}
 
-      {/* Hybrid Isometric Camera Controls & Booth Directory Mini Dock */}
-      <aside
-        className={`expo-hud-dock ${selectedBooth ? 'expo-hud-dock--panel-open' : ''}`}
-        aria-label="Điều khiển góc nhìn camera và danh sách gian hàng"
-      >
-        <div className="camera-mode-bar" role="group" aria-label="Chế độ góc nhìn Camera">
-          <button
-            type="button"
-            className={`camera-mode-btn ${
-              cameraMode === 'overview' ? 'camera-mode-btn--active' : ''
-            }`}
-            onClick={handleSwitchToOverview}
-            aria-pressed={cameraMode === 'overview'}
-            title="Nhìn tổng thể toàn bộ khu triển lãm 6 gian hàng"
-          >
-            🌐 Toàn cảnh
-          </button>
-
-          <button
-            type="button"
-            className={`camera-mode-btn ${
-              cameraMode === 'explore' ? 'camera-mode-btn--active' : ''
-            }`}
-            onClick={handleSwitchToExplore}
-            aria-pressed={cameraMode === 'explore'}
-            title="Camera đi theo nhân vật ở góc nhìn gần"
-          >
-            🚶 Tham quan
-          </button>
-
-          {cameraMode === 'focus' && (
+      {/* Hybrid Camera Controls & Booth Directory Mini Dock — Hidden during Booth Showcase mode */}
+      {!isBoothShowcaseActive && (
+        <aside
+          className={`expo-hud-dock ${selectedBooth ? 'expo-hud-dock--panel-open' : ''}`}
+          aria-label="Điều khiển góc nhìn camera và danh sách gian hàng"
+        >
+          <div className="camera-mode-bar" role="group" aria-label="Chế độ góc nhìn Camera">
             <button
               type="button"
-              className="camera-mode-btn camera-mode-btn--back"
-              onClick={handleReturnToExplore}
-              title="Thoát chế độ tập trung gian hàng để quay lại Tham quan"
+              className={`camera-mode-btn ${
+                cameraMode === 'overview' ? 'camera-mode-btn--active' : ''
+              }`}
+              onClick={handleSwitchToOverview}
+              aria-pressed={cameraMode === 'overview'}
+              title="Nhìn tổng thể toàn bộ khu triển lãm 6 gian hàng"
             >
-              ↩ Quay lại Tham quan
+              🌐 Toàn cảnh
             </button>
-          )}
 
-          <div className="zoom-controls">
             <button
               type="button"
-              className="zoom-btn"
-              onClick={() => setZoom((z) => Math.min(60, z + 4))}
-              title="Phóng to góc nhìn"
-              aria-label="Phóng to góc nhìn"
+              className={`camera-mode-btn ${
+                cameraMode === 'explore' ? 'camera-mode-btn--active' : ''
+              }`}
+              onClick={handleSwitchToExplore}
+              aria-pressed={cameraMode === 'explore'}
+              title="Camera góc nhìn thứ 3 (Third-person) đi theo sau nhân vật"
             >
-              ＋
+              🚶 Tham quan
             </button>
-            <button
-              type="button"
-              className="zoom-btn"
-              onClick={() => setZoom((z) => Math.max(14, z - 4))}
-              title="Thu nhỏ góc nhìn"
-              aria-label="Thu nhỏ góc nhìn"
-            >
-              －
-            </button>
+
+            <div className="zoom-controls">
+              <button
+                type="button"
+                className="zoom-btn"
+                onClick={() => setZoom((z) => Math.min(60, z + 4))}
+                title="Phóng to góc nhìn"
+                aria-label="Phóng to góc nhìn"
+              >
+                ＋
+              </button>
+              <button
+                type="button"
+                className="zoom-btn"
+                onClick={() => setZoom((z) => Math.max(14, z - 4))}
+                title="Thu nhỏ góc nhìn"
+                aria-label="Thu nhỏ góc nhìn"
+              >
+                －
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div className="booth-mini-list">
-          <span className="booth-mini-list__title">
-            {cameraMode === 'focus' && focusedBooth
-              ? `🎯 Đang xem cận cảnh: ${focusedBooth.name}`
-              : 'Gian hàng nổi bật (Bấm để xem cận cảnh)'}
-          </span>
-          <div className="booth-mini-list__chips">
-            {booths.map((booth) => {
-              const isFocused =
-                selectedBooth?.id === booth.id ||
-                (cameraMode === 'focus' && focusedBooth?.id === booth.id);
-              return (
-                <button
-                  key={booth.id}
-                  type="button"
-                  className={`booth-chip ${isFocused ? 'booth-chip--active' : ''}`}
-                  onClick={() => handleSelectBooth(booth)}
-                  title={`Tập trung camera và xem sản phẩm tại ${booth.name}`}
-                >
-                  <span className="booth-chip__dot" style={{ backgroundColor: booth.color }} />
-                  <span className="booth-chip__name">{booth.name}</span>
-                </button>
-              );
-            })}
+          <div className="booth-mini-list">
+            <span className="booth-mini-list__title">
+              Gian hàng nổi bật (Bấm để xem cận cảnh)
+            </span>
+            <div className="booth-mini-list__chips">
+              {booths.map((booth) => {
+                const isFocused =
+                  selectedBooth?.id === booth.id ||
+                  (cameraMode === 'focus' && focusedBooth?.id === booth.id);
+                return (
+                  <button
+                    key={booth.id}
+                    type="button"
+                    className={`booth-chip ${isFocused ? 'booth-chip--active' : ''}`}
+                    onClick={() => handleSelectBooth(booth)}
+                    title={`Tập trung camera và xem sản phẩm tại ${booth.name}`}
+                  >
+                    <span className="booth-chip__dot" style={{ backgroundColor: booth.color }} />
+                    <span className="booth-chip__name">{booth.name}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      )}
 
-      {/* Onboarding Controls Guide */}
-      {showHelp && (
+      {/* Onboarding Controls Guide — Hidden during Booth Showcase mode */}
+      {!isBoothShowcaseActive && showHelp && (
         <aside className="expo-help-card" aria-label="Hướng dẫn điều khiển">
           <div className="expo-help-card__header">
             <strong>🎮 Hướng dẫn tham quan triển lãm</strong>
@@ -659,13 +680,13 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
           </div>
           <ul className="expo-help-card__list">
             <li>
-              <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> hoặc <strong>Phím mũi tên</strong>: Di chuyển tự do (tự động chuyển về góc nhìn <em>Tham quan</em>).
+              <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> hoặc <strong>Phím mũi tên</strong>: Di chuyển tự do theo góc nhìn nhân vật.
             </li>
             <li>
               <strong>Click chuột xuống sàn</strong>: Tự động tìm đường (A*) tránh vật cản tới điểm chọn.
             </li>
             <li>
-              <strong>3 chế độ Camera</strong>: Chọn <em>Toàn cảnh</em> để bao quát 6 gian hàng, <em>Tham quan</em> để theo nhân vật, hoặc <em>Click vào Gian hàng</em> để phóng cận cảnh quầy kệ & sản phẩm.
+              <strong>3 chế độ Camera</strong>: Chọn <em>Toàn cảnh</em> (Isometric 2.5D), <em>Tham quan</em> (Third-person theo nhân vật), hoặc <em>Click vào Gian hàng</em> để xem cận cảnh quầy kệ & sản phẩm.
             </li>
             <li>
               <strong>Joystick cảm ứng</strong> (Góc dưới trái): Điều khiển mượt mà trên điện thoại/máy tính bảng.
@@ -685,6 +706,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
         onSelectProduct={handleSelectSlotProduct}
         player={playerDescriptor}
         playerTransformRef={transformRef}
+        cameraYawRef={cameraYawRef}
         onStepMovement={stepMovement}
         remoteVisitors={remoteVisitors}
         remoteVisitorsLiveRef={remoteVisitorsLiveRef}
@@ -697,7 +719,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
         zoom={zoom}
       />
 
-      <MobileJoystick onMove={handleJoystickMove} />
+      {!isBoothShowcaseActive && <MobileJoystick onMove={handleJoystickMove} />}
 
       <BoothPanel
         booth={selectedBooth}

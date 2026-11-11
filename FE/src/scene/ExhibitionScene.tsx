@@ -2,12 +2,14 @@ import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Line, OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
-import type {
-  Booth as BoothType,
-  BoothSlotView,
-  Point2D,
-  Product,
-  VisitorState,
+import {
+  type Booth as BoothType,
+  type BoothSlotView,
+  type Point2D,
+  type Product,
+  type VisitorState,
+  WORLD_BOUNDS,
+  getBoothObstacleBox,
 } from '../types/expo';
 import type { PlayerTransform } from '../controls/useClickToMove';
 import { Environment } from './Environment';
@@ -34,6 +36,7 @@ export interface ExhibitionSceneProps {
     state: 'idle' | 'walk';
   };
   playerTransformRef?: React.MutableRefObject<PlayerTransform>;
+  cameraYawRef?: React.MutableRefObject<number | null>;
   onStepMovement?: (delta: number) => void;
   remoteVisitors: VisitorState[];
   remoteVisitorsLiveRef?: React.MutableRefObject<Map<string, VisitorState>>;
@@ -52,10 +55,16 @@ export interface ShopShowcaseCameraTargets {
   entryPosition: THREE.Vector3;
 }
 
+export interface ThirdPersonCameraTargets {
+  cameraPosition: THREE.Vector3;
+  lookAtTarget: THREE.Vector3;
+}
+
 const ISOMETRIC_OFFSET = new THREE.Vector3(16, 26, 22);
 const MIN_CAMERA_ZOOM = 14;
 const MAX_CAMERA_ZOOM = 64;
 const SHOP_SHOWCASE_FOV = 38;
+const THIRD_PERSON_FOV = 50;
 const EMPTY_PRODUCTS: Product[] = [];
 
 /**
@@ -112,9 +121,10 @@ export function computeShopShowcaseCameraTargets(
     localLookY = 0.72;
     panX = 0;
   } else {
-    localCamZ = 10.8;
-    localCamY = 2.2;
-    localLookY = 2.1;
+    // Full-screen Shop Showcase: closer eye-level framing so all 6 product slots and backdrop are large & clear
+    localCamZ = 9.35;
+    localCamY = 2.15;
+    localLookY = 1.96;
     panX = 0;
   }
 
@@ -130,7 +140,7 @@ export function computeShopShowcaseCameraTargets(
 
   const cameraPosition = toWorld(panX, localCamY, localCamZ);
   const lookAtTarget = toWorld(panX, localLookY, localLookZ);
-  const entryPosition = toWorld(panX, localCamY + 0.75, localCamZ + 2.6);
+  const entryPosition = toWorld(panX, localCamY + 0.65, localCamZ + 2.2);
 
   return {
     cameraPosition,
@@ -139,12 +149,90 @@ export function computeShopShowcaseCameraTargets(
   };
 }
 
+/**
+ * Computes the Low-Angle Third-Person (`Tham quan`) camera position and forward lookAt target:
+ * - Positioned behind and slightly above the character (`y = 1.75..3.0m`)
+ * - Looking forward along the walkway so the visitor sees the character, pavement, booths on both sides, and spatial depth
+ * - Prevents ground clipping (`y >= 1.65m`) and pulls closer if a booth obstacle box is behind the character
+ */
+export function computeThirdPersonCameraTargets(
+  playerX: number,
+  playerZ: number,
+  cameraYaw: number,
+  zoom: number,
+  booths: BoothType[]
+): ThirdPersonCameraTargets {
+  const clampedZoom = THREE.MathUtils.clamp(zoom, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
+  const zoomRatio = 34 / clampedZoom;
+  const desiredDist = THREE.MathUtils.clamp(5.2 * zoomRatio, 3.5, 7.4);
+  const camHeight = THREE.MathUtils.clamp(2.26 * zoomRatio, 1.72, 3.05);
+
+  const fwdX = Math.sin(cameraYaw);
+  const fwdZ = Math.cos(cameraYaw);
+
+  // Raycast sample points behind the character to prevent clipping inside booth walls
+  let safeDist = desiredDist;
+  const obstacleBoxes = booths.map((b) => getBoothObstacleBox(b));
+  const checkFractions = [0.35, 0.55, 0.75, 1.0];
+
+  for (const frac of checkFractions) {
+    const testDist = desiredDist * frac;
+    const tx = playerX - fwdX * testDist;
+    const tz = playerZ - fwdZ * testDist;
+
+    const outOfBounds =
+      tx < WORLD_BOUNDS.minX + 1.0 ||
+      tx > WORLD_BOUNDS.maxX - 1.0 ||
+      tz < WORLD_BOUNDS.minZ + 1.0 ||
+      tz > WORLD_BOUNDS.maxZ - 1.0;
+
+    const hitsBooth = obstacleBoxes.some(
+      (box) => tx >= box.minX && tx <= box.maxX && tz >= box.minZ && tz <= box.maxZ
+    );
+
+    if (outOfBounds || hitsBooth) {
+      safeDist = Math.max(2.15, desiredDist * Math.max(0.25, frac - 0.22));
+      break;
+    }
+  }
+
+  const camX = THREE.MathUtils.clamp(
+    playerX - fwdX * safeDist,
+    WORLD_BOUNDS.minX + 0.9,
+    WORLD_BOUNDS.maxX - 0.9
+  );
+  const camZ = THREE.MathUtils.clamp(
+    playerZ - fwdZ * safeDist,
+    WORLD_BOUNDS.minZ + 0.9,
+    WORLD_BOUNDS.maxZ - 0.9
+  );
+  const camY = Math.max(1.65, camHeight);
+
+  const lookAheadDist = 3.4;
+  const lookX = playerX + fwdX * lookAheadDist;
+  const lookY = 1.46;
+  const lookZ = playerZ + fwdZ * lookAheadDist;
+
+  return {
+    cameraPosition: new THREE.Vector3(camX, camY, camZ),
+    lookAtTarget: new THREE.Vector3(lookX, lookY, lookZ),
+  };
+}
+
+function shortestAngleDiff(fromAngle: number, toAngle: number): number {
+  return Math.atan2(Math.sin(toAngle - fromAngle), Math.cos(toAngle - fromAngle));
+}
+
 interface HybridCameraRigProps {
   orthoCamRef: React.RefObject<THREE.OrthographicCamera | null>;
   perspCamRef: React.RefObject<THREE.PerspectiveCamera | null>;
+  booths: BoothType[];
   targetX: number;
   targetZ: number;
+  targetRotY: number;
   playerTransformRef?: React.MutableRefObject<PlayerTransform>;
+  cameraYawRef?: React.MutableRefObject<number | null>;
+  hasActiveAutoPath: boolean;
   onStepMovement?: (delta: number) => void;
   cameraMode: CameraViewMode;
   focusedBooth: BoothType | null;
@@ -155,9 +243,13 @@ interface HybridCameraRigProps {
 const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
   orthoCamRef,
   perspCamRef,
+  booths,
   targetX,
   targetZ,
+  targetRotY,
   playerTransformRef,
+  cameraYawRef,
+  hasActiveAutoPath,
   onStepMovement,
   cameraMode,
   focusedBooth,
@@ -169,16 +261,35 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
   const clampedZoom = THREE.MathUtils.clamp(zoom, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
   const initX = playerTransformRef ? playerTransformRef.current.x : targetX;
   const initZ = playerTransformRef ? playerTransformRef.current.z : targetZ;
+  const initRotY = playerTransformRef ? playerTransformRef.current.rotationY : targetRotY;
   const initFocusX = THREE.MathUtils.clamp(initX * 0.9, -18, 18);
   const initFocusZ = THREE.MathUtils.clamp(initZ * 0.85 - 1.2, -16, 16);
 
-  // Isometric camera state (Overview & Explore modes)
+  // Mode A: Isometric camera state (Overview mode)
   const smoothedIsoTarget = useRef(new THREE.Vector3(initFocusX, 0.4, initFocusZ));
   const desiredIsoTarget = useRef(new THREE.Vector3(initFocusX, 0.4, initFocusZ));
 
-  // Front-facing Shop Showcase perspective camera state (Focus mode)
-  const smoothedShopCamPos = useRef(new THREE.Vector3(0, 2.2, 12));
-  const smoothedShopLookAt = useRef(new THREE.Vector3(0, 2.1, 0));
+  // Mode B: Low-Angle Third-Person camera state (Explore mode)
+  const tpCamYawRef = useRef<number>(initRotY);
+  const smoothedTpCamPos = useRef(
+    new THREE.Vector3(
+      initX - Math.sin(initRotY) * 5.2,
+      2.26,
+      initZ - Math.cos(initRotY) * 5.2
+    )
+  );
+  const smoothedTpLookAt = useRef(
+    new THREE.Vector3(
+      initX + Math.sin(initRotY) * 3.4,
+      1.46,
+      initZ + Math.cos(initRotY) * 3.4
+    )
+  );
+  const wasExploreModeRef = useRef<boolean>(false);
+
+  // Mode C: Front-facing Shop Showcase perspective camera state (Focus mode)
+  const smoothedShopCamPos = useRef(new THREE.Vector3(0, 2.15, 10));
+  const smoothedShopLookAt = useRef(new THREE.Vector3(0, 1.96, 0));
   const lastFocusedBoothIdRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
@@ -197,17 +308,25 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
   useFrame((_, rawDelta) => {
     const delta = Math.min(rawDelta, 0.1);
 
-    // 1. Advance local player movement first in the unified R3F frame loop
+    // 1. Sync cameraYawRef before stepping movement so WASD/Joystick uses Third-Person heading in Explore Mode
+    if (cameraYawRef) {
+      cameraYawRef.current = cameraMode === 'explore' ? tpCamYawRef.current : null;
+    }
+
+    // 2. Advance local player movement in the unified R3F frame loop
     if (onStepMovement) {
       onStepMovement(rawDelta);
     }
 
-    // 2. Always keep exterior isometric target updated so returning from Shop Showcase is seamless
+    const liveX = playerTransformRef ? playerTransformRef.current.x : targetX;
+    const liveZ = playerTransformRef ? playerTransformRef.current.z : targetZ;
+    const liveRotY = playerTransformRef ? playerTransformRef.current.rotationY : targetRotY;
+    const liveState = playerTransformRef ? playerTransformRef.current.state : 'idle';
+
+    // 3. Keep Overview isometric target updated
     if (cameraMode === 'overview') {
       desiredIsoTarget.current.set(0, 0.2, 0.8);
     } else {
-      const liveX = playerTransformRef ? playerTransformRef.current.x : targetX;
-      const liveZ = playerTransformRef ? playerTransformRef.current.z : targetZ;
       const nextFocusX = THREE.MathUtils.clamp(liveX * 0.9, -18, 18);
       const nextFocusZ = THREE.MathUtils.clamp(liveZ * 0.85 - 1.2, -16, 16);
       desiredIsoTarget.current.set(nextFocusX, 0.45, nextFocusZ);
@@ -219,9 +338,18 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
 
     const isShopShowcase = cameraMode === 'focus' && focusedBooth !== null;
 
+    // ========================================================================
+    // MODE C — XEM GIAN HÀNG (Shop Showcase Eye-Level Perspective Camera)
+    // ========================================================================
     if (isShopShowcase && focusedBooth) {
+      wasExploreModeRef.current = false;
       const perspCam = perspCamRef.current;
       if (!perspCam) return;
+
+      if (Math.abs(perspCam.fov - SHOP_SHOWCASE_FOV) > 0.1) {
+        perspCam.fov = SHOP_SHOWCASE_FOV;
+        perspCam.updateProjectionMatrix();
+      }
 
       const targets = computeShopShowcaseCameraTargets(
         focusedBooth,
@@ -248,9 +376,69 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
       return;
     }
 
-    // Reset booth focus tracker when back in exterior Overview / Explore mode
     lastFocusedBoothIdRef.current = null;
 
+    // ========================================================================
+    // MODE B — THAM QUAN (Low-Angle Third-Person Perspective Camera)
+    // ========================================================================
+    if (cameraMode === 'explore') {
+      const perspCam = perspCamRef.current;
+      if (!perspCam) return;
+
+      if (Math.abs(perspCam.fov - THIRD_PERSON_FOV) > 0.1) {
+        perspCam.fov = THIRD_PERSON_FOV;
+        perspCam.updateProjectionMatrix();
+      }
+
+      // Smoothly steer camera yaw behind character when walking forward/turning or following an A* path,
+      // while avoiding a jarring 180-degree camera flip when the player steps backward (S / ArrowDown).
+      if (!wasExploreModeRef.current) {
+        wasExploreModeRef.current = true;
+        tpCamYawRef.current = liveRotY;
+        const initTp = computeThirdPersonCameraTargets(
+          liveX,
+          liveZ,
+          tpCamYawRef.current,
+          clampedZoom,
+          booths
+        );
+        smoothedTpCamPos.current.copy(initTp.cameraPosition);
+        smoothedTpLookAt.current.copy(initTp.lookAtTarget);
+      } else if (liveState === 'walk') {
+        const diff = shortestAngleDiff(tpCamYawRef.current, liveRotY);
+        if (hasActiveAutoPath || Math.abs(diff) < 2.35) {
+          const yawTurnRate = hasActiveAutoPath ? 3.8 : 2.6;
+          const yawAlpha = 1 - Math.exp(-yawTurnRate * delta);
+          tpCamYawRef.current += diff * yawAlpha;
+        }
+      }
+
+      if (cameraYawRef) {
+        cameraYawRef.current = tpCamYawRef.current;
+      }
+
+      const tpTargets = computeThirdPersonCameraTargets(
+        liveX,
+        liveZ,
+        tpCamYawRef.current,
+        clampedZoom,
+        booths
+      );
+
+      const tpAlpha = 1 - Math.exp(-9.5 * delta);
+      smoothedTpCamPos.current.lerp(tpTargets.cameraPosition, tpAlpha);
+      smoothedTpLookAt.current.lerp(tpTargets.lookAtTarget, tpAlpha);
+
+      perspCam.position.copy(smoothedTpCamPos.current);
+      perspCam.lookAt(smoothedTpLookAt.current);
+      perspCam.updateMatrixWorld();
+      return;
+    }
+
+    // ========================================================================
+    // MODE A — TOÀN CẢNH (2.5D Isometric Orthographic Camera)
+    // ========================================================================
+    wasExploreModeRef.current = false;
     const orthoCam = orthoCamRef.current;
     if (orthoCam) {
       orthoCam.position.copy(smoothedIsoTarget.current).add(ISOMETRIC_OFFSET);
@@ -277,6 +465,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     onSelectProduct,
     player,
     playerTransformRef,
+    cameraYawRef,
     onStepMovement,
     remoteVisitors,
     remoteVisitorsLiveRef,
@@ -306,6 +495,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     }, [focusedBooth, selectedBoothId, booths]);
 
     const isShopShowcase = cameraMode === 'focus' && activeFocusedBooth !== null;
+    const isOverviewMode = cameraMode === 'overview';
 
     const clickMarker =
       activePath.length > 0 ? activePath[activePath.length - 1] : null;
@@ -329,7 +519,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     );
 
     return (
-      <div className="expo-canvas-container" aria-label="Không gian triển lãm 3D Isometric">
+      <div className="expo-canvas-container" aria-label="Không gian triển lãm 3D">
         <Canvas
           orthographic
           shadows
@@ -346,35 +536,39 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             far: 320,
           }}
         >
-          <color attach="background" args={['#dce8f5']} />
-          <fog attach="fog" args={['#dce8f5', 82, 185]} />
+          <color attach="background" args={['#cfe4f7']} />
+          <fog attach="fog" args={['#cfe4f7', 86, 195]} />
 
-          {/* Exterior Isometric Orthographic Camera (Overview & Explore Modes) */}
+          {/* MODE A: Exterior 2.5D Isometric Orthographic Camera (Overview Mode) */}
           <OrthographicCamera
             ref={orthoCamRef}
-            makeDefault={!isShopShowcase}
+            makeDefault={isOverviewMode}
             position={[16, 26, 28]}
             zoom={34}
             near={0.1}
             far={320}
           />
 
-          {/* Front-Facing Eye-Level Shop Showcase Perspective Camera (Focus Mode) */}
+          {/* MODE B (Third-Person Explore) & MODE C (Shop Showcase Focus): Perspective Camera */}
           <PerspectiveCamera
             ref={perspCamRef}
-            makeDefault={isShopShowcase}
-            fov={SHOP_SHOWCASE_FOV}
+            makeDefault={!isOverviewMode}
+            fov={isShopShowcase ? SHOP_SHOWCASE_FOV : THIRD_PERSON_FOV}
             near={0.2}
-            far={160}
-            position={[0, 2.2, 12]}
+            far={220}
+            position={[0, 2.26, 9]}
           />
 
           <HybridCameraRig
             orthoCamRef={orthoCamRef}
             perspCamRef={perspCamRef}
+            booths={booths}
             targetX={player.x}
             targetZ={player.z}
+            targetRotY={player.rotationY}
             playerTransformRef={playerTransformRef}
+            cameraYawRef={cameraYawRef}
+            hasActiveAutoPath={activePath.length > 0}
             onStepMovement={onStepMovement}
             cameraMode={cameraMode}
             focusedBooth={activeFocusedBooth}
