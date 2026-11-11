@@ -1793,44 +1793,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 />
               </div>
 
-              <fieldset className="form-fieldset">
-                <legend>Tọa độ trong khuôn viên 3D (-20 đến 20)</legend>
-                <div className="form-row-2">
-                  <div className="form-field">
-                    <label htmlFor={`${formIdPrefix}-bx`}>Tọa độ X</label>
-                    <input
-                      id={`${formIdPrefix}-bx`}
-                      name="positionX"
-                      type="number"
-                      step="0.5"
-                      min={-20}
-                      max={20}
-                      required
-                      value={boothForm.positionX}
-                      onChange={(e) =>
-                        setBoothForm({ ...boothForm, positionX: Number(e.target.value) })
-                      }
-                    />
-                  </div>
-                  <div className="form-field">
-                    <label htmlFor={`${formIdPrefix}-bz`}>Tọa độ Z</label>
-                    <input
-                      id={`${formIdPrefix}-bz`}
-                      name="positionZ"
-                      type="number"
-                      step="0.5"
-                      min={-20}
-                      max={20}
-                      required
-                      value={boothForm.positionZ}
-                      onChange={(e) =>
-                        setBoothForm({ ...boothForm, positionZ: Number(e.target.value) })
-                      }
-                    />
-                  </div>
-                </div>
-              </fieldset>
-
               <div className="form-row-2">
                 <div className="form-field">
                   <label htmlFor={`${formIdPrefix}-bemail`}>Email liên hệ</label>
