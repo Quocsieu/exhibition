@@ -735,7 +735,7 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     }
   });
 
-  it('frames 100% of the Crown Signboard & enlarged 6-slot shelves without truncation across 1920x1080, 1366x768, and 390x844', () => {
+  it('frames 100% of the Product-First 3-Zone Showroom (KHU A Brand Header, KHU B Hero Center Stage, KHU C Secondary Shelves) across 1920x1080, 1366x768, and 390x844', () => {
     // 1. Enterprise names must NEVER be truncated with `...` or `…`
     const enterpriseNames = [
       ...DEFAULT_BOOTHS.map((b) => (b.companyName || b.name).toUpperCase()),
@@ -743,7 +743,7 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     ];
 
     for (const fullTitle of enterpriseNames) {
-      const fitted = fitEnterpriseTitleLines(null, fullTitle, 1168, 64, 34);
+      const fitted = fitEnterpriseTitleLines(null, fullTitle, 940, 56, 30);
       expect(fitted.lines.length).toBeGreaterThanOrEqual(1);
       expect(fitted.lines.length).toBeLessThanOrEqual(2);
       expect(fitted.lines.join(' ')).toBe(fullTitle);
@@ -751,23 +751,30 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
       expect(fitted.lines.join(' ').includes('...')).toBe(false);
     }
 
-    // 2. Product names wrap cleanly up to 2 high-contrast lines
-    const shortProdLines = wrapProductTitleLines(null, 'Kính AR Aether Vision Pro', 944, 38);
+    // 2. Product names wrap cleanly up to 3 high-contrast lines on the 1024x1240 portrait showroom panel
+    const shortProdLines = wrapProductTitleLines(null, 'Kính AR Aether Vision Pro', 916, 48);
     expect(shortProdLines.length).toBe(1);
     const longProdLines = wrapProductTitleLines(
       null,
       'Hệ thống Robot Tự hành Công nghiệp Kinetix X9 Ultra Pro Max Phiên bản Triển lãm Quốc tế 2026',
-      944,
-      38
+      916,
+      44
     );
-    expect(longProdLines.length).toBe(2);
+    expect(longProdLines.length).toBeGreaterThanOrEqual(2);
+    expect(longProdLines.length).toBeLessThanOrEqual(3);
 
-    // 3. Enlarged 6 slots have > 1.3m 3D separation and fit inside the 6.0m x 4.4m booth footprint
+    // 3. KHU B Hero Center Stage slots (slot_01, slot_02) and KHU C Secondary Shelf slots (slot_03..06)
+    // have hierarchy-compliant dimensions and > 1.3m 3D separation with zero overlap
     for (let i = 0; i < BOOTH_SLOT_DEFINITIONS.length; i++) {
       const a = BOOTH_SLOT_DEFINITIONS[i];
-      expect(a.maxSize[0]).toBeGreaterThanOrEqual(1.3);
-      expect(a.maxSize[1]).toBeGreaterThanOrEqual(1.05);
-      expect(Math.abs(a.position[0]) + a.maxSize[0] / 2).toBeLessThan(2.96);
+      if (a.zone === 'counter') {
+        expect(a.maxSize[0]).toBeGreaterThanOrEqual(1.6);
+        expect(a.maxSize[1]).toBeGreaterThanOrEqual(2.0);
+      } else {
+        expect(a.maxSize[0]).toBeGreaterThanOrEqual(1.15);
+        expect(a.maxSize[1]).toBeGreaterThanOrEqual(1.2);
+      }
+      expect(Math.abs(a.position[0]) + a.maxSize[0] / 2).toBeLessThan(3.1);
       for (let j = i + 1; j < BOOTH_SLOT_DEFINITIONS.length; j++) {
         const b = BOOTH_SLOT_DEFINITIONS[j];
         const dist3D = Math.hypot(
@@ -779,16 +786,16 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
       }
     }
 
-    // 4. Verify Crown Signboard (top at y = 4.784m, local z = 3.44m) and Counter base (y = 0.0m)
-    // fit 100% inside the Shop Showcase camera frustum across 1920x1080, 1366x768, and 390x844
+    // 4. Verify KHU A Single Unified Brand Header (top at y = 3.72m, local z = 3.52m) and
+    // KHU B Main Showroom Podium (bottom at y = 0.28m) fit inside the closer Shop Showcase frustum
     const viewports: [number, number][] = [
       [1920, 1080],
       [1366, 768],
       [390, 844],
     ];
     const tanHalfFov = Math.tan((19 * Math.PI) / 180);
-    const crownSignZ = 3.44;
-    const crownSignTopY = 4.784;
+    const brandHeaderZ = 3.52;
+    const brandHeaderTopY = 3.72;
 
     for (const [vw, vh] of viewports) {
       for (const booth of DEFAULT_BOOTHS) {
@@ -807,16 +814,16 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
           lookAtTarget.z - booth.positionZ
         );
         const totalSightSpanZ = camDistFromBoothCenter + lookDistFromBoothCenter;
-        const distCamToSignZ = camDistFromBoothCenter - crownSignZ;
-        const rayCenterYAtSign =
+        const distCamToHeaderZ = camDistFromBoothCenter - brandHeaderZ;
+        const rayCenterYAtHeader =
           cameraPosition.y +
-          (lookAtTarget.y - cameraPosition.y) * (distCamToSignZ / totalSightSpanZ);
-        const frustumHalfHeightAtSign = distCamToSignZ * tanHalfFov;
-        const frustumTopY = rayCenterYAtSign + frustumHalfHeightAtSign;
-        const frustumBottomY = rayCenterYAtSign - frustumHalfHeightAtSign;
+          (lookAtTarget.y - cameraPosition.y) * (distCamToHeaderZ / totalSightSpanZ);
+        const frustumHalfHeightAtHeader = distCamToHeaderZ * tanHalfFov;
+        const frustumTopY = rayCenterYAtHeader + frustumHalfHeightAtHeader;
+        const frustumBottomY = rayCenterYAtHeader - frustumHalfHeightAtHeader;
 
-        expect(frustumTopY).toBeGreaterThan(crownSignTopY + 0.2);
-        expect(frustumBottomY).toBeLessThanOrEqual(0.05);
+        expect(frustumTopY).toBeGreaterThan(brandHeaderTopY + 0.18);
+        expect(frustumBottomY).toBeLessThanOrEqual(0.22);
       }
     }
   });

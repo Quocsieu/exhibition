@@ -149,15 +149,16 @@ export function fitEnterpriseTitleLines(
 }
 
 /**
- * Wraps a product title into up to 2 high-contrast lines across the full width of the
- * 3D product display card so product names are large and immediately readable.
+ * Wraps a product title into up to 3 high-contrast lines across the full width of the
+ * 3D product display panel so product names are large and immediately readable.
  */
 export function wrapProductTitleLines(
   ctx: CanvasRenderingContext2D | null,
   rawName: string,
-  maxWidthPx = 944,
-  fontPx = 38,
-  fontFamily = 'Inter, Segoe UI, Arial, sans-serif'
+  maxWidthPx = 936,
+  fontPx = 44,
+  fontFamily = 'Inter, Segoe UI, Arial, sans-serif',
+  maxLines = 3
 ): string[] {
   const clean = rawName.trim().replace(/\s+/g, ' ');
   if (!clean) return ['Sản phẩm trưng bày'];
@@ -167,38 +168,39 @@ export function wrapProductTitleLines(
   }
 
   const words = clean.split(' ');
-  let line1 = '';
-  let restStartIdx = 0;
+  const lines: string[] = [];
+  let currentLine = '';
 
   for (let i = 0; i < words.length; i++) {
-    const candidate = line1 ? `${line1} ${words[i]}` : words[i];
+    const word = words[i];
+    const candidate = currentLine ? `${currentLine} ${word}` : word;
     if (
       measureCanvasTextWidth(ctx, candidate, fontPx, '900', fontFamily) <= maxWidthPx ||
-      !line1
+      !currentLine
     ) {
-      line1 = candidate;
-      restStartIdx = i + 1;
+      currentLine = candidate;
     } else {
-      break;
+      if (lines.length + 1 >= maxLines) {
+        let lastLine = `${currentLine} ${words.slice(i).join(' ')}`;
+        while (
+          lastLine.length > 4 &&
+          measureCanvasTextWidth(ctx, `${lastLine}…`, fontPx, '900', fontFamily) > maxWidthPx
+        ) {
+          lastLine = lastLine.slice(0, -1).trimEnd();
+        }
+        lines.push(`${lastLine}…`);
+        return lines;
+      }
+      lines.push(currentLine);
+      currentLine = word;
     }
   }
 
-  if (restStartIdx >= words.length) {
-    return [line1];
+  if (currentLine) {
+    lines.push(currentLine);
   }
 
-  let line2 = words.slice(restStartIdx).join(' ');
-  if (measureCanvasTextWidth(ctx, line2, fontPx, '900', fontFamily) > maxWidthPx) {
-    while (
-      line2.length > 4 &&
-      measureCanvasTextWidth(ctx, `${line2}…`, fontPx, '900', fontFamily) > maxWidthPx
-    ) {
-      line2 = line2.slice(0, -1).trimEnd();
-    }
-    line2 = `${line2}…`;
-  }
-
-  return [line1, line2];
+  return lines.slice(0, maxLines);
 }
 
 export type BoothVisualTheme = 'tech' | 'living' | 'coffee' | 'robotics' | 'design' | 'energy';
@@ -294,59 +296,72 @@ export function createBoothSignTexture(options: {
   active: boolean;
   theme?: BoothVisualTheme;
 }): THREE.CanvasTexture {
-  const canvas = createCanvasElement(1280, 360);
+  const canvas = createCanvasElement(1536, 240);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
     const pal = getThemePalette(options.theme, options.color);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Unified KHU A Brand Header Frame
     ctx.save();
-    createRoundRectPath(ctx, 16, 14, 1248, 332, 42);
+    createRoundRectPath(ctx, 10, 10, 1516, 220, 28);
     ctx.fillStyle = options.active ? pal.bgActive : pal.bg;
     ctx.fill();
-    ctx.lineWidth = options.active ? 12 : 8;
+    ctx.lineWidth = options.active ? 10 : 6;
     ctx.strokeStyle = options.active ? '#fbbf24' : pal.border;
     ctx.stroke();
     ctx.restore();
 
-    // Decorative top illuminated accent bar
-    ctx.save();
-    createRoundRectPath(ctx, 56, 32, 1168, 12, 6);
+    // Top illuminated brand line
     ctx.fillStyle = options.active ? '#fbbf24' : pal.border;
+    ctx.fillRect(42, 16, 1452, 8);
+
+    // Left Corporate Emblem Medallion
+    ctx.save();
+    createRoundRectPath(ctx, 34, 34, 172, 172, 26);
+    ctx.fillStyle = 'rgba(9, 13, 22, 0.85)';
     ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = options.active ? '#fbbf24' : pal.border;
+    ctx.stroke();
     ctx.restore();
 
-    // Category & Booth Subtitle Header (auto-fitted, no truncation of key info)
-    const categoryHeader = `${pal.icon} ${options.category.toUpperCase()}`;
-    const fittedSub = fitEnterpriseTitleLines(ctx, categoryHeader, 1140, 30, 22);
-    ctx.font = `800 ${fittedSub.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
+    ctx.font = '900 76px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillStyle = pal.textSub;
-    ctx.fillText(fittedSub.lines[0] || categoryHeader, canvas.width / 2, 86);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(pal.icon, 120, 144);
 
-    // Full Enterprise Name (100% complete — never truncated with `...`)
+    // Center Full Enterprise Name (100% complete — never truncated with `...`)
     const fullEnterpriseTitle = options.name.toUpperCase();
-    const fittedTitle = fitEnterpriseTitleLines(ctx, fullEnterpriseTitle, 1168, 64, 34);
+    const fittedTitle = fitEnterpriseTitleLines(ctx, fullEnterpriseTitle, 980, 58, 32);
     ctx.save();
     ctx.font = `900 ${fittedTitle.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
-    ctx.textAlign = 'center';
+    ctx.textAlign = 'left';
     ctx.fillStyle = pal.textMain;
     ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
-    ctx.shadowBlur = 10;
-    ctx.shadowOffsetY = 3;
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 2;
 
     if (fittedTitle.lines.length === 1) {
-      ctx.fillText(fittedTitle.lines[0], canvas.width / 2, 178);
+      ctx.fillText(fittedTitle.lines[0], 234, 114);
     } else {
-      ctx.fillText(fittedTitle.lines[0], canvas.width / 2, 144);
-      ctx.fillText(fittedTitle.lines[1], canvas.width / 2, 198);
+      ctx.fillText(fittedTitle.lines[0], 234, 84);
+      ctx.fillText(fittedTitle.lines[1], 234, 134);
     }
     ctx.restore();
 
-    // Bottom interactive badge
+    // Subtitle: Booth Name & Category
+    const categoryHeader = `★ ${options.category.toUpperCase()} ★`;
+    const fittedSub = fitEnterpriseTitleLines(ctx, categoryHeader, 980, 28, 20);
+    ctx.font = `800 ${fittedSub.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = pal.textSub;
+    ctx.fillText(fittedSub.lines[0] || categoryHeader, 234, 184);
+
+    // Right Product Count Pill
     ctx.save();
-    createRoundRectPath(ctx, 250, 242, 780, 68, 34);
+    createRoundRectPath(ctx, 1244, 52, 258, 136, 24);
     ctx.fillStyle = options.active ? pal.border : pal.badgeBg;
     ctx.fill();
     ctx.lineWidth = 3;
@@ -354,14 +369,14 @@ export function createBoothSignTexture(options: {
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '800 29px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '900 44px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = pal.badgeText;
-    ctx.fillText(
-      `📦 ${options.productCount} sản phẩm · Bấm để xem Gian hàng`,
-      canvas.width / 2,
-      287
-    );
+    ctx.fillText(`${options.productCount} SP`, 1373, 116);
+
+    ctx.font = '800 22px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = pal.badgeText;
+    ctx.fillText('TRƯNG BÀY', 1373, 156);
   }
 
   const texture = registerTrackedTexture(canvas);
@@ -375,43 +390,14 @@ export function createBoothFasciaTexture(options: {
   color: string;
   theme?: BoothVisualTheme;
 }): THREE.CanvasTexture {
-  const canvas = createCanvasElement(1280, 220);
-  const ctx = canvas.getContext('2d');
-
-  if (ctx) {
-    const pal = getThemePalette(options.theme, options.color);
-    ctx.fillStyle = pal.bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.fillStyle = pal.border;
-    ctx.fillRect(0, 0, 44, canvas.height);
-    ctx.fillRect(canvas.width - 44, 0, 44, canvas.height);
-    ctx.fillRect(0, 0, canvas.width, 12);
-    ctx.fillRect(0, canvas.height - 14, canvas.width, 14);
-
-    // Full Enterprise Name on architectural fascia (auto-fitted, zero `...` truncation)
-    const fasciaTitle = `${pal.icon} ${options.name.toUpperCase()}`;
-    const fittedFascia = fitEnterpriseTitleLines(ctx, fasciaTitle, 1140, 56, 30);
-    ctx.font = `900 ${fittedFascia.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillStyle = pal.textMain;
-    if (fittedFascia.lines.length === 1) {
-      ctx.fillText(fittedFascia.lines[0], canvas.width / 2, 104);
-    } else {
-      ctx.fillText(fittedFascia.lines[0], canvas.width / 2, 74);
-      ctx.fillText(fittedFascia.lines[1], canvas.width / 2, 118);
-    }
-
-    const categoryLine = `★ ${options.category.toUpperCase()} ★`;
-    const fittedCat = fitEnterpriseTitleLines(ctx, categoryLine, 1140, 28, 20);
-    ctx.font = `800 ${fittedCat.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
-    ctx.fillStyle = pal.textSub;
-    ctx.fillText(fittedCat.lines[0] || categoryLine, canvas.width / 2, 172);
-  }
-
-  const texture = registerTrackedTexture(canvas);
-  texture.anisotropy = 8;
-  return texture;
+  return createBoothSignTexture({
+    name: options.name,
+    category: options.category,
+    productCount: 6,
+    color: options.color,
+    active: false,
+    theme: options.theme,
+  });
 }
 
 export function createBoothPosterTexture(options: {
@@ -914,200 +900,74 @@ export function createEnterpriseBackdropTexture(options: {
     const pal = getThemePalette(options.theme, options.color);
     const companyTitle = (options.companyName || options.name).toUpperCase();
 
-    // Deep exhibition stand backdrop gradient
-    const bgGrad = ctx.createLinearGradient(0, 0, 1024, 576);
+    // 1. Calm, non-competing architectural showroom wall gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, 576);
     bgGrad.addColorStop(0, pal.bg);
-    bgGrad.addColorStop(0.55, pal.bgActive);
-    bgGrad.addColorStop(1, '#090d16');
+    bgGrad.addColorStop(0.5, '#0b1120');
+    bgGrad.addColorStop(1, '#070b14');
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, 1024, 576);
 
-    // Optional custom banner image background overlay
+    // Optional custom banner image background overlay (toned down so products stay primary)
     if (loadedBanner) {
       ctx.save();
-      ctx.globalAlpha = 0.28;
-      ctx.drawImage(loadedBanner, 0, 0, 1024, 576);
-      ctx.restore();
-    } else {
-      // Stylized exhibition key-visual geometric rays on right side
-      ctx.save();
-      ctx.strokeStyle = pal.border;
       ctx.globalAlpha = 0.16;
-      ctx.lineWidth = 3;
-      for (let i = 0; i < 8; i++) {
-        ctx.beginPath();
-        ctx.arc(820, 288, 70 + i * 38, 0, Math.PI * 2);
-        ctx.stroke();
-      }
+      ctx.drawImage(loadedBanner, 0, 0, 1024, 576);
       ctx.restore();
     }
 
-    // Illuminated perimeter frame
-    ctx.strokeStyle = pal.border;
-    ctx.lineWidth = 8;
-    ctx.strokeRect(18, 18, 988, 540);
-
-    // Top illuminated brand header bar
-    ctx.fillStyle = pal.border;
-    ctx.fillRect(18, 18, 988, 18);
-
-    // Left Corporate Logo Medallion
+    // Subtle vertical architectural acoustic/wood fluting slats
     ctx.save();
-    createRoundRectPath(ctx, 56, 66, 132, 132, 28);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-    ctx.fill();
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = pal.border;
-    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.032)';
+    for (let x = 32; x < 1024; x += 28) {
+      ctx.fillRect(x, 86, 8, 468);
+    }
     ctx.restore();
+
+    // Dual soft showroom spotlight halos behind Left Hero Bay (slot_01) & Right Hero Bay (slot_02)
+    for (const bayCenterX of [284, 740]) {
+      const radial = ctx.createRadialGradient(bayCenterX, 330, 24, bayCenterX, 330, 220);
+      radial.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
+      radial.addColorStop(0.55, 'rgba(56, 189, 248, 0.04)');
+      radial.addColorStop(1, 'rgba(15, 23, 42, 0)');
+      ctx.fillStyle = radial;
+      ctx.fillRect(bayCenterX - 230, 96, 460, 450);
+
+      // Subtle architectural recessed bay frame behind each main product
+      ctx.save();
+      createRoundRectPath(ctx, bayCenterX - 208, 108, 416, 434, 24);
+      ctx.strokeStyle = pal.border;
+      ctx.globalAlpha = 0.28;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Illuminated outer perimeter architectural trim
+    ctx.strokeStyle = pal.border;
+    ctx.lineWidth = 6;
+    ctx.strokeRect(14, 14, 996, 548);
+
+    // Subtle Top Brand Crest Strip (sits high at y = 18..86, above the main product panels)
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+    ctx.fillRect(18, 18, 988, 66);
+    ctx.fillStyle = pal.border;
+    ctx.fillRect(18, 82, 988, 3);
 
     if (loadedLogo) {
       ctx.save();
-      createRoundRectPath(ctx, 64, 74, 116, 116, 22);
+      createRoundRectPath(ctx, 42, 26, 50, 50, 12);
       ctx.clip();
-      ctx.drawImage(loadedLogo, 64, 74, 116, 116);
+      ctx.drawImage(loadedLogo, 42, 26, 50, 50);
       ctx.restore();
-    } else {
-      const initials = companyTitle
-        .split(/\s+/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((w) => w[0])
-        .join('');
-      ctx.font = '900 50px Inter, Segoe UI, Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = pal.textSub;
-      ctx.fillText(initials || pal.icon, 122, 148);
     }
 
-    // Enterprise Company Name badge (auto-fitted without `...` truncation)
-    ctx.save();
-    createRoundRectPath(ctx, 214, 68, 740, 44, 12);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = pal.border;
-    ctx.stroke();
-    ctx.restore();
-
-    const badgeLine = `🏢 ${companyTitle}  ·  ${options.category.toUpperCase()}`;
-    const fittedBadge = fitEnterpriseTitleLines(ctx, badgeLine, 704, 22, 16);
-    ctx.font = `800 ${fittedBadge.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
-    ctx.textAlign = 'left';
-    ctx.fillStyle = pal.textSub;
-    ctx.fillText(fittedBadge.lines[0] || badgeLine, 234, 98);
-
-    // Main Exhibition Stand Name (auto-fitted without `...` truncation)
-    const fittedStandName = fitEnterpriseTitleLines(
-      ctx,
-      options.name.toUpperCase(),
-      740,
-      54,
-      28
-    );
-    ctx.font = `900 ${fittedStandName.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
-    ctx.fillStyle = pal.textMain;
-    if (fittedStandName.lines.length === 1) {
-      ctx.fillText(fittedStandName.lines[0], 214, 172);
-    } else {
-      ctx.fillText(fittedStandName.lines[0], 214, 152);
-      ctx.fillText(fittedStandName.lines[1], 214, 194);
-    }
-
-    // Divider line
-    ctx.fillStyle = pal.border;
-    ctx.fillRect(56, 224, 912, 4);
-
-    // Enterprise Value Proposition / Tagline & Description Box
-    ctx.save();
-    createRoundRectPath(ctx, 56, 252, 620, 196, 22);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
-    ctx.fill();
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.font = '700 21px Inter, Segoe UI, Arial, sans-serif';
-    ctx.fillStyle = pal.textSub;
-    ctx.fillText('GIẢI PHÁP & SẢN PHẨM TRƯNG BÀY CHÍNH HÃNG', 84, 290);
-
-    const tagline = options.tagline || 'Trải nghiệm trực tiếp sản phẩm trên kệ trưng bày 3D';
-    ctx.font = '700 26px Inter, Segoe UI, Arial, sans-serif';
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillText(truncateText(tagline, 42), 84, 334);
-
-    const descriptionText = (options.description || '').trim();
-    if (descriptionText) {
-      const descWords = descriptionText.split(/\s+/);
-      let descLine1 = '';
-      let descLine2 = '';
-      for (const w of descWords) {
-        if ((descLine1 + ' ' + w).trim().length <= 48) {
-          descLine1 = (descLine1 + ' ' + w).trim();
-        } else {
-          descLine2 = (descLine2 + ' ' + w).trim();
-        }
-      }
-      ctx.font = '500 20px Inter, Segoe UI, Arial, sans-serif';
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillText(truncateText(descLine1, 50), 84, 374);
-      if (descLine2) {
-        ctx.fillText(truncateText(descLine2, 50), 84, 404);
-      }
-    } else {
-      ctx.font = '600 20px Inter, Segoe UI, Arial, sans-serif';
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillText('✦ Bấm trực tiếp vào sản phẩm trên quầy hoặc kệ 2 bên để xem chi tiết', 84, 392);
-    }
-
-    // Right Visual Recognition Card
-    ctx.save();
-    createRoundRectPath(ctx, 704, 252, 264, 196, 22);
-    ctx.fillStyle = pal.badgeBg;
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = pal.border;
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.font = '800 58px Inter, Segoe UI, Arial, sans-serif';
+    const headerCrest = `${pal.icon}  ${companyTitle}  ·  SHOWROOM TRƯNG BÀY CHÍNH HÃNG`;
+    const fittedCrest = fitEnterpriseTitleLines(ctx, headerCrest, 900, 24, 16);
+    ctx.font = `800 ${fittedCrest.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(pal.icon, 836, 332);
-
-    ctx.font = '800 22px Inter, Segoe UI, Arial, sans-serif';
     ctx.fillStyle = pal.textSub;
-    ctx.fillText('KỆ TRƯNG BÀY 3D', 836, 382);
-
-    ctx.font = '700 24px Inter, Segoe UI, Arial, sans-serif';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(`${options.occupiedSlots} / ${options.totalSlots} VỊ TRÍ`, 836, 420);
-
-    // Bottom Exhibition Footer Strip (Includes Website / Contact Email if provided)
-    ctx.save();
-    createRoundRectPath(ctx, 56, 474, 912, 56, 16);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = pal.border;
-    ctx.stroke();
-    ctx.restore();
-
-    const contactSuffix = options.contactUrl
-      ? ` · ${options.contactUrl.replace(/^https?:\/\//i, '')}`
-      : options.contactEmail
-        ? ` · ${options.contactEmail}`
-        : '';
-
-    ctx.font = '700 21px Inter, Segoe UI, Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillText(
-      truncateText(`★ GIAN HÀNG TRIỂN LÃM · ${companyTitle}${contactSuffix} ★`, 64),
-      512,
-      510
-    );
+    ctx.fillText(fittedCrest.lines[0] || headerCrest, 512, 60);
 
     texture.needsUpdate = true;
   };
@@ -1186,8 +1046,11 @@ export function computeAspectFitRect(
 }
 
 /**
- * Creates a high-contrast 3D Product Display Stand Card texture for a product assigned to a slot.
- * Renders the real product photo prominently while preserving its true aspect ratio.
+ * Creates a high-contrast Portrait Showroom 3D Product Display Panel texture (`1024 x 1240`)
+ * for a product assigned to a slot:
+ * - Upper 64% (`980 x 780`): Huge unstretched, uncropped product photo on a bright studio mount
+ * - Lower 36% (`980 x 402`): High-contrast dark info zone with up to 3 lines of large product name
+ *   (`42px-54px`) + prominent `64px` gold VND price (`6.850.000 ₫`)
  */
 export function createProductDisplayCardTexture(options: {
   slotLabel: string;
@@ -1199,7 +1062,7 @@ export function createProductDisplayCardTexture(options: {
   selected: boolean;
 }): THREE.CanvasTexture {
   const W = 1024;
-  const H = 836;
+  const H = 1240;
   const canvas = createCanvasElement(W, H);
   const ctx = canvas.getContext('2d');
   const texture = registerTrackedTexture(canvas);
@@ -1223,24 +1086,24 @@ export function createProductDisplayCardTexture(options: {
     if (!ctx || isDisposed) return;
     ctx.clearRect(0, 0, W, H);
 
-    // 1. Outer Display Stand Frame Background
+    // 1. Outer Showroom Display Panel Frame
     ctx.save();
-    createRoundRectPath(ctx, 4, 4, W - 8, H - 8, 28);
+    createRoundRectPath(ctx, 6, 6, W - 12, H - 12, 32);
     ctx.fillStyle = '#090d16';
     ctx.fill();
-    ctx.lineWidth = options.selected ? 14 : 8;
+    ctx.lineWidth = options.selected ? 16 : 9;
     ctx.strokeStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
     ctx.stroke();
     ctx.restore();
 
-    // 2. Large Prominent Studio Photo Viewport (Occupies the main upper display area: 988 x 548)
-    const frameX = 18;
-    const frameY = 16;
-    const frameW = W - 36; // 988
-    const frameH = 548;
+    // 2. Enlarged Hero Studio Photo Viewport (980 x 780)
+    const frameX = 22;
+    const frameY = 22;
+    const frameW = W - 44; // 980
+    const frameH = 780;
 
     ctx.save();
-    createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 20);
+    createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 24);
     const studioGrad = ctx.createLinearGradient(frameX, frameY, frameX, frameY + frameH);
     studioGrad.addColorStop(0, '#ffffff');
     studioGrad.addColorStop(1, '#f1f5f9');
@@ -1253,10 +1116,10 @@ export function createProductDisplayCardTexture(options: {
       const natH = loadedImg.naturalHeight || loadedImg.height || 600;
 
       ctx.save();
-      createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 20);
+      createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 24);
       ctx.clip();
 
-      // Subtle studio backdrop fill so portrait/square photos never leave harsh blank bars
+      // Subtle studio backdrop fill so portrait/landscape photos never leave harsh blank bars
       ctx.save();
       ctx.globalAlpha = 0.22;
       const coverScale = Math.max(frameW / Math.max(1, natW), frameH / Math.max(1, natH));
@@ -1272,27 +1135,27 @@ export function createProductDisplayCardTexture(options: {
       ctx.restore();
 
       // True-aspect-ratio product photo (100% unstretched, uncropped)
-      const fit = computeAspectFitRect(natW, natH, frameX, frameY, frameW, frameH, 6);
+      const fit = computeAspectFitRect(natW, natH, frameX, frameY, frameW, frameH, 8);
       ctx.save();
-      ctx.shadowColor = 'rgba(15, 23, 42, 0.24)';
-      ctx.shadowBlur = 16;
-      ctx.shadowOffsetY = 4;
-      createRoundRectPath(ctx, fit.x, fit.y, fit.width, fit.height, 14);
+      ctx.shadowColor = 'rgba(15, 23, 42, 0.25)';
+      ctx.shadowBlur = 20;
+      ctx.shadowOffsetY = 6;
+      createRoundRectPath(ctx, fit.x, fit.y, fit.width, fit.height, 16);
       ctx.fillStyle = '#ffffff';
       ctx.fill();
       ctx.restore();
 
       ctx.save();
-      createRoundRectPath(ctx, fit.x, fit.y, fit.width, fit.height, 14);
+      createRoundRectPath(ctx, fit.x, fit.y, fit.width, fit.height, 16);
       ctx.clip();
       ctx.drawImage(loadedImg, fit.x, fit.y, fit.width, fit.height);
       ctx.restore();
 
       ctx.restore();
     } else {
-      // Honest non-deceptive fallback when image is loading, missing, or broken
+      // Clean fallback when image is loading, missing, or broken
       ctx.save();
-      createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 20);
+      createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 24);
       const fallbackGrad = ctx.createLinearGradient(frameX, frameY, frameX + frameW, frameY + frameH);
       fallbackGrad.addColorStop(0, '#1e293b');
       fallbackGrad.addColorStop(1, '#0f172a');
@@ -1302,13 +1165,13 @@ export function createProductDisplayCardTexture(options: {
 
       ctx.save();
       ctx.beginPath();
-      ctx.arc(W / 2, frameY + frameH / 2 - 28, 66, 0, Math.PI * 2);
+      ctx.arc(W / 2, frameY + frameH / 2 - 34, 82, 0, Math.PI * 2);
       ctx.fillStyle = options.accentColor || '#0ea5e9';
       ctx.globalAlpha = 0.24;
       ctx.fill();
       ctx.restore();
 
-      ctx.font = '800 48px Inter, Segoe UI, Arial, sans-serif';
+      ctx.font = '900 58px Inter, Segoe UI, Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#f8fafc';
       const initials = options.name
@@ -1317,9 +1180,9 @@ export function createProductDisplayCardTexture(options: {
         .slice(0, 2)
         .map((w) => w[0]?.toUpperCase())
         .join('');
-      ctx.fillText(initials || 'SP', W / 2, frameY + frameH / 2 - 10);
+      ctx.fillText(initials || 'SP', W / 2, frameY + frameH / 2 - 12);
 
-      ctx.font = '700 28px Inter, Segoe UI, Arial, sans-serif';
+      ctx.font = '700 32px Inter, Segoe UI, Arial, sans-serif';
       ctx.fillStyle = '#94a3b8';
       const statusText =
         imageStatus === 'loading'
@@ -1327,91 +1190,96 @@ export function createProductDisplayCardTexture(options: {
           : imageStatus === 'error'
             ? 'Không tải được ảnh sản phẩm'
             : 'Chưa có ảnh sản phẩm';
-      ctx.fillText(statusText, W / 2, frameY + frameH / 2 + 72);
+      ctx.fillText(statusText, W / 2, frameY + frameH / 2 + 86);
     }
 
-    // Frame border & compact corner Slot Badge
+    // Studio photo border & compact top-left Slot Badge
     ctx.save();
-    createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 20);
-    ctx.lineWidth = 3.5;
-    ctx.strokeStyle = options.selected ? '#fbbf24' : 'rgba(148, 163, 184, 0.5)';
+    createRoundRectPath(ctx, frameX, frameY, frameW, frameH, 24);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = options.selected ? '#fbbf24' : 'rgba(148, 163, 184, 0.55)';
     ctx.stroke();
     ctx.restore();
 
     ctx.save();
-    createRoundRectPath(ctx, frameX + 12, frameY + 12, 134, 40, 11);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.86)';
+    createRoundRectPath(ctx, frameX + 14, frameY + 14, 148, 46, 12);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
     ctx.fill();
     ctx.lineWidth = 2.5;
     ctx.strokeStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '800 21px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '800 24px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#f8fafc';
-    ctx.fillText(shortSlotBadge.toUpperCase(), frameX + 79, frameY + 39);
+    ctx.fillText(shortSlotBadge.toUpperCase(), frameX + 88, frameY + 45);
 
-    // 3. Dedicated High-Contrast Bottom Info Zone (y = 574..820, never overlaps product photo)
-    const infoX = 18;
-    const infoY = 574;
-    const infoW = W - 36; // 988
-    const infoH = 246;
+    // 3. Dedicated High-Contrast Product Name & Price Zone (y = 816..1218, 980 x 402)
+    const infoX = 22;
+    const infoY = 816;
+    const infoW = W - 44; // 980
+    const infoH = 402;
 
     ctx.save();
-    createRoundRectPath(ctx, infoX, infoY, infoW, infoH, 20);
+    createRoundRectPath(ctx, infoX, infoY, infoW, infoH, 24);
     ctx.fillStyle = '#0f172a';
     ctx.fill();
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3.5;
     ctx.strokeStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
     ctx.stroke();
     ctx.restore();
 
     // Accent top bar inside info panel
-    ctx.save();
     ctx.fillStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
-    ctx.fillRect(infoX + 24, infoY, infoW - 48, 5);
-    ctx.restore();
+    ctx.fillRect(infoX + 28, infoY, infoW - 56, 6);
 
-    // Product Name: up to 2 full-width lines in high-contrast bold white
-    const titleLines = wrapProductTitleLines(ctx, options.name, 944, 38);
+    // Product Name: up to 3 full-width lines in huge high-contrast white typography
+    const titleLines = wrapProductTitleLines(ctx, options.name, 932, 44, undefined, 3);
     ctx.textAlign = 'left';
     ctx.fillStyle = '#ffffff';
     if (titleLines.length === 1) {
-      ctx.font = '900 42px Inter, Segoe UI, Arial, sans-serif';
-      ctx.fillText(titleLines[0], 40, 646);
+      ctx.font = '900 52px Inter, Segoe UI, Arial, sans-serif';
+      ctx.fillText(titleLines[0], 46, 946);
+    } else if (titleLines.length === 2) {
+      ctx.font = '900 46px Inter, Segoe UI, Arial, sans-serif';
+      ctx.fillText(titleLines[0], 46, 912);
+      ctx.fillText(titleLines[1], 46, 974);
     } else {
-      ctx.font = '900 37px Inter, Segoe UI, Arial, sans-serif';
-      ctx.fillText(titleLines[0], 40, 626);
-      ctx.fillText(titleLines[1], 40, 672);
+      ctx.font = '900 40px Inter, Segoe UI, Arial, sans-serif';
+      ctx.fillText(titleLines[0], 46, 892);
+      ctx.fillText(titleLines[1], 46, 944);
+      ctx.fillText(titleLines[2], 46, 996);
     }
 
-    // Prominent Price Box & Value right below Product Name (e.g., `6.850.000 ₫`)
+    // Prominent Price Banner right below Product Name (e.g., `6.850.000 ₫`)
     ctx.save();
-    createRoundRectPath(ctx, 34, 696, 716, 102, 16);
-    ctx.fillStyle = 'rgba(251, 191, 36, 0.14)';
+    createRoundRectPath(ctx, 42, 1054, 728, 140, 20);
+    ctx.fillStyle = 'rgba(251, 191, 36, 0.16)';
     ctx.fill();
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = 'rgba(251, 191, 36, 0.65)';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#fbbf24';
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '900 48px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '900 62px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'left';
     ctx.fillStyle = '#fbbf24';
-    ctx.fillText(truncateText(options.priceText, 22), 54, 764);
+    ctx.fillText(truncateText(options.priceText, 20), 66, 1146);
 
     // Interactive Action Pill on bottom-right of Price Row
     ctx.save();
-    createRoundRectPath(ctx, W - 254, 704, 216, 86, 16);
+    createRoundRectPath(ctx, W - 236, 1062, 194, 124, 20);
     ctx.fillStyle = options.selected ? '#fbbf24' : options.accentColor || '#0ea5e9';
     ctx.fill();
     ctx.restore();
 
-    ctx.font = '900 25px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '900 28px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = options.selected ? '#0f172a' : '#ffffff';
-    ctx.fillText('CHI TIẾT ▸', W - 146, 756);
+    ctx.fillText('CHI TIẾT', W - 139, 1118);
+    ctx.font = '800 24px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillText('NHẤN XEM ▸', W - 139, 1154);
 
     texture.needsUpdate = true;
   };

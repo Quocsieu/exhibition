@@ -94,20 +94,20 @@ export function computeShopShowcaseCameraTargets(
   let localCamZ: number;
   let localCamY: number;
   let localLookY: number;
-  const localLookZ = -0.45;
+  const localLookZ = -0.25;
   let panX = 0;
 
   if (isDesktopSplit) {
     // Drawer occupies min(500px, 44vw) on the right side of the screen
     const drawerFraction = Math.min(500 / safeWidth, 0.44);
     const openFraction = Math.max(0.52, 1 - drawerFraction);
-    const halfSpanRequired = Math.max(booth.width, 6.2) * 0.62;
+    const halfSpanRequired = Math.max(booth.width, 6.2) * 0.58;
     const distForWidth =
       1.6 + halfSpanRequired / Math.max(0.32, openFraction * tanHalfFov * aspect);
-    const distForHeight = 3.44 + 2.45 / tanHalfFov;
-    localCamZ = THREE.MathUtils.clamp(Math.max(distForWidth, distForHeight), 10.85, 15.8);
-    localCamY = 2.44;
-    localLookY = 2.54;
+    const distForHeight = 3.52 + 1.85 / tanHalfFov;
+    localCamZ = THREE.MathUtils.clamp(Math.max(distForWidth, distForHeight), 9.05, 14.8);
+    localCamY = 2.12;
+    localLookY = 2.06;
 
     // Shift both camera and lookAt along local +X so the shop sits in the open left viewport
     // while keeping the sightline 100% perpendicular (0 deg horizontal angle) to the storefront
@@ -115,21 +115,22 @@ export function computeShopShowcaseCameraTargets(
     panX = drawerFraction * 0.88 * frustumHalfWidthAtCenter;
   } else if (isMobileSheet) {
     // Bottom sheet occupies up to 62vh on mobile; frame storefront in the upper viewport
-    const halfSpanRequired = Math.max(booth.width, 6.2) * 0.6;
+    const halfSpanRequired = Math.max(booth.width, 6.2) * 0.58;
     const distForWidth = 1.8 + halfSpanRequired / Math.max(0.24, tanHalfFov * aspect);
-    localCamZ = THREE.MathUtils.clamp(Math.max(distForWidth, 12.2), 12.2, 17.8);
-    localCamY = 2.38;
-    localLookY = 1.12;
+    localCamZ = THREE.MathUtils.clamp(Math.max(distForWidth, 11.4), 11.4, 16.8);
+    localCamY = 2.18;
+    localLookY = 1.08;
     panX = 0;
   } else {
-    // Full-screen Shop Showcase: frames the entire booth from counter plinth (y = 0) up to
-    // above the Crown Signboard (y = 5.08m > 4.78m) while keeping all 6 product slots large & clear
-    const halfSpanRequired = Math.max(booth.width, 6.2) * 0.56;
+    // Full-screen Product-First Shop Showcase: moves 1.80m closer (z = 9.05m) now that the
+    // duplicate top billboard is removed, framing KHU A Brand Header (y = 3.04..3.72m),
+    // KHU B Hero Center Stage (slot_01 & slot_02), and KHU C Secondary Shelves (slot_03..06)
+    const halfSpanRequired = Math.max(booth.width, 6.2) * 0.55;
     const distForWidth =
-      2.6 + halfSpanRequired / Math.max(0.22, tanHalfFov * aspect);
-    localCamZ = THREE.MathUtils.clamp(Math.max(10.85, distForWidth), 10.85, 16.4);
-    localCamY = 2.44;
-    localLookY = 2.58;
+      2.4 + halfSpanRequired / Math.max(0.22, tanHalfFov * aspect);
+    localCamZ = THREE.MathUtils.clamp(Math.max(9.05, distForWidth), 9.05, 15.2);
+    localCamY = 2.12;
+    localLookY = 2.06;
     panX = 0;
   }
 

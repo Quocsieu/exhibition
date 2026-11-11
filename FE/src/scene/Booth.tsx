@@ -1,6 +1,6 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Billboard, useGLTF } from '@react-three/drei';
+import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   type Booth as BoothType,
@@ -11,7 +11,6 @@ import {
 import { formatCurrency } from '../components/ProductPanel';
 import {
   type BoothVisualTheme,
-  createBoothFasciaTexture,
   createBoothSignTexture,
   createEnterpriseBackdropTexture,
   createProductDisplayCardTexture,
@@ -69,34 +68,32 @@ const BACKDROP_GLOW_BORDER_GEOM = new THREE.BoxGeometry(4.2, 2.54, 0.08);
 const BACKDROP_CANVAS_GEOM = new THREE.PlaneGeometry(3.96, 2.28);
 const BACKDROP_LIGHT_BAR_GEOM = new THREE.BoxGeometry(3.8, 0.07, 0.22);
 
-// Front Exhibition Counter (Centered at x = 0, z = 1.34; top surface at y = 0.94)
-const EXPO_COUNTER_BODY_GEOM = new THREE.BoxGeometry(2.96, 0.62, 0.92);
-const EXPO_COUNTER_TOP_GEOM = new THREE.BoxGeometry(3.12, 0.065, 1.02);
-const EXPO_COUNTER_FRONT_PANEL_GEOM = new THREE.BoxGeometry(2.72, 0.46, 0.04);
-const EXPO_COUNTER_LED_STRIP_GEOM = new THREE.BoxGeometry(3.06, 0.04, 0.98);
+// KHU B — Main Showroom Podium (Centered at x = 0, z = 0.92; low-profile top surface at y = 0.56)
+const EXPO_COUNTER_BODY_GEOM = new THREE.BoxGeometry(3.32, 0.26, 0.84);
+const EXPO_COUNTER_TOP_GEOM = new THREE.BoxGeometry(3.44, 0.05, 0.92);
+const EXPO_COUNTER_FRONT_PANEL_GEOM = new THREE.BoxGeometry(3.12, 0.18, 0.04);
+const EXPO_COUNTER_LED_STRIP_GEOM = new THREE.BoxGeometry(3.4, 0.035, 0.9);
 
-// Symmetric Stepped 2-Tier Exhibition Display Racks (Left & Right — Enlarged for high product visibility)
-const STEPPED_RACK_PILLAR_GEOM = new THREE.BoxGeometry(1.46, 1.34, 0.74);
-const STEPPED_RACK_LOWER_BASE_GEOM = new THREE.BoxGeometry(1.46, 0.48, 0.74);
-const STEPPED_SHELF_BOARD_GEOM = new THREE.BoxGeometry(1.56, 0.065, 0.84);
-const STEPPED_SHELF_TRIM_GEOM = new THREE.BoxGeometry(1.58, 0.028, 0.86);
-const STEPPED_RACK_BACKBOARD_GEOM = new THREE.BoxGeometry(1.56, 0.88, 0.06);
+// KHU C — Symmetric 2-Tier Secondary Showroom Racks (Flanking at x = ±2.44m)
+const STEPPED_RACK_PILLAR_GEOM = new THREE.BoxGeometry(1.18, 1.38, 0.64);
+const STEPPED_RACK_LOWER_BASE_GEOM = new THREE.BoxGeometry(1.24, 0.14, 0.68);
+const STEPPED_SHELF_BOARD_GEOM = new THREE.BoxGeometry(1.3, 0.055, 0.74);
+const STEPPED_SHELF_TRIM_GEOM = new THREE.BoxGeometry(1.32, 0.025, 0.76);
+const STEPPED_RACK_BACKBOARD_GEOM = new THREE.BoxGeometry(1.28, 1.18, 0.05);
 
-// Slot Product Stand Geometries (Enlarged high-visibility 3D display boards sitting flush at y = 0)
-const SLOT_EMPTY_MAT_GEOM = new THREE.BoxGeometry(0.96, 0.008, 0.56);
-const SLOT_STAND_BASE_GEOM = new THREE.BoxGeometry(1.06, 0.04, 0.38);
-const SLOT_STAND_LED_TRIM_GEOM = new THREE.BoxGeometry(1.09, 0.012, 0.4);
-const SLOT_STAND_STRUT_GEOM = new THREE.BoxGeometry(0.28, 0.44, 0.05);
-const SLOT_CARD_FRAME_GEOM = new THREE.BoxGeometry(1.24, 1.02, 0.046);
-const SLOT_CARD_BEZEL_GEOM = new THREE.BoxGeometry(1.28, 1.06, 0.03);
-const SLOT_CARD_PLANE_GEOM = new THREE.PlaneGeometry(1.19, 0.97);
+// Portrait Showroom Product Display Panel Geometries (1 : 1.21 aspect ratio matching 1024 × 1240 texture)
+const SLOT_EMPTY_MAT_GEOM = new THREE.BoxGeometry(1.04, 0.008, 0.54);
+const SLOT_STAND_BASE_GEOM = new THREE.BoxGeometry(1.08, 0.036, 0.36);
+const SLOT_STAND_LED_TRIM_GEOM = new THREE.BoxGeometry(1.11, 0.012, 0.38);
+const SLOT_STAND_STRUT_GEOM = new THREE.BoxGeometry(0.26, 0.48, 0.05);
+const SLOT_CARD_FRAME_GEOM = new THREE.BoxGeometry(1.14, 1.38, 0.046);
+const SLOT_CARD_BEZEL_GEOM = new THREE.BoxGeometry(1.18, 1.42, 0.03);
+const SLOT_CARD_PLANE_GEOM = new THREE.PlaneGeometry(1.1, 1.33);
 
 const PERGOLA_RAFTER_GEOM = new THREE.BoxGeometry(0.16, 0.22, 4.6);
 const AWNING_SLAT_GEOM = new THREE.BoxGeometry(0.94, 0.08, 0.68);
 const LANTERN_BULB_GEOM = new THREE.SphereGeometry(0.12, 10, 10);
 const CEIL_LIGHT_GEOM = new THREE.BoxGeometry(1.45, 0.06, 0.18);
-const SIGN_BILLBOARD_GEOM = new THREE.PlaneGeometry(5.65, 1.18);
-const SIGN_CROWN_STRUT_GEOM = new THREE.CylinderGeometry(0.055, 0.055, 0.62, 8);
 
 const TOTEM_BODY_GEOM = new THREE.BoxGeometry(0.56, 1.92, 0.16);
 const TOTEM_BASE_GEOM = new THREE.BoxGeometry(0.68, 0.08, 0.36);
@@ -276,18 +273,25 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
       };
     }, [cardTexture]);
 
-    // Zone-calibrated safe display scale: maximizes product photo, title & price visibility while
-    // guaranteeing zero overlap between adjacent slots (counter spacing = 1.68m, stepped shelves = 0.90m Y & 0.96m Z offset)
-    const fitScale = slot.zone === 'counter' ? 1.08 : 1.02;
+    // Product-First 3-Zone Display Scale:
+    // - KHU B Main Hero Slots (slot_01, slot_02 on center podium): [1.36, 1.44, 1.15] -> 1.60m wide × 2.04m tall
+    // - KHU C Secondary Shelf Slots (slot_03..06 on left/right 2-tier shelves): [0.98, 0.85, 1.0] -> 1.16m wide × 1.21m tall
+    const isHeroCounterSlot = slot.zone === 'counter';
+    const baseScale: [number, number, number] = isHeroCounterSlot
+      ? [1.36, 1.44, 1.15]
+      : [0.98, 0.85, 1.0];
+    const displayScale: [number, number, number] = highlighted
+      ? [baseScale[0] * 1.03, baseScale[1] * 1.03, baseScale[2] * 1.03]
+      : baseScale;
     const facingYawOffset =
-      slot.zone === 'left-shelf' ? -0.1 : slot.zone === 'right-shelf' ? 0.1 : 0;
+      slot.zone === 'left-shelf' ? -0.06 : slot.zone === 'right-shelf' ? 0.06 : 0;
 
     const hasValidModelUrl = Boolean(
       product?.modelUrl && /\.(glb|gltf)(\?.*)?$/i.test(product.modelUrl.trim())
     );
 
     const renderFramedPhotoStand = () => (
-      <group position={[0, 0.545, 0.026]} rotation={[-0.04, 0, 0]}>
+      <group position={[0, 0.725, 0.026]} rotation={[-0.02, 0, 0]}>
         {/* Outer highlight bezel */}
         <mesh
           position={[0, 0, -0.005]}
@@ -344,8 +348,8 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
           /* Empty Slot: Clean natural recessed shelf pad — zero fake product */
           <mesh position={[0, 0.004, 0]} geometry={SLOT_EMPTY_MAT_GEOM} material={EMPTY_SLOT_MAT} />
         ) : (
-          /* Occupied Slot: Flush 3D Display Stand sitting directly on the shelf/counter at y = 0 */
-          <group scale={highlighted ? [fitScale * 1.04, fitScale * 1.04, fitScale * 1.04] : [fitScale, fitScale, fitScale]}>
+          /* Occupied Slot: Flush 3D Display Stand sitting directly on the shelf/podium at y = 0 */
+          <group scale={displayScale}>
             {/* Flush Display Plinth Base sitting at y = 0..0.038 */}
             <mesh
               position={[0, 0.019, 0]}
@@ -462,20 +466,14 @@ export const Booth: React.FC<BoothProps> = React.memo(
       };
     }, [brandStandardMat, brandFlatMat, brandBasicMat]);
 
-    // Pre-generate and cache Fascia, Enterprise Backdrop, Idle Sign, and Active Sign textures
-    const { fasciaTexture, backdropTexture, idleSignTexture, activeSignTexture } = useMemo(() => {
+    // Pre-generate and cache Unified Brand Header (Idle/Active) and Calm Showroom Backdrop textures
+    const { backdropTexture, idleSignTexture, activeSignTexture } = useMemo(() => {
       const enterpriseTitle = booth.companyName || booth.name;
       const standSubtitle =
         booth.companyName && booth.companyName !== booth.name
           ? `${booth.name} · ${booth.category}`
           : booth.category;
       return {
-        fasciaTexture: createBoothFasciaTexture({
-          name: enterpriseTitle,
-          category: standSubtitle,
-          color: booth.color,
-          theme,
-        }),
         backdropTexture: createEnterpriseBackdropTexture({
           name: booth.name,
           companyName: enterpriseTitle,
@@ -526,12 +524,11 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
     useEffect(() => {
       return () => {
-        fasciaTexture.dispose();
         backdropTexture.dispose();
         idleSignTexture.dispose();
         activeSignTexture.dispose();
       };
-    }, [fasciaTexture, backdropTexture, idleSignTexture, activeSignTexture]);
+    }, [backdropTexture, idleSignTexture, activeSignTexture]);
 
     const currentSignTexture = active ? activeSignTexture : idleSignTexture;
 
@@ -615,13 +612,13 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {/* ================================================================
             2. REAL-WORLD TRADE FAIR EXHIBITION STAND ARCHITECTURE:
-               A) LARGE ILLUMINATED REAR ENTERPRISE BACKDROP WALL
-               B) FRONT EXHIBITION RECEPTION & DISPLAY COUNTER (slot_01, slot_02)
-               C) SYMMETRIC LEFT & RIGHT 2-TIER STEPPED DISPLAY SHELVES (slot_03..06)
+               KHU A) SINGLE UNIFIED BRAND HEADER AT TOP + CALM REAR BACKDROP WALL
+               KHU B) MAIN PRODUCT DISPLAY PODIUM (slot_01, slot_02 HERO CENTER STAGE)
+               KHU C) SYMMETRIC LEFT & RIGHT 2-TIER SECONDARY SHELVES (slot_03..06)
            ================================================================ */}
 
-        {/* A) Large Rear Enterprise Backdrop Wall (Company Name, Logo, Key Visual) */}
-        <group position={[0, 1.86, -vd / 2 + 0.18]}>
+        {/* Rear Architectural Showroom Backdrop Wall (Calm spotlight background behind Hero Products) */}
+        <group position={[0, 1.82, -vd / 2 + 0.18]}>
           <mesh position={[0, 0, -0.02]} geometry={BACKDROP_GLOW_BORDER_GEOM} material={brandBasicMat} />
           <mesh geometry={BACKDROP_FRAME_GEOM} material={DARK_NAVY_MAT} />
           <mesh position={[0, 0, 0.065]} geometry={BACKDROP_CANVAS_GEOM}>
@@ -635,38 +632,38 @@ export const Booth: React.FC<BoothProps> = React.memo(
           />
         </group>
 
-        {/* B) Front Exhibition Counter (Centered at x = 0, z = 1.34; top surface at y = 0.94) */}
-        <group position={[0, 0, 1.34]}>
+        {/* KHU B — Main Product Display Podium (Centered at x = 0, z = 0.92; low-profile top surface at y = 0.56) */}
+        <group position={[0, 0, 0.92]}>
           <mesh
-            position={[0, 0.6, 0]}
+            position={[0, 0.41, 0]}
             castShadow
             receiveShadow
             geometry={EXPO_COUNTER_BODY_GEOM}
             material={shelfTopMat}
           />
           <mesh
-            position={[0, 0.91, 0]}
+            position={[0, 0.535, 0]}
             castShadow
             receiveShadow
             geometry={EXPO_COUNTER_TOP_GEOM}
             material={shelfBodyMat}
           />
           <mesh
-            position={[0, 0.875, 0]}
+            position={[0, 0.505, 0]}
             geometry={EXPO_COUNTER_LED_STRIP_GEOM}
             material={brandBasicMat}
           />
           <mesh
-            position={[0, 0.6, 0.47]}
+            position={[0, 0.41, 0.43]}
             geometry={EXPO_COUNTER_FRONT_PANEL_GEOM}
             material={brandStandardMat}
           />
         </group>
 
-        {/* C1) Left Symmetric 2-Tier Stepped Exhibition Display Shelf (slot_03 Upper, slot_04 Lower) */}
+        {/* KHU C1 — Left Symmetric 2-Tier Secondary Product Shelf (slot_03 Upper, slot_04 Lower) */}
         <group>
-          {/* Upper Tier Structure (Centered at [-2.22, y, -0.44], top surface at y = 1.68) */}
-          <group position={[-2.22, 0, -0.44]} rotation={[0, 0.24, 0]}>
+          {/* Upper Tier Structure (Centered at [-2.44, y, 0.68], top surface at y = 1.72) */}
+          <group position={[-2.44, 0, 0.68]} rotation={[0, 0.2, 0]}>
             <mesh
               position={[0, 0.98, 0]}
               castShadow
@@ -675,52 +672,52 @@ export const Booth: React.FC<BoothProps> = React.memo(
               material={shelfBodyMat}
             />
             <mesh
-              position={[0, 1.65, 0]}
+              position={[0, 1.69, 0]}
               castShadow
               receiveShadow
               geometry={STEPPED_SHELF_BOARD_GEOM}
               material={shelfTopMat}
             />
             <mesh
-              position={[0, 1.61, 0]}
+              position={[0, 1.66, 0]}
               geometry={STEPPED_SHELF_TRIM_GEOM}
               material={brandBasicMat}
             />
             <mesh
-              position={[0, 2.08, -0.39]}
+              position={[0, 2.3, -0.35]}
               geometry={STEPPED_RACK_BACKBOARD_GEOM}
               material={DARK_NAVY_MAT}
             />
           </group>
 
-          {/* Lower Tier Structure (Centered at [-2.22, y, 0.52], top surface at y = 0.78) */}
-          <group position={[-2.22, 0, 0.52]} rotation={[0, 0.24, 0]}>
+          {/* Lower Tier Structure (Centered at [-2.44, y, 1.12], top surface at y = 0.42) */}
+          <group position={[-2.44, 0, 1.12]} rotation={[0, 0.2, 0]}>
             <mesh
-              position={[0, 0.51, 0]}
+              position={[0, 0.32, 0]}
               castShadow
               receiveShadow
               geometry={STEPPED_RACK_LOWER_BASE_GEOM}
               material={shelfBodyMat}
             />
             <mesh
-              position={[0, 0.75, 0]}
+              position={[0, 0.39, 0]}
               castShadow
               receiveShadow
               geometry={STEPPED_SHELF_BOARD_GEOM}
               material={shelfTopMat}
             />
             <mesh
-              position={[0, 0.71, 0]}
+              position={[0, 0.365, 0]}
               geometry={STEPPED_SHELF_TRIM_GEOM}
               material={brandBasicMat}
             />
           </group>
         </group>
 
-        {/* C2) Right Symmetric 2-Tier Stepped Exhibition Display Shelf (slot_05 Upper, slot_06 Lower) */}
+        {/* KHU C2 — Right Symmetric 2-Tier Secondary Product Shelf (slot_05 Upper, slot_06 Lower) */}
         <group>
-          {/* Upper Tier Structure (Centered at [2.22, y, -0.44], top surface at y = 1.68) */}
-          <group position={[2.22, 0, -0.44]} rotation={[0, -0.24, 0]}>
+          {/* Upper Tier Structure (Centered at [2.44, y, 0.68], top surface at y = 1.72) */}
+          <group position={[2.44, 0, 0.68]} rotation={[0, -0.2, 0]}>
             <mesh
               position={[0, 0.98, 0]}
               castShadow
@@ -729,42 +726,42 @@ export const Booth: React.FC<BoothProps> = React.memo(
               material={shelfBodyMat}
             />
             <mesh
-              position={[0, 1.65, 0]}
+              position={[0, 1.69, 0]}
               castShadow
               receiveShadow
               geometry={STEPPED_SHELF_BOARD_GEOM}
               material={shelfTopMat}
             />
             <mesh
-              position={[0, 1.61, 0]}
+              position={[0, 1.66, 0]}
               geometry={STEPPED_SHELF_TRIM_GEOM}
               material={brandBasicMat}
             />
             <mesh
-              position={[0, 2.08, -0.39]}
+              position={[0, 2.3, -0.35]}
               geometry={STEPPED_RACK_BACKBOARD_GEOM}
               material={DARK_NAVY_MAT}
             />
           </group>
 
-          {/* Lower Tier Structure (Centered at [2.22, y, 0.52], top surface at y = 0.78) */}
-          <group position={[2.22, 0, 0.52]} rotation={[0, -0.24, 0]}>
+          {/* Lower Tier Structure (Centered at [2.44, y, 1.12], top surface at y = 0.42) */}
+          <group position={[2.44, 0, 1.12]} rotation={[0, -0.2, 0]}>
             <mesh
-              position={[0, 0.51, 0]}
+              position={[0, 0.32, 0]}
               castShadow
               receiveShadow
               geometry={STEPPED_RACK_LOWER_BASE_GEOM}
               material={shelfBodyMat}
             />
             <mesh
-              position={[0, 0.75, 0]}
+              position={[0, 0.39, 0]}
               castShadow
               receiveShadow
               geometry={STEPPED_SHELF_BOARD_GEOM}
               material={shelfTopMat}
             />
             <mesh
-              position={[0, 0.71, 0]}
+              position={[0, 0.365, 0]}
               geometry={STEPPED_SHELF_TRIM_GEOM}
               material={brandBasicMat}
             />
@@ -786,31 +783,32 @@ export const Booth: React.FC<BoothProps> = React.memo(
         ))}
 
         {/* ================================================================
-            4. ARCHITECTURAL ROOF, FASCIA HEADER & FRONT PILLARS BY THEME
-               (Fascia advanced to z = vd/2 + 1.18, y = 3.21m so roof eaves/awnings never occlude enterprise name)
+            4. KHU A — SINGLE UNIFIED BRAND HEADER & OUTWARD-FRAMED PILLARS BY THEME
+               (Single Brand Header at world y = 3.38m, front plane z = 3.52m, height = 0.68m;
+                Front pillars shifted outward to x = ±3.28m so the 6.2m product stage is 100% unobstructed)
            ================================================================ */}
         {theme === 'tech' && (
           <group>
             <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.82, vd / 2 + 0.42]} castShadow material={DARK_NAVY_MAT}>
-                <boxGeometry args={[vw + 0.48, 0.5, 0.34]} />
+              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={DARK_NAVY_MAT}>
+                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
-              <mesh position={[0, -0.55, vd / 2 + 0.44]} material={CYAN_GLOW_MAT}>
-                <boxGeometry args={[vw + 0.52, 0.06, 0.38]} />
+              <mesh position={[0, -0.26, vd / 2 + 0.44]} material={CYAN_GLOW_MAT}>
+                <boxGeometry args={[vw + 0.6, 0.06, 0.38]} />
               </mesh>
-              <mesh position={[0, -0.82, vd / 2 + 0.6]}>
-                <planeGeometry args={[vw + 0.28, 0.46]} />
-                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
+              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                <planeGeometry args={[vw + 0.36, 0.68]} />
+                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
               <mesh position={[-vw * 0.22, -0.14, -0.5]} geometry={CEIL_LIGHT_GEOM} material={CYAN_GLOW_MAT} />
               <mesh position={[vw * 0.22, -0.14, -0.5]} geometry={CEIL_LIGHT_GEOM} material={WHITE_LIGHT_MAT} />
             </group>
 
-            <group position={[vw / 2 - 0.18, 0.18, vd / 2 - 0.22]}>
+            <group position={[vw / 2 + 0.28, 0.18, vd / 2 - 0.22]}>
               <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={TRUSS_PILLAR_GEOM} material={CHROME_PILLAR_MAT} />
               <mesh position={[0, WALL_HEIGHT * 0.65, 0]} geometry={TRUSS_RING_GEOM} material={CYAN_GLOW_MAT} />
             </group>
-            <group position={[-vw / 2 + 0.36, 0.18, vd / 2 - 0.2]}>
+            <group position={[-vw / 2 - 0.48, 0.18, vd / 2 - 0.2]}>
               <mesh position={[0, 0.04, 0]} geometry={TOTEM_BASE_GEOM} material={DARK_NAVY_MAT} />
               <mesh position={[0, 0.98, 0]} geometry={TOTEM_BODY_GEOM} material={DARK_NAVY_MAT} />
               <mesh position={[0, 1.06, 0.085]} geometry={TOTEM_SCREEN_GEOM} material={CYAN_GLOW_MAT} />
@@ -820,29 +818,29 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {theme === 'living' && (
           <group>
-            <group position={[0, WALL_HEIGHT + 0.56, 0.7]}>
-              <mesh position={[0, -0.8, vd / 2 + 0.44]} castShadow material={WARM_OAK_MAT}>
-                <boxGeometry args={[vw + 0.46, 0.5, 0.34]} />
+            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
+              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={WARM_OAK_MAT}>
+                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
-              <mesh position={[0, -0.8, vd / 2 + 0.62]}>
-                <planeGeometry args={[vw + 0.26, 0.46]} />
-                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
+              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                <planeGeometry args={[vw + 0.36, 0.68]} />
+                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
               {[-2.4, -1.6, -0.8, 0, 0.8, 1.6, 2.4].map((rx, idx) => (
                 <mesh
                   key={`rafter-${idx}`}
-                  position={[rx, -0.22, -0.62]}
+                  position={[rx, -0.18, -0.62]}
                   geometry={PERGOLA_RAFTER_GEOM}
                   material={WARM_OAK_MAT}
                 />
               ))}
             </group>
 
-            {[-vw / 2 + 0.22, vw / 2 - 0.22].map((px, idx) => (
+            {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
               <group key={`oak-pil-${idx}`} position={[px, 0.18, vd / 2 - 0.18]}>
                 <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={WARM_OAK_MAT} />
-                <mesh position={[idx === 0 ? 0.42 : -0.42, 0.19, 0.25]} geometry={PLANT_POT_GEOM} material={CREAM_WALL_MAT} />
-                <mesh position={[idx === 0 ? 0.42 : -0.42, 0.52, 0.25]} geometry={PLANT_BUSH_GEOM} material={EMERALD_PLANT_MAT} />
+                <mesh position={[idx === 0 ? -0.38 : 0.38, 0.19, 0.25]} geometry={PLANT_POT_GEOM} material={CREAM_WALL_MAT} />
+                <mesh position={[idx === 0 ? -0.38 : 0.38, 0.52, 0.25]} geometry={PLANT_BUSH_GEOM} material={EMERALD_PLANT_MAT} />
               </group>
             ))}
           </group>
@@ -851,17 +849,17 @@ export const Booth: React.FC<BoothProps> = React.memo(
         {theme === 'coffee' && (
           <group>
             <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.82, vd / 2 + 0.42]} castShadow material={ESPRESSO_WOOD_MAT}>
-                <boxGeometry args={[vw + 0.48, 0.5, 0.34]} />
+              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={ESPRESSO_WOOD_MAT}>
+                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
-              <mesh position={[0, -0.82, vd / 2 + 0.6]}>
-                <planeGeometry args={[vw + 0.28, 0.46]} />
-                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
+              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                <planeGeometry args={[vw + 0.36, 0.68]} />
+                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
               {[-2.4, -1.44, -0.48, 0.48, 1.44, 2.4].map((ax, idx) => (
                 <mesh
                   key={`cafe-awning-${idx}`}
-                  position={[ax, -1.16, vd / 2 - 0.42]}
+                  position={[ax, -1.08, vd / 2 - 0.42]}
                   rotation={[0.26, 0, 0]}
                   geometry={AWNING_SLAT_GEOM}
                   material={idx % 2 === 0 ? COPPER_CRAFT_MAT : CREAM_WALL_MAT}
@@ -870,18 +868,18 @@ export const Booth: React.FC<BoothProps> = React.memo(
               {[-2.1, -1.05, 0, 1.05, 2.1].map((lx, idx) => (
                 <mesh
                   key={`cafe-bulb-${idx}`}
-                  position={[lx, -1.3, vd / 2 - 0.48]}
+                  position={[lx, -1.2, vd / 2 - 0.48]}
                   geometry={LANTERN_BULB_GEOM}
                   material={WARM_BULB_MAT}
                 />
               ))}
             </group>
 
-            {[-vw / 2 + 0.22, vw / 2 - 0.22].map((px, idx) => (
+            {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
               <group key={`cafe-col-${idx}`} position={[px, 0.18, vd / 2 - 0.18]}>
                 <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={ESPRESSO_WOOD_MAT} />
-                <mesh position={[idx === 0 ? 0.45 : -0.45, 0.19, 0.28]} geometry={PLANT_POT_GEOM} material={COPPER_CRAFT_MAT} />
-                <mesh position={[idx === 0 ? 0.45 : -0.45, 0.52, 0.28]} geometry={PLANT_BUSH_GEOM} material={EMERALD_PLANT_MAT} />
+                <mesh position={[idx === 0 ? -0.38 : 0.38, 0.19, 0.28]} geometry={PLANT_POT_GEOM} material={COPPER_CRAFT_MAT} />
+                <mesh position={[idx === 0 ? -0.38 : 0.38, 0.52, 0.28]} geometry={PLANT_BUSH_GEOM} material={EMERALD_PLANT_MAT} />
               </group>
             ))}
           </group>
@@ -890,19 +888,19 @@ export const Booth: React.FC<BoothProps> = React.memo(
         {theme === 'robotics' && (
           <group>
             <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.82, vd / 2 + 0.42]} castShadow material={SLATE_DARK_MAT}>
-                <boxGeometry args={[vw + 0.48, 0.5, 0.34]} />
+              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={SLATE_DARK_MAT}>
+                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
-              <mesh position={[0, -0.55, vd / 2 + 0.44]} material={GOLD_BASIC_MAT}>
-                <boxGeometry args={[vw + 0.52, 0.06, 0.38]} />
+              <mesh position={[0, -0.26, vd / 2 + 0.44]} material={GOLD_BASIC_MAT}>
+                <boxGeometry args={[vw + 0.6, 0.06, 0.38]} />
               </mesh>
-              <mesh position={[0, -0.82, vd / 2 + 0.6]}>
-                <planeGeometry args={[vw + 0.28, 0.46]} />
-                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
+              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                <planeGeometry args={[vw + 0.36, 0.68]} />
+                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
             </group>
 
-            {[-vw / 2 + 0.22, vw / 2 - 0.22].map((px, idx) => (
+            {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
               <group key={`rob-truss-${idx}`} position={[px, 0.18, vd / 2 - 0.2]}>
                 <mesh position={[0, 0.09, 0]} geometry={TRUSS_BASE_GEOM} material={DARK_NAVY_MAT} />
                 <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={TRUSS_PILLAR_GEOM} material={CHROME_PILLAR_MAT} />
@@ -916,18 +914,18 @@ export const Booth: React.FC<BoothProps> = React.memo(
         {theme === 'design' && (
           <group>
             <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.82, vd / 2 + 0.42]} castShadow material={VIOLET_ART_MAT}>
-                <boxGeometry args={[vw + 0.48, 0.5, 0.34]} />
+              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={VIOLET_ART_MAT}>
+                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
-              <mesh position={[0, -0.55, vd / 2 + 0.44]} material={MAGENTA_ART_MAT}>
-                <boxGeometry args={[vw + 0.52, 0.07, 0.38]} />
+              <mesh position={[0, -0.26, vd / 2 + 0.44]} material={MAGENTA_ART_MAT}>
+                <boxGeometry args={[vw + 0.6, 0.07, 0.38]} />
               </mesh>
-              <mesh position={[0, -0.82, vd / 2 + 0.6]}>
-                <planeGeometry args={[vw + 0.28, 0.46]} />
-                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
+              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                <planeGeometry args={[vw + 0.36, 0.68]} />
+                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
 
-              <group position={[0, -0.78, -0.5]}>
+              <group position={[0, -0.68, -0.5]}>
                 <mesh rotation={[Math.PI / 2, 0.12, 0]} geometry={HALO_RING_LARGE_GEOM} material={WHITE_LIGHT_MAT} />
                 <mesh
                   rotation={[Math.PI / 2, -0.18, 0]}
@@ -943,15 +941,15 @@ export const Booth: React.FC<BoothProps> = React.memo(
         {theme === 'energy' && (
           <group>
             <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.82, vd / 2 + 0.42]} castShadow material={DARK_NAVY_MAT}>
-                <boxGeometry args={[vw + 0.48, 0.5, 0.34]} />
+              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={DARK_NAVY_MAT}>
+                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
-              <mesh position={[0, -0.55, vd / 2 + 0.44]} material={EMERALD_GLOW_MAT}>
-                <boxGeometry args={[vw + 0.52, 0.07, 0.38]} />
+              <mesh position={[0, -0.26, vd / 2 + 0.44]} material={EMERALD_GLOW_MAT}>
+                <boxGeometry args={[vw + 0.6, 0.07, 0.38]} />
               </mesh>
-              <mesh position={[0, -0.82, vd / 2 + 0.6]}>
-                <planeGeometry args={[vw + 0.28, 0.46]} />
-                <meshBasicMaterial map={fasciaTexture} toneMapped={false} />
+              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                <planeGeometry args={[vw + 0.36, 0.68]} />
+                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
 
               {[-2.1, -0.7, 0.7, 2.1].map((sx, idx) => (
@@ -965,7 +963,7 @@ export const Booth: React.FC<BoothProps> = React.memo(
               ))}
             </group>
 
-            {[-vw / 2 + 0.24, vw / 2 - 0.24].map((px, idx) => (
+            {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
               <group key={`eco-col-${idx}`} position={[px, 0.18, vd / 2 - 0.2]}>
                 <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={WHITE_GLOSS_MAT} />
                 {[0.65, 1.35, 2.05].map((py, bIdx) => (
@@ -980,28 +978,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
             ))}
           </group>
         )}
-
-        {/* ================================================================
-            5. GRAND STOREFRONT CROWN SIGNBOARD (Positioned in Front of Roof Eaves & Inside Shop Showcase Frustum)
-           ================================================================ */}
-        <mesh
-          position={[-1.75, WALL_HEIGHT + 0.32, vd / 2 + 1.18]}
-          geometry={SIGN_CROWN_STRUT_GEOM}
-          material={CHROME_PILLAR_MAT}
-        />
-        <mesh
-          position={[1.75, WALL_HEIGHT + 0.32, vd / 2 + 1.18]}
-          geometry={SIGN_CROWN_STRUT_GEOM}
-          material={CHROME_PILLAR_MAT}
-        />
-        <Billboard position={[0, WALL_HEIGHT + 0.72, vd / 2 + 1.24]}>
-          <mesh
-            geometry={SIGN_BILLBOARD_GEOM}
-            scale={active ? [1.04, 1.04, 1] : [1, 1, 1]}
-          >
-            <meshBasicMaterial map={currentSignTexture} transparent depthWrite={false} toneMapped={false} />
-          </mesh>
-        </Billboard>
       </group>
     );
   }

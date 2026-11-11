@@ -1,10 +1,8 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Booth, Product, BoothSlotView } from '../types/expo';
 import { resolveBoothTheme } from './Booth';
-import { createBannerSignTexture } from './sceneTextures';
 
 export interface ShopShowcaseStageProps {
   booth: Booth;
@@ -36,7 +34,6 @@ const STAFF_TORSO_GEOM = new THREE.CapsuleGeometry(0.18, 0.36, 5, 10);
 const STAFF_HEAD_GEOM = new THREE.SphereGeometry(0.19, 12, 12);
 const STAFF_ARM_GEOM = new THREE.CapsuleGeometry(0.065, 0.24, 4, 8);
 const STAFF_APRON_GEOM = new THREE.BoxGeometry(0.32, 0.38, 0.04);
-const STAFF_BADGE_GEOM = new THREE.PlaneGeometry(1.38, 0.3);
 
 const COURTYARD_STONE_MAT = new THREE.MeshStandardMaterial({
   color: '#334155',
@@ -69,23 +66,6 @@ const CYAN_RING_MAT = new THREE.MeshBasicMaterial({ color: '#38bdf8' });
 const EMERALD_RING_MAT = new THREE.MeshBasicMaterial({ color: '#34d399' });
 const WHITE_APRON_MAT = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.35 });
 
-function getStaffRoleTitle(theme: string): string {
-  switch (theme) {
-    case 'living':
-      return '🛋️ KIẾN TRÚC SƯ NỘI THẤT';
-    case 'coffee':
-      return '☕ NGHỆ NHÂN RANG XAY';
-    case 'robotics':
-      return '🤖 KỸ SƯ ROBOTICS & AI';
-    case 'design':
-      return '🎨 GIÁM ĐỐC SÁNG TẠO';
-    case 'energy':
-      return '☀️ CHUYÊN GIA NĂNG LƯỢNG';
-    default:
-      return '⚡ CHUYÊN VIÊN CÔNG NGHỆ';
-  }
-}
-
 export const ShopShowcaseStage: React.FC<ShopShowcaseStageProps> = React.memo(
   ({ booth }) => {
     const staffGroupRef = useRef<THREE.Group>(null);
@@ -105,22 +85,11 @@ export const ShopShowcaseStage: React.FC<ShopShowcaseStageProps> = React.memo(
       [booth.color]
     );
 
-    const staffBadgeTexture = useMemo(
-      () =>
-        createBannerSignTexture({
-          title: getStaffRoleTitle(theme),
-          subtitle: `${booth.companyName || booth.name} · Bấm sản phẩm trên kệ để xem`,
-          accentColor: booth.color,
-        }),
-      [theme, booth.companyName, booth.name, booth.color]
-    );
-
     useEffect(() => {
       return () => {
         brandAwningMat.dispose();
-        staffBadgeTexture.dispose();
       };
-    }, [brandAwningMat, staffBadgeTexture]);
+    }, [brandAwningMat]);
 
     useFrame(({ clock }) => {
       const t = clock.getElapsedTime();
@@ -138,12 +107,24 @@ export const ShopShowcaseStage: React.FC<ShopShowcaseStageProps> = React.memo(
         position={[booth.positionX, 0, booth.positionZ]}
         rotation={[0, booth.rotationY || 0, 0]}
       >
-        {/* Warm Interior Commercial Glow (Only active for the focused shop) */}
+        {/* Product-First Showroom Lighting Rig (Only active for the focused shop) */}
         <pointLight
-          position={[0, 2.75, 0.8]}
-          color="#fef08a"
-          intensity={1.25}
-          distance={11}
+          position={[0, 2.35, 2.15]}
+          color="#fffbeb"
+          intensity={1.55}
+          distance={12}
+        />
+        <pointLight
+          position={[-2.4, 2.0, 2.0]}
+          color="#f8fafc"
+          intensity={0.95}
+          distance={8}
+        />
+        <pointLight
+          position={[2.4, 2.0, 2.0]}
+          color="#f8fafc"
+          intensity={0.95}
+          distance={8}
         />
 
         {/* ================================================================
@@ -237,12 +218,11 @@ export const ShopShowcaseStage: React.FC<ShopShowcaseStageProps> = React.memo(
         )}
 
         {/* ================================================================
-            2. WELCOMING SPECIALIST AT RIGHT ENTRANCE PILLAR
-               (Positioned at x = vw/2 - 0.56, z = vd/2 + 0.62 so the rear
-                enterprise backdrop, front counter, and all 6 product slots
-                are 100% unobstructed)
+            2. WELCOMING SPECIALIST OUTSIDE RIGHT ENTRANCE
+               (Positioned at x = vw/2 + 0.95 (3.95m), z = vd/2 + 0.35 without
+                any floating text banner so all 6 product slots are 100% clear)
            ================================================================ */}
-        <group ref={staffGroupRef} position={[vw / 2 - 0.56, 0.18, vd / 2 + 0.62]}>
+        <group ref={staffGroupRef} position={[vw / 2 + 0.95, 0.18, vd / 2 + 0.35]}>
           <mesh position={[0, 0.72, 0]} geometry={STAFF_TORSO_GEOM} material={brandAwningMat} />
           <mesh position={[0, 0.68, 0.17]} geometry={STAFF_APRON_GEOM} material={WHITE_APRON_MAT} />
           <mesh position={[0, 1.18, 0]} geometry={STAFF_HEAD_GEOM} material={STAFF_SKIN_MAT} />
@@ -265,12 +245,6 @@ export const ShopShowcaseStage: React.FC<ShopShowcaseStageProps> = React.memo(
             geometry={STAFF_ARM_GEOM}
             material={brandAwningMat}
           />
-
-          <Billboard position={[0, 1.54, 0]}>
-            <mesh geometry={STAFF_BADGE_GEOM}>
-              <meshBasicMaterial map={staffBadgeTexture} transparent depthWrite={false} />
-            </mesh>
-          </Billboard>
         </group>
       </group>
     );
