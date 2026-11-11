@@ -20,9 +20,15 @@ export function createApiRoutes(controller: ExpoController): Router {
   // Booths
   router.get('/booths', controller.listBooths);
   router.get('/booths/:id', controller.getBooth);
+  router.get('/booths/:id/slots', controller.getBoothSlots);
+  router.put('/booths/:id/slots/:slotId', requireAdminAuth, controller.assignBoothSlot);
+  router.delete('/booths/:id/slots/:slotId', requireAdminAuth, controller.clearBoothSlot);
   router.post('/booths', requireAdminAuth, controller.createBooth);
   router.put('/booths/:id', requireAdminAuth, controller.updateBooth);
   router.delete('/booths/:id', requireAdminAuth, controller.deleteBooth);
+
+  // Slots
+  router.get('/slots', controller.listSlots);
 
   // Products
   router.get('/products', controller.listProducts);

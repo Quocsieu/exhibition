@@ -49,6 +49,7 @@ export const STATIC_OBSTACLES: ObstacleBox[] = [
 export const BoothSchema = z.object({
   id: z.string().min(1).max(64),
   name: z.string().min(2).max(120),
+  companyName: z.string().max(150).optional().default(''),
   tagline: z.string().max(200).default(''),
   description: z.string().max(2000).default(''),
   category: z.string().max(100).default('General'),
@@ -82,6 +83,7 @@ export const ProductSchema = z.object({
   currency: z.string().min(1).max(10).default('VND'),
   description: z.string().max(5000).default(''),
   images: z.array(z.string()).default([]),
+  modelUrl: z.string().optional().default(''),
   videoUrl: z.string().url().optional().or(z.literal('')).default(''),
   sourceUrl: z.string().url(),
   contactUrl: z.string().url().optional().or(z.literal('')).default(''),
@@ -98,6 +100,106 @@ export type CreateProductInput = z.infer<typeof CreateProductInputSchema>;
 
 export const UpdateProductInputSchema = ProductSchema.partial().omit({ id: true });
 export type UpdateProductInput = z.infer<typeof UpdateProductInputSchema>;
+
+// ============================================================================
+// BOOTH SLOT DEFINITIONS & PRODUCT-SLOT ASSIGNMENT CONTRACTS
+// ============================================================================
+
+export type BoothSlotZone = 'counter' | 'left-shelf' | 'right-shelf';
+
+export interface BoothSlotDefinition {
+  slotId: string;
+  label: string;
+  zone: BoothSlotZone;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  rotationY: number;
+  maxSize: [number, number, number];
+}
+
+export const BOOTH_SLOT_DEFINITIONS: BoothSlotDefinition[] = [
+  {
+    slotId: 'slot_01',
+    label: 'Quầy Trưng Bày Chính — Vị trí Trái',
+    zone: 'counter',
+    position: [-0.68, 1.04, 1.25],
+    rotation: [0, 0.1, 0],
+    rotationY: 0.1,
+    maxSize: [0.72, 0.68, 0.52],
+  },
+  {
+    slotId: 'slot_02',
+    label: 'Quầy Trưng Bày Chính — Vị trí Phải',
+    zone: 'counter',
+    position: [0.68, 1.04, 1.25],
+    rotation: [0, -0.1, 0],
+    rotationY: -0.1,
+    maxSize: [0.72, 0.68, 0.52],
+  },
+  {
+    slotId: 'slot_03',
+    label: 'Kệ Trưng Bày Trái — Tầng Trên',
+    zone: 'left-shelf',
+    position: [-2.12, 1.54, -0.32],
+    rotation: [0, 0.36, 0],
+    rotationY: 0.36,
+    maxSize: [0.68, 0.58, 0.44],
+  },
+  {
+    slotId: 'slot_04',
+    label: 'Kệ Trưng Bày Trái — Tầng Dưới',
+    zone: 'left-shelf',
+    position: [-2.12, 0.88, 0.34],
+    rotation: [0, 0.36, 0],
+    rotationY: 0.36,
+    maxSize: [0.68, 0.58, 0.44],
+  },
+  {
+    slotId: 'slot_05',
+    label: 'Kệ Trưng Bày Phải — Tầng Trên',
+    zone: 'right-shelf',
+    position: [2.12, 1.54, -0.32],
+    rotation: [0, -0.36, 0],
+    rotationY: -0.36,
+    maxSize: [0.68, 0.58, 0.44],
+  },
+  {
+    slotId: 'slot_06',
+    label: 'Kệ Trưng Bày Phải — Tầng Dưới',
+    zone: 'right-shelf',
+    position: [2.12, 0.88, 0.34],
+    rotation: [0, -0.36, 0],
+    rotationY: -0.36,
+    maxSize: [0.68, 0.58, 0.44],
+  },
+];
+
+export const VALID_BOOTH_SLOT_IDS = new Set<string>(
+  BOOTH_SLOT_DEFINITIONS.map((s) => s.slotId)
+);
+
+export const BoothSlotAssignmentSchema = z.object({
+  boothId: z.string().min(1).max(64),
+  slotId: z.string().min(1).max(64),
+  productId: z.string().min(1).max(64),
+  updatedAt: z.string().optional(),
+});
+
+export type BoothSlotAssignment = z.infer<typeof BoothSlotAssignmentSchema>;
+
+export interface BoothSlotView {
+  boothId: string;
+  slot: BoothSlotDefinition;
+  productId: string | null;
+  product: Product | null;
+  updatedAt: string | null;
+}
+
+export const AssignSlotBodySchema = z.object({
+  productId: z.string().min(1).max(64).nullable(),
+});
+
+export type AssignSlotBody = z.infer<typeof AssignSlotBodySchema>;
 
 export const ExtractedProductDraftSchema = z.object({
   name: z.string().default(''),
@@ -267,6 +369,7 @@ export const DEFAULT_BOOTHS: Booth[] = [
   {
     id: 'booth-aether-tech',
     name: 'Aether Tech Lab',
+    companyName: 'Aether Technologies Corp.',
     tagline: 'Thiết bị phần cứng thông minh & IoT công nghiệp',
     description:
       'Chuyên cung cấp thiết bị cảm biến môi trường, kính thực tế tăng cường doanh nghiệp và trạm điều khiển thông minh.',
@@ -285,6 +388,7 @@ export const DEFAULT_BOOTHS: Booth[] = [
   {
     id: 'booth-nordic-living',
     name: 'Nordic Living Studio',
+    companyName: 'Nordic Living Interiors AB',
     tagline: 'Nội thất công thái học & Không gian làm việc hiện đại',
     description:
       'Giải pháp nội thất văn phòng và gia đình thiết kế tối giản Bắc Âu, vật liệu gỗ FSC tái tạo và kim loại sơn tĩnh điện.',
@@ -303,6 +407,7 @@ export const DEFAULT_BOOTHS: Booth[] = [
   {
     id: 'booth-ecovita-craft',
     name: 'EcoVita Roastery & Craft',
+    companyName: 'EcoVita Highland Roastery JSC',
     tagline: 'Cà phê đặc sản & Nông sản hữu cơ truy xuất nguồn gốc',
     description:
       'Hệ sinh thái nông sản bền vững từ vùng nguyên liệu Tây Nguyên, rang xay chuẩn SCA và đóng gói phân hủy sinh học.',
@@ -321,6 +426,7 @@ export const DEFAULT_BOOTHS: Booth[] = [
   {
     id: 'booth-kinetix-robotics',
     name: 'Kinetix Robotics & AI',
+    companyName: 'Kinetix Automation & Robotics Co.',
     tagline: 'Robot tự hành AMR & Tự động hóa kho vận',
     description:
       'Cánh tay robot cộng tác (Cobot) và xe tự hành kho thông minh tích hợp thị giác máy tính thời gian thực.',
@@ -339,6 +445,7 @@ export const DEFAULT_BOOTHS: Booth[] = [
   {
     id: 'booth-lumina-design',
     name: 'Lumina Design Collective',
+    companyName: 'Lumina Architectural Lighting Ltd.',
     tagline: 'Đèn kiến trúc & Vật liệu trang trí bền vững',
     description:
       'Bộ sưu tập đèn chiếu sáng nghệ thuật CRI 97+ và tấm tiêu âm sợi PET tái chế cho văn phòng, showroom và khách sạn.',
@@ -357,6 +464,7 @@ export const DEFAULT_BOOTHS: Booth[] = [
   {
     id: 'booth-solaris-energy',
     name: 'Solaris Clean Energy',
+    companyName: 'Solaris Green Energy Group',
     tagline: 'Lưu trữ năng lượng Lithium-LFP & Trạm sạc thông minh',
     description:
       'Giải pháp pin lưu trữ năng lượng mặt trời áp mái và bộ biến tần hybrid hiệu suất 98.4% cho doanh nghiệp và hộ gia đình.',
@@ -387,6 +495,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
       'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80',
       'https://images.unsplash.com/photo-1558346490-a72e53ae2d4f?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     sourceUrl: 'https://example.com/products/aethersense-x1',
     contactUrl: 'https://example.com/contact?product=aethersense-x1',
@@ -404,6 +513,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     images: [
       'https://images.unsplash.com/photo-1592478411213-6153e4ebc07d?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: '',
     sourceUrl: 'https://example.com/products/aetherglass-lite',
     contactUrl: 'https://example.com/contact?product=aetherglass-lite',
@@ -422,6 +532,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
       'https://images.unsplash.com/photo-1518455027359-f3f8164ba6bd?auto=format&fit=crop&w=900&q=80',
       'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: '',
     sourceUrl: 'https://example.com/products/fjall-standing-desk',
     contactUrl: 'https://example.com/contact?product=fjall-standing-desk',
@@ -439,6 +550,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     images: [
       'https://images.unsplash.com/photo-1505843490538-5133c6c7d0e1?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: '',
     sourceUrl: 'https://example.com/products/nordic-airmesh-ultra',
     contactUrl: 'https://example.com/contact?product=nordic-airmesh-ultra',
@@ -457,6 +569,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
       'https://images.unsplash.com/photo-1559056199-641a0ac8b55e?auto=format&fit=crop&w=900&q=80',
       'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: '',
     sourceUrl: 'https://example.com/products/caudat-arabica-honey',
     contactUrl: 'https://example.com/contact?product=caudat-arabica-honey',
@@ -474,6 +587,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     images: [
       'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: '',
     sourceUrl: 'https://example.com/products/ecovita-drip-box',
     contactUrl: 'https://example.com/contact?product=ecovita-drip-box',
@@ -491,6 +605,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     images: [
       'https://images.unsplash.com/photo-1485827404703-89b55fcc595e?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     sourceUrl: 'https://example.com/products/kinetix-amr-200',
     contactUrl: 'https://example.com/contact?product=kinetix-amr-200',
@@ -508,6 +623,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     images: [
       'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: '',
     sourceUrl: 'https://example.com/products/kinetix-eyepro',
     contactUrl: 'https://example.com/contact?product=kinetix-eyepro',
@@ -525,6 +641,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     images: [
       'https://images.unsplash.com/photo-1513506003901-1e6a229e2d15?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: '',
     sourceUrl: 'https://example.com/products/lumina-halo-linear',
     contactUrl: 'https://example.com/contact?product=lumina-halo-linear',
@@ -542,6 +659,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     images: [
       'https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: '',
     sourceUrl: 'https://example.com/products/lumina-acoustic-hex',
     contactUrl: 'https://example.com/contact?product=lumina-acoustic-hex',
@@ -559,6 +677,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     images: [
       'https://images.unsplash.com/photo-1509391366360-2e959784a276?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: '',
     sourceUrl: 'https://example.com/products/solaris-powerwall-10kwh',
     contactUrl: 'https://example.com/contact?product=solaris-powerwall-10kwh',
@@ -576,10 +695,26 @@ export const DEFAULT_PRODUCTS: Product[] = [
     images: [
       'https://images.unsplash.com/photo-1593941707882-a5bba14938c7?auto=format&fit=crop&w=900&q=80',
     ],
+    modelUrl: '',
     videoUrl: '',
     sourceUrl: 'https://example.com/products/solaris-chargebox-22kw',
     contactUrl: 'https://example.com/contact?product=solaris-chargebox-22kw',
     sku: 'SOL-EV-22K',
     inStock: true,
   },
+];
+
+export const DEFAULT_SLOT_ASSIGNMENTS: BoothSlotAssignment[] = [
+  { boothId: 'booth-aether-tech', slotId: 'slot_01', productId: 'prod-aether-hub-x1' },
+  { boothId: 'booth-aether-tech', slotId: 'slot_03', productId: 'prod-aether-glass-ar' },
+  { boothId: 'booth-nordic-living', slotId: 'slot_01', productId: 'prod-nordic-desk-pro' },
+  { boothId: 'booth-nordic-living', slotId: 'slot_03', productId: 'prod-nordic-chair-ergo' },
+  { boothId: 'booth-ecovita-craft', slotId: 'slot_01', productId: 'prod-ecovita-arabica' },
+  { boothId: 'booth-ecovita-craft', slotId: 'slot_02', productId: 'prod-ecovita-drip-gift' },
+  { boothId: 'booth-kinetix-robotics', slotId: 'slot_01', productId: 'prod-kinetix-amr-200' },
+  { boothId: 'booth-kinetix-robotics', slotId: 'slot_05', productId: 'prod-kinetix-vision-cam' },
+  { boothId: 'booth-lumina-design', slotId: 'slot_01', productId: 'prod-lumina-halo-lamp' },
+  { boothId: 'booth-lumina-design', slotId: 'slot_03', productId: 'prod-lumina-acoustic-hex' },
+  { boothId: 'booth-solaris-energy', slotId: 'slot_01', productId: 'prod-solaris-pack-10kw' },
+  { boothId: 'booth-solaris-energy', slotId: 'slot_05', productId: 'prod-solaris-ev-charger' },
 ];

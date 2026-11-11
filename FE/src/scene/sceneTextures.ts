@@ -724,6 +724,371 @@ export function createCrosswalkTexture(): THREE.CanvasTexture {
 }
 
 /**
+ * Creates a Trade Fair / Exhibition Stand Enterprise Backdrop texture showing:
+ * - Corporate Brand Monogram / Logo Badge (plus async logoUrl load if provided)
+ * - Enterprise Company Name (`companyName`)
+ * - Booth Title (`name`), Category, Tagline, and Visual Brand Key Art
+ */
+export function createEnterpriseBackdropTexture(options: {
+  name: string;
+  companyName?: string;
+  category: string;
+  tagline: string;
+  color: string;
+  logoUrl?: string;
+  bannerUrl?: string;
+  occupiedSlots: number;
+  totalSlots: number;
+  theme?: BoothVisualTheme;
+}): THREE.CanvasTexture {
+  const canvas = createCanvasElement(1024, 576);
+  const ctx = canvas.getContext('2d');
+  const texture = registerTrackedTexture(canvas);
+
+  const renderBackdrop = (loadedBanner?: HTMLImageElement, loadedLogo?: HTMLImageElement) => {
+    if (!ctx) return;
+    const pal = getThemePalette(options.theme, options.color);
+    const companyTitle = (options.companyName || options.name).toUpperCase();
+
+    // Deep exhibition stand backdrop gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, 1024, 576);
+    bgGrad.addColorStop(0, pal.bg);
+    bgGrad.addColorStop(0.55, pal.bgActive);
+    bgGrad.addColorStop(1, '#090d16');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, 1024, 576);
+
+    // Optional custom banner image background overlay
+    if (loadedBanner) {
+      ctx.save();
+      ctx.globalAlpha = 0.28;
+      ctx.drawImage(loadedBanner, 0, 0, 1024, 576);
+      ctx.restore();
+    } else {
+      // Stylized exhibition key-visual geometric rays on right side
+      ctx.save();
+      ctx.strokeStyle = pal.border;
+      ctx.globalAlpha = 0.16;
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 8; i++) {
+        ctx.beginPath();
+        ctx.arc(820, 288, 70 + i * 38, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Illuminated perimeter frame
+    ctx.strokeStyle = pal.border;
+    ctx.lineWidth = 8;
+    ctx.strokeRect(18, 18, 988, 540);
+
+    // Top illuminated brand header bar
+    ctx.fillStyle = pal.border;
+    ctx.fillRect(18, 18, 988, 18);
+
+    // Left Corporate Logo Medallion
+    ctx.save();
+    createRoundRectPath(ctx, 56, 66, 132, 132, 28);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    ctx.fill();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = pal.border;
+    ctx.stroke();
+    ctx.restore();
+
+    if (loadedLogo) {
+      ctx.save();
+      createRoundRectPath(ctx, 64, 74, 116, 116, 22);
+      ctx.clip();
+      ctx.drawImage(loadedLogo, 64, 74, 116, 116);
+      ctx.restore();
+    } else {
+      const initials = companyTitle
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w) => w[0])
+        .join('');
+      ctx.font = '900 50px Inter, Segoe UI, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = pal.textSub;
+      ctx.fillText(initials || pal.icon, 122, 148);
+    }
+
+    // Enterprise Company Name badge
+    ctx.save();
+    createRoundRectPath(ctx, 214, 68, 740, 44, 12);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = pal.border;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.font = '800 22px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = pal.textSub;
+    ctx.fillText(
+      truncateText(`🏢 ${companyTitle}  ·  ${options.category.toUpperCase()}`, 52),
+      234,
+      98
+    );
+
+    // Main Exhibition Stand Name
+    ctx.font = '900 54px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = pal.textMain;
+    ctx.fillText(truncateText(options.name.toUpperCase(), 24), 214, 172);
+
+    // Divider line
+    ctx.fillStyle = pal.border;
+    ctx.fillRect(56, 224, 912, 4);
+
+    // Enterprise Value Proposition / Tagline Box
+    ctx.save();
+    createRoundRectPath(ctx, 56, 252, 620, 196, 22);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.font = '700 22px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = pal.textSub;
+    ctx.fillText('GIẢI PHÁP & SẢN PHẨM TRƯNG BÀY CHÍNH HÃNG', 84, 296);
+
+    const tagline = options.tagline || 'Trải nghiệm trực tiếp sản phẩm trên kệ trưng bày 3D';
+    const words = tagline.split(/\s+/);
+    let line1 = '';
+    let line2 = '';
+    for (const w of words) {
+      if ((line1 + ' ' + w).trim().length <= 42) {
+        line1 = (line1 + ' ' + w).trim();
+      } else {
+        line2 = (line2 + ' ' + w).trim();
+      }
+    }
+    ctx.font = '600 28px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillText(truncateText(line1, 44), 84, 348);
+    if (line2) {
+      ctx.fillText(truncateText(line2, 44), 84, 388);
+    }
+
+    ctx.font = '600 20px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillText('✦ Bấm trực tiếp vào sản phẩm trên quầy hoặc kệ 2 bên để xem chi tiết', 84, 426);
+
+    // Right Visual Recognition Card
+    ctx.save();
+    createRoundRectPath(ctx, 704, 252, 264, 196, 22);
+    ctx.fillStyle = pal.badgeBg;
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = pal.border;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.font = '800 58px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(pal.icon, 836, 332);
+
+    ctx.font = '800 22px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = pal.textSub;
+    ctx.fillText('KỆ TRƯNG BÀY 3D', 836, 382);
+
+    ctx.font = '700 24px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`${options.occupiedSlots} / ${options.totalSlots} VỊ TRÍ`, 836, 420);
+
+    // Bottom Exhibition Footer Strip
+    ctx.save();
+    createRoundRectPath(ctx, 56, 474, 912, 56, 16);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = pal.border;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.font = '700 22px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillText(
+      `★ GIAN HÀNG TRIỂN LÃM CHÍNH THỨC · ${companyTitle} ★`,
+      512,
+      510
+    );
+
+    texture.needsUpdate = true;
+  };
+
+  renderBackdrop();
+
+  if (typeof Image !== 'undefined' && (options.bannerUrl || options.logoUrl)) {
+    let bannerImg: HTMLImageElement | undefined;
+    let logoImg: HTMLImageElement | undefined;
+
+    if (options.bannerUrl) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        bannerImg = img;
+        renderBackdrop(bannerImg, logoImg);
+      };
+      img.src = options.bannerUrl;
+    }
+
+    if (options.logoUrl) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        logoImg = img;
+        renderBackdrop(bannerImg, logoImg);
+      };
+      img.src = options.logoUrl;
+    }
+  }
+
+  return texture;
+}
+
+/**
+ * Creates a high-contrast 3D Product Display Stand Card texture for a product assigned to a slot.
+ * Automatically draws the product's primary image when available.
+ */
+export function createProductDisplayCardTexture(options: {
+  slotLabel: string;
+  name: string;
+  priceText: string;
+  sku?: string;
+  imageUrl?: string;
+  accentColor: string;
+  selected: boolean;
+}): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 384);
+  const ctx = canvas.getContext('2d');
+  const texture = registerTrackedTexture(canvas);
+
+  const renderCard = (loadedImg?: HTMLImageElement) => {
+    if (!ctx) return;
+    ctx.clearRect(0, 0, 512, 384);
+
+    // Card background
+    ctx.save();
+    createRoundRectPath(ctx, 10, 10, 492, 364, 24);
+    ctx.fillStyle = options.selected ? '#0f172a' : '#111827';
+    ctx.fill();
+    ctx.lineWidth = options.selected ? 10 : 6;
+    ctx.strokeStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
+    ctx.stroke();
+    ctx.restore();
+
+    // Top slot header strip
+    ctx.save();
+    createRoundRectPath(ctx, 26, 24, 460, 44, 12);
+    ctx.fillStyle = options.selected ? '#fbbf24' : options.accentColor || '#0ea5e9';
+    ctx.fill();
+    ctx.restore();
+
+    ctx.font = '800 22px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = options.selected ? '#0f172a' : '#ffffff';
+    ctx.fillText(truncateText(options.slotLabel.toUpperCase(), 26), 44, 54);
+
+    if (options.sku) {
+      ctx.textAlign = 'right';
+      ctx.font = '700 18px Inter, Segoe UI, Arial, sans-serif';
+      ctx.fillText(truncateText(options.sku, 14), 470, 53);
+    }
+
+    // Center visual preview frame
+    ctx.save();
+    createRoundRectPath(ctx, 26, 80, 460, 176, 16);
+    const frameGrad = ctx.createLinearGradient(26, 80, 486, 256);
+    frameGrad.addColorStop(0, '#1e293b');
+    frameGrad.addColorStop(1, '#0f172a');
+    ctx.fillStyle = frameGrad;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+    ctx.stroke();
+    ctx.restore();
+
+    if (loadedImg) {
+      ctx.save();
+      createRoundRectPath(ctx, 28, 82, 456, 172, 14);
+      ctx.clip();
+      ctx.drawImage(loadedImg, 28, 82, 456, 172);
+      ctx.restore();
+    } else {
+      // Stylized product showcase graphic placeholder
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(256, 168, 54, 0, Math.PI * 2);
+      ctx.fillStyle = options.accentColor || '#0ea5e9';
+      ctx.globalAlpha = 0.22;
+      ctx.fill();
+      ctx.restore();
+
+      ctx.font = '800 44px Inter, Segoe UI, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#f8fafc';
+      const initials = options.name
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w) => w[0]?.toUpperCase())
+        .join('');
+      ctx.fillText(initials || '3D', 256, 184);
+    }
+
+    // Product Name
+    ctx.font = '800 26px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(truncateText(options.name, 26), 30, 294);
+
+    // Price & CTA pill
+    ctx.save();
+    createRoundRectPath(ctx, 26, 312, 460, 46, 14);
+    ctx.fillStyle = 'rgba(30, 41, 59, 0.95)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.font = '800 23px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#fde68a';
+    ctx.fillText(truncateText(options.priceText, 18), 44, 343);
+
+    ctx.font = '700 19px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillText('BẤM XEM →', 470, 342);
+
+    texture.needsUpdate = true;
+  };
+
+  renderCard();
+
+  if (typeof Image !== 'undefined' && options.imageUrl) {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      renderCard(img);
+    };
+    img.src = options.imageUrl;
+  }
+
+  return texture;
+}
+
+/**
  * Creates a Rectangular Running-Bond Brick/Stone Sidewalk Paver texture (vỉa hè lát gạch)
  * with warm gray and subtle terracotta-sandstone tones and clean mortar lines.
  */

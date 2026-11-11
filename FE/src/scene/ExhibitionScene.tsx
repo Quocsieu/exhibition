@@ -2,7 +2,13 @@ import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Line, OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
-import type { Booth as BoothType, Point2D, Product, VisitorState } from '../types/expo';
+import type {
+  Booth as BoothType,
+  BoothSlotView,
+  Point2D,
+  Product,
+  VisitorState,
+} from '../types/expo';
 import type { PlayerTransform } from '../controls/useClickToMove';
 import { Environment } from './Environment';
 import { Booth } from './Booth';
@@ -15,6 +21,7 @@ export type CameraViewMode = 'overview' | 'explore' | 'focus';
 export interface ExhibitionSceneProps {
   booths: BoothType[];
   productCountByBooth: Record<string, number>;
+  slotsByBooth?: Record<string, BoothSlotView[]>;
   activeBoothProducts?: Product[];
   selectedProductId?: string | null;
   onSelectProduct?: (product: Product) => void;
@@ -264,6 +271,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
   ({
     booths,
     productCountByBooth,
+    slotsByBooth,
     activeBoothProducts = EMPTY_PRODUCTS,
     selectedProductId = null,
     onSelectProduct,
@@ -370,7 +378,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             onStepMovement={onStepMovement}
             cameraMode={cameraMode}
             focusedBooth={activeFocusedBooth}
-            isPanelOpen={Boolean(selectedBoothId)}
+            isPanelOpen={false}
             zoom={zoom}
           />
 
@@ -416,6 +424,9 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
               key={booth.id}
               booth={booth}
               productCount={productCountByBooth[booth.id] ?? 0}
+              slots={slotsByBooth?.[booth.id]}
+              selectedProductId={selectedProductId}
+              onSelectProduct={onSelectProduct}
               isSelected={
                 selectedBoothId === booth.id ||
                 (cameraMode === 'focus' && activeFocusedBooth?.id === booth.id)
@@ -430,6 +441,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             <ShopShowcaseStage
               booth={activeFocusedBooth}
               products={activeBoothProducts}
+              slots={slotsByBooth?.[activeFocusedBooth.id]}
               selectedProductId={selectedProductId}
               onSelectProduct={onSelectProduct}
             />

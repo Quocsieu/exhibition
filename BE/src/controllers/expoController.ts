@@ -5,6 +5,7 @@ import {
   UpdateBoothInputSchema,
   CreateProductInputSchema,
   UpdateProductInputSchema,
+  AssignSlotBodySchema,
 } from '../schemas/expoSchemas.js';
 import type { ExpoService } from '../services/expoService.js';
 import {
@@ -64,7 +65,8 @@ export class ExpoController {
       return;
     }
     const products = this.service.listProducts(booth.id);
-    res.json({ booth, products });
+    const slots = this.service.getBoothSlots(booth.id);
+    res.json({ booth, products, slots });
   };
 
   createBooth = (req: Request, res: Response): void => {
@@ -223,6 +225,79 @@ export class ExpoController {
     } catch (err) {
       res.status(400).json({
         error: err instanceof Error ? err.message : 'Lỗi khi xử lý dữ liệu import.',
+      });
+    }
+  };
+
+  // Slots & Booth Slot Assignments
+  listSlots = (req: Request, res: Response): void => {
+    const boothId = typeof req.query.boothId === 'string' ? req.query.boothId : undefined;
+    res.json({
+      slotDefinitions: this.service.listSlotDefinitions(),
+      assignments: this.service.listSlotAssignments(boothId),
+    });
+  };
+
+  getBoothSlots = (req: Request, res: Response): void => {
+    const boothId = String(req.params.id);
+    const booth = this.service.getBoothById(boothId);
+    if (!booth) {
+      res.status(404).json({ error: 'Không tìm thấy gian hàng.' });
+      return;
+    }
+    const slots = this.service.getBoothSlots(boothId);
+    res.json({
+      booth,
+      slotDefinitions: this.service.listSlotDefinitions(),
+      slots,
+    });
+  };
+
+  assignBoothSlot = (req: Request, res: Response): void => {
+    const boothId = String(req.params.id);
+    const slotId = String(req.params.slotId);
+    const parsed = AssignSlotBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues[0]?.message || 'Dữ liệu gán sản phẩm vào slot không hợp lệ.',
+        issues: parsed.error.issues,
+      });
+      return;
+    }
+
+    try {
+      const rawProductId = parsed.data.productId;
+      const updatedSlot =
+        rawProductId === null || rawProductId.trim() === ''
+          ? this.service.clearBoothSlot(boothId, slotId)
+          : this.service.assignProductToSlot(boothId, slotId, rawProductId.trim());
+      const slots = this.service.getBoothSlots(boothId);
+      res.json({
+        slot: updatedSlot,
+        slots,
+      });
+    } catch (err) {
+      const status = (err as Error & { statusCode?: number }).statusCode || 400;
+      res.status(status).json({
+        error: err instanceof Error ? err.message : 'Không thể gán sản phẩm vào vị trí trưng bày.',
+      });
+    }
+  };
+
+  clearBoothSlot = (req: Request, res: Response): void => {
+    const boothId = String(req.params.id);
+    const slotId = String(req.params.slotId);
+    try {
+      const clearedSlot = this.service.clearBoothSlot(boothId, slotId);
+      const slots = this.service.getBoothSlots(boothId);
+      res.json({
+        slot: clearedSlot,
+        slots,
+      });
+    } catch (err) {
+      const status = (err as Error & { statusCode?: number }).statusCode || 400;
+      res.status(status).json({
+        error: err instanceof Error ? err.message : 'Không thể gỡ sản phẩm khỏi vị trí trưng bày.',
       });
     }
   };

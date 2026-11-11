@@ -9,8 +9,14 @@ import {
   type Product,
   type CreateProductInput,
   type UpdateProductInput,
+  type BoothSlotDefinition,
+  type BoothSlotAssignment,
+  type BoothSlotView,
+  BOOTH_SLOT_DEFINITIONS,
+  VALID_BOOTH_SLOT_IDS,
   DEFAULT_BOOTHS,
   DEFAULT_PRODUCTS,
+  DEFAULT_SLOT_ASSIGNMENTS,
 } from '../schemas/expoSchemas.js';
 
 export class ExpoDatabase {
@@ -36,6 +42,7 @@ export class ExpoDatabase {
       CREATE TABLE IF NOT EXISTS booths (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
+        company_name TEXT NOT NULL DEFAULT '',
         tagline TEXT NOT NULL DEFAULT '',
         description TEXT NOT NULL DEFAULT '',
         category TEXT NOT NULL DEFAULT 'General',
@@ -60,13 +67,69 @@ export class ExpoDatabase {
         description TEXT NOT NULL DEFAULT '',
         images_json TEXT NOT NULL DEFAULT '[]',
         video_url TEXT NOT NULL DEFAULT '',
+        model_url TEXT NOT NULL DEFAULT '',
         source_url TEXT NOT NULL,
         contact_url TEXT NOT NULL DEFAULT '',
         sku TEXT NOT NULL DEFAULT '',
         in_stock INTEGER NOT NULL DEFAULT 1,
         FOREIGN KEY (booth_id) REFERENCES booths(id) ON DELETE CASCADE
       );
+
+      CREATE TABLE IF NOT EXISTS booth_slot_assignments (
+        booth_id TEXT NOT NULL,
+        slot_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (booth_id, slot_id),
+        FOREIGN KEY (booth_id) REFERENCES booths(id) ON DELETE CASCADE,
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+      );
     `);
+
+    const boothCols = this.db.prepare('PRAGMA table_info(booths)').all() as { name: string }[];
+    if (!boothCols.some((c) => c.name === 'company_name')) {
+      this.db.exec("ALTER TABLE booths ADD COLUMN company_name TEXT NOT NULL DEFAULT '';");
+    }
+
+    const productCols = this.db.prepare('PRAGMA table_info(products)').all() as { name: string }[];
+    if (!productCols.some((c) => c.name === 'model_url')) {
+      this.db.exec("ALTER TABLE products ADD COLUMN model_url TEXT NOT NULL DEFAULT '';");
+    }
+  }
+
+  private seedDefaultSlotAssignments(): void {
+    const versionRow = this.db.prepare('PRAGMA user_version').get() as { user_version: number } | undefined;
+    const currentVersion = Number(versionRow?.user_version || 0);
+    if (currentVersion >= 2) {
+      return;
+    }
+
+    const upsertSlot = this.db.prepare(`
+      INSERT INTO booth_slot_assignments (booth_id, slot_id, product_id, updated_at)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(booth_id, slot_id) DO NOTHING
+    `);
+
+    for (const item of DEFAULT_SLOT_ASSIGNMENTS) {
+      const boothExists = this.getBoothById(item.boothId);
+      const product = this.getProductById(item.productId);
+      if (boothExists && product && product.boothId === item.boothId) {
+        upsertSlot.run(item.boothId, item.slotId, item.productId);
+      }
+    }
+
+    // Backfill company_name on default booths if empty
+    const updateCompany = this.db.prepare(
+      "UPDATE booths SET company_name = ? WHERE id = ? AND (company_name = '' OR company_name IS NULL)"
+    );
+    for (const b of DEFAULT_BOOTHS) {
+      if (b.companyName) {
+        updateCompany.run(b.companyName, b.id);
+      }
+    }
+    this.boothsCache = null;
+
+    this.db.exec('PRAGMA user_version = 2;');
   }
 
   private seedIfEmpty(): void {
@@ -84,21 +147,23 @@ export class ExpoDatabase {
           updateLayout.run(b.positionX, b.positionZ, b.rotationY || 0, b.id);
         }
       }
+      this.seedDefaultSlotAssignments();
       return;
     }
 
     const insertBooth = this.db.prepare(`
       INSERT INTO booths (
-        id, name, tagline, description, category, color,
+        id, name, company_name, tagline, description, category, color,
         logo_url, banner_url, contact_email, contact_url,
         position_x, position_z, rotation_y, width, depth
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const b of DEFAULT_BOOTHS) {
       insertBooth.run(
         b.id,
         b.name,
+        b.companyName || b.name,
         b.tagline,
         b.description,
         b.category,
@@ -118,8 +183,8 @@ export class ExpoDatabase {
     const insertProduct = this.db.prepare(`
       INSERT INTO products (
         id, booth_id, name, price, currency, description,
-        images_json, video_url, source_url, contact_url, sku, in_stock
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        images_json, video_url, model_url, source_url, contact_url, sku, in_stock
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const p of DEFAULT_PRODUCTS) {
@@ -132,18 +197,22 @@ export class ExpoDatabase {
         p.description,
         JSON.stringify(p.images || []),
         p.videoUrl || '',
+        p.modelUrl || '',
         p.sourceUrl,
         p.contactUrl || '',
         p.sku || '',
         p.inStock ? 1 : 0
       );
     }
+
+    this.seedDefaultSlotAssignments();
   }
 
   private mapBoothRow(row: Record<string, unknown>): Booth {
     return {
       id: String(row.id),
       name: String(row.name),
+      companyName: String(row.company_name || row.name || ''),
       tagline: String(row.tagline || ''),
       description: String(row.description || ''),
       category: String(row.category || 'General'),
@@ -180,6 +249,7 @@ export class ExpoDatabase {
       description: String(row.description || ''),
       images,
       videoUrl: String(row.video_url || ''),
+      modelUrl: String(row.model_url || ''),
       sourceUrl: String(row.source_url),
       contactUrl: String(row.contact_url || ''),
       sku: String(row.sku || ''),
@@ -211,14 +281,15 @@ export class ExpoDatabase {
     this.db
       .prepare(
         `INSERT INTO booths (
-          id, name, tagline, description, category, color,
+          id, name, company_name, tagline, description, category, color,
           logo_url, banner_url, contact_email, contact_url,
           position_x, position_z, rotation_y, width, depth
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
         input.name,
+        input.companyName || input.name,
         input.tagline || '',
         input.description || '',
         input.category || 'General',
@@ -250,13 +321,14 @@ export class ExpoDatabase {
     this.db
       .prepare(
         `UPDATE booths SET
-          name = ?, tagline = ?, description = ?, category = ?, color = ?,
+          name = ?, company_name = ?, tagline = ?, description = ?, category = ?, color = ?,
           logo_url = ?, banner_url = ?, contact_email = ?, contact_url = ?,
           position_x = ?, position_z = ?, rotation_y = ?, width = ?, depth = ?
         WHERE id = ?`
       )
       .run(
         merged.name,
+        merged.companyName || merged.name,
         merged.tagline,
         merged.description,
         merged.category,
@@ -317,8 +389,8 @@ export class ExpoDatabase {
       .prepare(
         `INSERT INTO products (
           id, booth_id, name, price, currency, description,
-          images_json, video_url, source_url, contact_url, sku, in_stock
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          images_json, video_url, model_url, source_url, contact_url, sku, in_stock
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -329,6 +401,7 @@ export class ExpoDatabase {
         input.description || '',
         JSON.stringify(input.images || []),
         input.videoUrl || '',
+        input.modelUrl || '',
         input.sourceUrl,
         input.contactUrl || '',
         input.sku || '',
@@ -346,6 +419,10 @@ export class ExpoDatabase {
       if (!targetBooth) {
         throw new Error(`Gian hàng đích '${input.boothId}' không tồn tại.`);
       }
+      // If product moves to another booth, remove its slot assignments from old booth
+      this.db
+        .prepare('DELETE FROM booth_slot_assignments WHERE product_id = ? AND booth_id != ?')
+        .run(id, input.boothId);
     }
 
     const merged: Product = {
@@ -358,7 +435,7 @@ export class ExpoDatabase {
       .prepare(
         `UPDATE products SET
           booth_id = ?, name = ?, price = ?, currency = ?, description = ?,
-          images_json = ?, video_url = ?, source_url = ?, contact_url = ?, sku = ?, in_stock = ?
+          images_json = ?, video_url = ?, model_url = ?, source_url = ?, contact_url = ?, sku = ?, in_stock = ?
         WHERE id = ?`
       )
       .run(
@@ -369,6 +446,7 @@ export class ExpoDatabase {
         merged.description,
         JSON.stringify(merged.images || []),
         merged.videoUrl || '',
+        merged.modelUrl || '',
         merged.sourceUrl,
         merged.contactUrl || '',
         merged.sku || '',
@@ -382,6 +460,127 @@ export class ExpoDatabase {
   deleteProduct(id: string): boolean {
     const res = this.db.prepare('DELETE FROM products WHERE id = ?').run(id);
     return res.changes > 0;
+  }
+
+  listSlotDefinitions(): BoothSlotDefinition[] {
+    return BOOTH_SLOT_DEFINITIONS;
+  }
+
+  listSlotAssignments(boothId?: string): BoothSlotAssignment[] {
+    const rows = boothId
+      ? (this.db
+          .prepare(
+            'SELECT booth_id, slot_id, product_id, updated_at FROM booth_slot_assignments WHERE booth_id = ? ORDER BY slot_id ASC'
+          )
+          .all(boothId) as Record<string, unknown>[])
+      : (this.db
+          .prepare(
+            'SELECT booth_id, slot_id, product_id, updated_at FROM booth_slot_assignments ORDER BY booth_id ASC, slot_id ASC'
+          )
+          .all() as Record<string, unknown>[]);
+
+    return rows.map((row) => ({
+      boothId: String(row.booth_id),
+      slotId: String(row.slot_id),
+      productId: String(row.product_id),
+      updatedAt: String(row.updated_at || new Date().toISOString()),
+    }));
+  }
+
+  getBoothSlots(boothId: string): BoothSlotView[] {
+    const booth = this.getBoothById(boothId);
+    if (!booth) {
+      throw new Error(`Gian hàng '${boothId}' không tồn tại.`);
+    }
+
+    const assignments = this.listSlotAssignments(boothId);
+    const assignmentBySlot = new Map<string, BoothSlotAssignment>();
+    for (const a of assignments) {
+      assignmentBySlot.set(a.slotId, a);
+    }
+
+    const products = this.listProducts(boothId);
+    const productById = new Map<string, Product>();
+    for (const p of products) {
+      productById.set(p.id, p);
+    }
+
+    return BOOTH_SLOT_DEFINITIONS.map((slot) => {
+      const assignment = assignmentBySlot.get(slot.slotId);
+      const product = assignment ? productById.get(assignment.productId) || this.getProductById(assignment.productId) : null;
+      return {
+        boothId,
+        slot,
+        productId: product ? product.id : null,
+        product: product || null,
+        updatedAt: assignment?.updatedAt ?? null,
+      };
+    });
+  }
+
+  assignProductToSlot(boothId: string, slotId: string, productId: string): BoothSlotView {
+    const booth = this.getBoothById(boothId);
+    if (!booth) {
+      const err = new Error(`Gian hàng '${boothId}' không tồn tại.`);
+      (err as Error & { statusCode?: number }).statusCode = 404;
+      throw err;
+    }
+
+    if (!VALID_BOOTH_SLOT_IDS.has(slotId)) {
+      const err = new Error(`Vị trí trưng bày (slot '${slotId}') không hợp lệ hoặc không thuộc gian hàng.`);
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+
+    const product = this.getProductById(productId);
+    if (!product) {
+      const err = new Error(`Sản phẩm '${productId}' không tồn tại.`);
+      (err as Error & { statusCode?: number }).statusCode = 404;
+      throw err;
+    }
+
+    if (product.boothId !== boothId) {
+      const err = new Error(
+        `Sản phẩm '${product.name}' thuộc gian hàng '${product.boothId}', không thể gán sang gian hàng '${boothId}'.`
+      );
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+
+    this.db
+      .prepare(
+        `INSERT INTO booth_slot_assignments (booth_id, slot_id, product_id, updated_at)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(booth_id, slot_id) DO UPDATE SET
+           product_id = excluded.product_id,
+           updated_at = CURRENT_TIMESTAMP`
+      )
+      .run(boothId, slotId, productId);
+
+    const slots = this.getBoothSlots(boothId);
+    return slots.find((s) => s.slot.slotId === slotId)!;
+  }
+
+  clearBoothSlot(boothId: string, slotId: string): BoothSlotView {
+    const booth = this.getBoothById(boothId);
+    if (!booth) {
+      const err = new Error(`Gian hàng '${boothId}' không tồn tại.`);
+      (err as Error & { statusCode?: number }).statusCode = 404;
+      throw err;
+    }
+
+    if (!VALID_BOOTH_SLOT_IDS.has(slotId)) {
+      const err = new Error(`Vị trí trưng bày (slot '${slotId}') không hợp lệ hoặc không thuộc gian hàng.`);
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+
+    this.db
+      .prepare('DELETE FROM booth_slot_assignments WHERE booth_id = ? AND slot_id = ?')
+      .run(boothId, slotId);
+
+    const slots = this.getBoothSlots(boothId);
+    return slots.find((s) => s.slot.slotId === slotId)!;
   }
 
   close(): void {

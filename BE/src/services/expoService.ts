@@ -6,6 +6,9 @@ import type {
   CreateProductInput,
   UpdateProductInput,
   ExtractedProductDraft,
+  BoothSlotDefinition,
+  BoothSlotAssignment,
+  BoothSlotView,
 } from '../schemas/expoSchemas.js';
 import type { ExpoDatabase } from '../database/db.js';
 import {
@@ -55,6 +58,26 @@ export class ExpoService {
 
   deleteProduct(id: string): boolean {
     return this.db.deleteProduct(id);
+  }
+
+  listSlotDefinitions(): BoothSlotDefinition[] {
+    return this.db.listSlotDefinitions();
+  }
+
+  listSlotAssignments(boothId?: string): BoothSlotAssignment[] {
+    return this.db.listSlotAssignments(boothId);
+  }
+
+  getBoothSlots(boothId: string): BoothSlotView[] {
+    return this.db.getBoothSlots(boothId);
+  }
+
+  assignProductToSlot(boothId: string, slotId: string, productId: string): BoothSlotView {
+    return this.db.assignProductToSlot(boothId, slotId, productId);
+  }
+
+  clearBoothSlot(boothId: string, slotId: string): BoothSlotView {
+    return this.db.clearBoothSlot(boothId, slotId);
   }
 
   async extractFromExternalUrl(url: string): Promise<ExtractedProductDraft> {

@@ -1,40 +1,89 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ExhibitionPage } from './pages/ExhibitionPage';
 import { AdminPage } from './pages/AdminPage';
 
+interface ParsedRoute {
+  view: 'expo' | 'admin';
+  adminBoothId: string | null;
+}
+
+function parseCurrentLocation(): ParsedRoute {
+  const hash = window.location.hash || '';
+  const pathname = window.location.pathname || '/';
+
+  // 1. Check hash routes: #admin, #dashboard, #/admin/booths, #/admin/booths/:boothId/slots
+  const hashSlotMatch = hash.match(/^#\/?admin\/booths\/([^/]+)(?:\/slots)?$/i);
+  if (hashSlotMatch) {
+    return {
+      view: 'admin',
+      adminBoothId: decodeURIComponent(hashSlotMatch[1]),
+    };
+  }
+  if (
+    hash === '#admin' ||
+    hash === '#dashboard' ||
+    hash === '#/admin' ||
+    hash === '#/admin/booths'
+  ) {
+    return { view: 'admin', adminBoothId: null };
+  }
+
+  // 2. Check pathname routes: /admin, /admin/booths, /admin/booths/:boothId, /admin/booths/:boothId/slots
+  const pathSlotMatch = pathname.match(/^\/admin\/booths\/([^/]+)(?:\/slots)?\/?$/i);
+  if (pathSlotMatch) {
+    return {
+      view: 'admin',
+      adminBoothId: decodeURIComponent(pathSlotMatch[1]),
+    };
+  }
+  if (/^\/admin(?:\/booths)?\/?$/i.test(pathname)) {
+    return { view: 'admin', adminBoothId: null };
+  }
+
+  return { view: 'expo', adminBoothId: null };
+}
+
 export const App: React.FC = () => {
-  const [view, setView] = useState<'expo' | 'admin'>(() =>
-    window.location.hash === '#admin' || window.location.hash === '#dashboard'
-      ? 'admin'
-      : 'expo'
-  );
+  const [route, setRoute] = useState<ParsedRoute>(() => parseCurrentLocation());
 
   useEffect(() => {
-    const onHashChange = () => {
-      setView(
-        window.location.hash === '#admin' || window.location.hash === '#dashboard'
-          ? 'admin'
-          : 'expo'
-      );
+    const syncRoute = () => {
+      setRoute(parseCurrentLocation());
     };
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    window.addEventListener('hashchange', syncRoute);
+    window.addEventListener('popstate', syncRoute);
+    return () => {
+      window.removeEventListener('hashchange', syncRoute);
+      window.removeEventListener('popstate', syncRoute);
+    };
   }, []);
 
-  const openAdmin = () => {
-    window.location.hash = 'admin';
-    setView('admin');
-  };
+  const openAdmin = useCallback((boothId: string | null = null) => {
+    if (boothId) {
+      window.location.hash = `/admin/booths/${encodeURIComponent(boothId)}/slots`;
+      setRoute({ view: 'admin', adminBoothId: boothId });
+    } else {
+      window.location.hash = '/admin/booths';
+      setRoute({ view: 'admin', adminBoothId: null });
+    }
+  }, []);
 
-  const openExpo = () => {
+  const openExpo = useCallback(() => {
+    if (window.location.pathname.startsWith('/admin')) {
+      window.history.pushState({}, '', '/');
+    }
     window.location.hash = '';
-    setView('expo');
-  };
+    setRoute({ view: 'expo', adminBoothId: null });
+  }, []);
 
-  return view === 'admin' ? (
-    <AdminPage onBackToExpo={openExpo} />
+  return route.view === 'admin' ? (
+    <AdminPage
+      initialBoothId={route.adminBoothId}
+      onNavigateBoothSlots={openAdmin}
+      onBackToExpo={openExpo}
+    />
   ) : (
-    <ExhibitionPage onOpenAdmin={openAdmin} />
+    <ExhibitionPage onOpenAdmin={() => openAdmin(null)} />
   );
 };
 

@@ -325,4 +325,129 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
 
     clientA.disconnect();
   });
+
+  it('manages Booth & Slot product assignments with strict validation and IDOR protection', async () => {
+    // 1. Public GET /api/slots returns 6 slot definitions and default seeded assignments
+    const allSlotsRes = await fetch(`${baseUrl}/api/slots`);
+    expect(allSlotsRes.status).toBe(200);
+    const allSlotsData = (await allSlotsRes.json()) as {
+      slotDefinitions: { slotId: string; zone: string }[];
+      assignments: { boothId: string; slotId: string; productId: string }[];
+    };
+    expect(allSlotsData.slotDefinitions.length).toBe(6);
+    expect(allSlotsData.slotDefinitions.map((s) => s.slotId)).toEqual([
+      'slot_01',
+      'slot_02',
+      'slot_03',
+      'slot_04',
+      'slot_05',
+      'slot_06',
+    ]);
+    expect(allSlotsData.assignments.length).toBeGreaterThanOrEqual(12);
+
+    // 2. Public GET /api/booths/booth-aether-tech/slots returns 6 slot views for the booth
+    const boothSlotsRes = await fetch(`${baseUrl}/api/booths/booth-aether-tech/slots`);
+    expect(boothSlotsRes.status).toBe(200);
+    const boothSlotsData = (await boothSlotsRes.json()) as {
+      booth: { id: string; companyName?: string };
+      slots: { slot: { slotId: string }; productId: string | null; product: { id: string } | null }[];
+    };
+    expect(boothSlotsData.booth.id).toBe('booth-aether-tech');
+    expect(boothSlotsData.booth.companyName).toBeTruthy();
+    expect(boothSlotsData.slots.length).toBe(6);
+
+    // 3. Unauthenticated PUT / DELETE slot assignment is rejected with 401
+    const unauthPut = await fetch(`${baseUrl}/api/booths/booth-aether-tech/slots/slot_03`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productId: 'prod-aether-core' }),
+    });
+    expect(unauthPut.status).toBe(401);
+
+    // 4. Login as admin
+    const loginRes = await fetch(`${baseUrl}/api/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'admin',
+        password: process.env.ADMIN_PASSWORD || 'expo-admin-2026',
+      }),
+    });
+    const { token } = (await loginRes.json()) as { token: string };
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+
+    // 5. Reject invalid slotId (400)
+    const invalidSlotRes = await fetch(`${baseUrl}/api/booths/booth-aether-tech/slots/slot_99`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({ productId: 'prod-aether-core' }),
+    });
+    expect(invalidSlotRes.status).toBe(400);
+
+    // 6. Reject non-existent boothId (404)
+    const invalidBoothRes = await fetch(`${baseUrl}/api/booths/booth-ghost/slots/slot_01`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({ productId: 'prod-aether-core' }),
+    });
+    expect(invalidBoothRes.status).toBe(404);
+
+    // 7. Reject non-existent productId (404)
+    const invalidProdRes = await fetch(`${baseUrl}/api/booths/booth-aether-tech/slots/slot_01`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({ productId: 'prod-does-not-exist' }),
+    });
+    expect(invalidProdRes.status).toBe(404);
+
+    // 8. Reject cross-booth product assignment (IDOR protection -> 400)
+    const crossBoothRes = await fetch(`${baseUrl}/api/booths/booth-aether-tech/slots/slot_04`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({ productId: 'prod-nordic-desk-pro' }),
+    });
+    expect(crossBoothRes.status).toBe(400);
+
+    // 9. Assign valid product to empty slot_04 of booth-aether-tech
+    const assignRes = await fetch(`${baseUrl}/api/booths/booth-aether-tech/slots/slot_04`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({ productId: 'prod-aether-glass-ar' }),
+    });
+    expect(assignRes.status).toBe(200);
+    const assignData = (await assignRes.json()) as {
+      slot: { productId: string | null; slot: { slotId: string } };
+    };
+    expect(assignData.slot.slot.slotId).toBe('slot_04');
+    expect(assignData.slot.productId).toBe('prod-aether-glass-ar');
+
+    // 10. Replace product in slot_04 with prod-aether-hub-x1 (no duplicate boothId + slotId)
+    const replaceRes = await fetch(`${baseUrl}/api/booths/booth-aether-tech/slots/slot_04`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({ productId: 'prod-aether-hub-x1' }),
+    });
+    expect(replaceRes.status).toBe(200);
+    const replaceData = (await replaceRes.json()) as {
+      slot: { productId: string | null };
+      slots: { slot: { slotId: string }; productId: string | null }[];
+    };
+    expect(replaceData.slot.productId).toBe('prod-aether-hub-x1');
+    expect(replaceData.slots.filter((s) => s.slot.slotId === 'slot_04').length).toBe(1);
+
+    // 11. Remove product from slot_04 via DELETE
+    const clearRes = await fetch(`${baseUrl}/api/booths/booth-aether-tech/slots/slot_04`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    });
+    expect(clearRes.status).toBe(200);
+    const clearData = (await clearRes.json()) as {
+      slot: { productId: string | null; product: unknown };
+    };
+    expect(clearData.slot.productId).toBeNull();
+    expect(clearData.slot.product).toBeNull();
+  });
 });

@@ -1,13 +1,46 @@
-import type {
-  Booth,
-  CreateBoothInput,
-  UpdateBoothInput,
-  Product,
-  CreateProductInput,
-  UpdateProductInput,
-  ExtractedProductDraft,
+import {
+  type Booth,
+  type CreateBoothInput,
+  type UpdateBoothInput,
+  type Product,
+  type CreateProductInput,
+  type UpdateProductInput,
+  type ExtractedProductDraft,
+  type BoothSlotDefinition,
+  type BoothSlotAssignment,
+  type BoothSlotView,
+  BOOTH_SLOT_DEFINITIONS,
 } from '../types/expo';
 import { API_BASE_URL, buildApiUrl } from '../config/apiConfig';
+
+export function buildBoothSlotViews(
+  boothId: string,
+  products: Product[],
+  assignments: BoothSlotAssignment[]
+): BoothSlotView[] {
+  const boothAssignments = assignments.filter((a) => a.boothId === boothId);
+  const assignmentBySlot = new Map<string, BoothSlotAssignment>();
+  for (const a of boothAssignments) {
+    assignmentBySlot.set(a.slotId, a);
+  }
+
+  const productById = new Map<string, Product>();
+  for (const p of products) {
+    productById.set(p.id, p);
+  }
+
+  return BOOTH_SLOT_DEFINITIONS.map((slot) => {
+    const assignment = assignmentBySlot.get(slot.slotId);
+    const product = assignment ? productById.get(assignment.productId) || null : null;
+    return {
+      boothId,
+      slot,
+      productId: product ? product.id : null,
+      product,
+      updatedAt: assignment?.updatedAt ?? null,
+    };
+  });
+}
 
 async function requestJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('expo_admin_token');
@@ -59,6 +92,55 @@ export const apiClient = {
     const query = boothId ? `?boothId=${encodeURIComponent(boothId)}` : '';
     const res = await requestJson<{ products: Product[] }>(`/api/products${query}`);
     return res.products;
+  },
+
+  async getSlots(boothId?: string): Promise<{
+    slotDefinitions: BoothSlotDefinition[];
+    assignments: BoothSlotAssignment[];
+  }> {
+    const query = boothId ? `?boothId=${encodeURIComponent(boothId)}` : '';
+    return requestJson<{
+      slotDefinitions: BoothSlotDefinition[];
+      assignments: BoothSlotAssignment[];
+    }>(`/api/slots${query}`);
+  },
+
+  async getBoothSlots(boothId: string): Promise<{
+    booth: Booth;
+    slotDefinitions: BoothSlotDefinition[];
+    slots: BoothSlotView[];
+  }> {
+    return requestJson<{
+      booth: Booth;
+      slotDefinitions: BoothSlotDefinition[];
+      slots: BoothSlotView[];
+    }>(`/api/booths/${encodeURIComponent(boothId)}/slots`);
+  },
+
+  async assignProductToSlot(
+    boothId: string,
+    slotId: string,
+    productId: string | null
+  ): Promise<{ slot: BoothSlotView; slots: BoothSlotView[] }> {
+    return requestJson<{ slot: BoothSlotView; slots: BoothSlotView[] }>(
+      `/api/booths/${encodeURIComponent(boothId)}/slots/${encodeURIComponent(slotId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ productId }),
+      }
+    );
+  },
+
+  async clearBoothSlot(
+    boothId: string,
+    slotId: string
+  ): Promise<{ slot: BoothSlotView; slots: BoothSlotView[] }> {
+    return requestJson<{ slot: BoothSlotView; slots: BoothSlotView[] }>(
+      `/api/booths/${encodeURIComponent(boothId)}/slots/${encodeURIComponent(slotId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
   },
 
   async loginAdmin(username: string, password: string): Promise<{ token: string; username: string }> {

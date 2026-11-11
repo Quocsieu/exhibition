@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_BOOTHS,
+  DEFAULT_PRODUCTS,
+  BOOTH_SLOT_DEFINITIONS,
+  FALLBACK_SLOT_ASSIGNMENTS,
   WORLD_BOUNDS,
   CENTRAL_SPAWN_POINT,
   CENTRAL_SPAWN_SLOTS,
@@ -16,6 +19,8 @@ import {
   createBoothSignTexture,
   createBoothFasciaTexture,
   createBoothPosterTexture,
+  createEnterpriseBackdropTexture,
+  createProductDisplayCardTexture,
   createProductTagTexture,
   createAvatarNametagTexture,
   createPlazaTileTexture,
@@ -27,6 +32,7 @@ import {
   createSidewalkPaverTexture,
   getActiveCanvasTextureCount,
 } from '../scene/sceneTextures';
+import { buildBoothSlotViews } from '../services/api';
 import {
   GLB_ASSET_PATHS,
   type GlbAssetId,
@@ -478,5 +484,72 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
       'https://exhibition-xl20.onrender.com'
     );
     expect(normalizeBackendOrigin('localhost:4000/')).toBe('http://localhost:4000');
+  });
+
+  it('validates 6 non-overlapping 3D booth slots (counter, left-shelf, right-shelf) and deterministic slot product mapping', () => {
+    expect(BOOTH_SLOT_DEFINITIONS.length).toBe(6);
+    expect(BOOTH_SLOT_DEFINITIONS.map((s) => s.slotId)).toEqual([
+      'slot_01',
+      'slot_02',
+      'slot_03',
+      'slot_04',
+      'slot_05',
+      'slot_06',
+    ]);
+
+    // Verify pairwise 3D distance between all 6 slots so products never overlap on shelves/counter
+    for (let i = 0; i < BOOTH_SLOT_DEFINITIONS.length; i++) {
+      const a = BOOTH_SLOT_DEFINITIONS[i];
+      expect(a.maxSize[0]).toBeGreaterThan(0.5);
+      expect(a.maxSize[1]).toBeGreaterThan(0.5);
+      expect(a.maxSize[2]).toBeGreaterThan(0.4);
+      for (let j = i + 1; j < BOOTH_SLOT_DEFINITIONS.length; j++) {
+        const b = BOOTH_SLOT_DEFINITIONS[j];
+        const dist = Math.hypot(
+          a.position[0] - b.position[0],
+          a.position[1] - b.position[1],
+          a.position[2] - b.position[2]
+        );
+        expect(dist).toBeGreaterThan(0.8);
+      }
+    }
+
+    // Verify buildBoothSlotViews maps occupied slots and leaves remaining slots empty (null)
+    for (const booth of DEFAULT_BOOTHS) {
+      const slotViews = buildBoothSlotViews(booth.id, DEFAULT_PRODUCTS, FALLBACK_SLOT_ASSIGNMENTS);
+      expect(slotViews.length).toBe(6);
+      const occupied = slotViews.filter((s) => s.product !== null);
+      const empty = slotViews.filter((s) => s.product === null);
+      expect(occupied.length).toBe(2);
+      expect(empty.length).toBe(4);
+      for (const occ of occupied) {
+        expect(occ.product?.boothId).toBe(booth.id);
+      }
+    }
+
+    // Verify Enterprise Backdrop and Product Display Card textures dispose cleanly
+    const baseline = getActiveCanvasTextureCount();
+    const backdropTex = createEnterpriseBackdropTexture({
+      name: DEFAULT_BOOTHS[0].name,
+      companyName: DEFAULT_BOOTHS[0].companyName,
+      category: DEFAULT_BOOTHS[0].category,
+      tagline: DEFAULT_BOOTHS[0].tagline,
+      color: DEFAULT_BOOTHS[0].color,
+      occupiedSlots: 2,
+      totalSlots: 6,
+      theme: 'tech',
+    });
+    const cardTex = createProductDisplayCardTexture({
+      slotLabel: 'SLOT_01 · Quầy trước - Trái',
+      name: DEFAULT_PRODUCTS[0].name,
+      priceText: '12.500.000 ₫',
+      sku: DEFAULT_PRODUCTS[0].sku,
+      accentColor: DEFAULT_BOOTHS[0].color,
+      selected: false,
+    });
+    expect(getActiveCanvasTextureCount()).toBe(baseline + 2);
+    backdropTex.dispose();
+    cardTex.dispose();
+    expect(getActiveCanvasTextureCount()).toBe(baseline);
   });
 });

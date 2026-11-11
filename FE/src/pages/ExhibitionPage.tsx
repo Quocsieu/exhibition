@@ -2,8 +2,11 @@ import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 
 import {
   type Booth,
   type Product,
+  type BoothSlotAssignment,
+  type BoothSlotView,
   DEFAULT_BOOTHS,
   DEFAULT_PRODUCTS,
+  FALLBACK_SLOT_ASSIGNMENTS,
   CENTRAL_SPAWN_POINT,
   getBoothApproachPoint,
   isPointWalkable,
@@ -14,7 +17,7 @@ import { MobileJoystick } from '../controls/MobileJoystick';
 import { BoothPanel } from '../components/BoothPanel';
 import { LoadingScreen } from '../components/LoadingScreen';
 import { useRealtime } from '../hooks/useRealtime';
-import { apiClient } from '../services/api';
+import { apiClient, buildBoothSlotViews } from '../services/api';
 
 const AVATAR_COLORS = [
   '#0ea5e9',
@@ -96,6 +99,9 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
 
   const [booths, setBooths] = useState<Booth[]>(DEFAULT_BOOTHS);
   const [products, setProducts] = useState<Product[]>(DEFAULT_PRODUCTS);
+  const [slotAssignments, setSlotAssignments] = useState<BoothSlotAssignment[]>(
+    FALLBACK_SLOT_ASSIGNMENTS
+  );
   const [loadingData, setLoadingData] = useState(true);
   const [dataWarning, setDataWarning] = useState<string | null>(null);
 
@@ -115,16 +121,22 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
   const loadExpoData = useCallback(async () => {
     setLoadingData(true);
     try {
-      const [fetchedBooths, fetchedProducts] = await Promise.all([
+      const [fetchedBooths, fetchedProducts, fetchedSlots] = await Promise.all([
         apiClient.getBooths(),
         apiClient.getProducts(),
+        apiClient.getSlots().catch(() => ({
+          slotDefinitions: [],
+          assignments: FALLBACK_SLOT_ASSIGNMENTS,
+        })),
       ]);
       setBooths(fetchedBooths);
       setProducts(fetchedProducts);
+      setSlotAssignments(fetchedSlots.assignments);
       setDataWarning(null);
     } catch {
       setBooths(DEFAULT_BOOTHS);
       setProducts(DEFAULT_PRODUCTS);
+      setSlotAssignments(FALLBACK_SLOT_ASSIGNMENTS);
       setDataWarning('Đang hiển thị dữ liệu mẫu cục bộ (Chưa kết nối được API Backend).');
     } finally {
       setLoadingData(false);
@@ -351,13 +363,41 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
     [cameraMode, moveToPoint]
   );
 
+  const slotsByBooth = useMemo<Record<string, BoothSlotView[]>>(() => {
+    const map: Record<string, BoothSlotView[]> = {};
+    for (const b of booths) {
+      map[b.id] = buildBoothSlotViews(b.id, products, slotAssignments);
+    }
+    return map;
+  }, [booths, products, slotAssignments]);
+
   const productCountByBooth = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const p of products) {
-      counts[p.boothId] = (counts[p.boothId] || 0) + 1;
+    for (const b of booths) {
+      const occupied = (slotsByBooth[b.id] || []).filter((s) => Boolean(s.product)).length;
+      const totalBoothProds = products.filter((p) => p.boothId === b.id).length;
+      counts[b.id] = occupied > 0 ? occupied : totalBoothProds;
     }
     return counts;
-  }, [products]);
+  }, [booths, products, slotsByBooth]);
+
+  const handleSelectSlotProduct = useCallback(
+    (product: Product | null) => {
+      if (!product) {
+        setSelectedProduct(null);
+        return;
+      }
+      const ownerBooth = booths.find((b) => b.id === product.boothId) || selectedBooth;
+      if (ownerBooth && selectedBooth?.id !== ownerBooth.id) {
+        setSelectedBooth(ownerBooth);
+        setFocusedBooth(ownerBooth);
+        setCameraMode('focus');
+        setZoom(FOCUS_DEFAULT_ZOOM);
+      }
+      setSelectedProduct(product);
+    },
+    [booths, selectedBooth]
+  );
 
   const activeBoothProducts = useMemo(() => {
     const targetId = selectedBooth?.id || focusedBooth?.id;
@@ -639,9 +679,10 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
       <ExhibitionScene
         booths={booths}
         productCountByBooth={productCountByBooth}
+        slotsByBooth={slotsByBooth}
         activeBoothProducts={activeBoothProducts}
         selectedProductId={selectedProduct?.id ?? null}
-        onSelectProduct={setSelectedProduct}
+        onSelectProduct={handleSelectSlotProduct}
         player={playerDescriptor}
         playerTransformRef={transformRef}
         onStepMovement={stepMovement}
@@ -661,8 +702,9 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({ onOpenAdmin }) =
       <BoothPanel
         booth={selectedBooth}
         products={products}
+        slots={selectedBooth ? slotsByBooth[selectedBooth.id] : undefined}
         selectedProduct={selectedProduct}
-        onSelectProduct={setSelectedProduct}
+        onSelectProduct={handleSelectSlotProduct}
         onClose={handleReturnToExplore}
         onWalkToBooth={handleWalkToBooth}
       />

@@ -29,7 +29,7 @@ export const ProductPanel: React.FC<ProductPanelProps> = ({ booth, product, onBa
         className="btn btn--ghost btn--sm product-detail__back"
         onClick={onBack}
       >
-        ← Quay lại danh sách sản phẩm ({booth.name})
+        ← Quay lại kệ trưng bày 3D ({booth.name})
       </button>
 
       <div className="product-detail__layout">
