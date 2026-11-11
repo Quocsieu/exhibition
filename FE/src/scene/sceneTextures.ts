@@ -530,7 +530,8 @@ export function createPlazaTileTexture(): THREE.CanvasTexture {
   const texture = registerTrackedTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(16, 16);
+  texture.repeat.set(18, 18);
+  texture.anisotropy = 8;
   return texture;
 }
 
@@ -574,12 +575,214 @@ export function createPlazaTileBumpTexture(): THREE.CanvasTexture {
   texture.colorSpace = THREE.NoColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(16, 16);
+  texture.repeat.set(18, 18);
+  texture.anisotropy = 8;
   return texture;
 }
 
 /**
- * Creates a decorative compass-rose & mosaic floor medallion texture for the Central Plaza.
+ * Creates a Stylized 3D City Asphalt Road texture with mineral aggregate grain,
+ * subtle dual-lane wear bands, white shoulder edge lines, and a dashed white center line.
+ */
+export function createAsphaltRoadTexture(repeatY = 6): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 512);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    // Deep charcoal-slate stylized asphalt base
+    ctx.fillStyle = '#333d4b';
+    ctx.fillRect(0, 0, 512, 512);
+
+    // Subtle darker wheel-track wear bands on left and right lanes
+    const leftLaneGrad = ctx.createLinearGradient(64, 0, 224, 0);
+    leftLaneGrad.addColorStop(0, 'rgba(30, 41, 59, 0)');
+    leftLaneGrad.addColorStop(0.5, 'rgba(15, 23, 42, 0.28)');
+    leftLaneGrad.addColorStop(1, 'rgba(30, 41, 59, 0)');
+    ctx.fillStyle = leftLaneGrad;
+    ctx.fillRect(64, 0, 160, 512);
+
+    const rightLaneGrad = ctx.createLinearGradient(288, 0, 448, 0);
+    rightLaneGrad.addColorStop(0, 'rgba(30, 41, 59, 0)');
+    rightLaneGrad.addColorStop(0.5, 'rgba(15, 23, 42, 0.28)');
+    rightLaneGrad.addColorStop(1, 'rgba(30, 41, 59, 0)');
+    ctx.fillStyle = rightLaneGrad;
+    ctx.fillRect(288, 0, 160, 512);
+
+    // Deterministic mineral aggregate speckle (stylized asphalt grain)
+    const speckleColors = ['#28313e', '#3f4b5b', '#495668', '#242c38'];
+    for (let i = 0; i < 900; i++) {
+      const sx = (i * 137 + (i % 17) * 29) % 512;
+      const sy = (i * 251 + (i % 23) * 19) % 512;
+      const size = (i % 3) + 2;
+      ctx.fillStyle = speckleColors[i % speckleColors.length];
+      ctx.fillRect(sx, sy, size, size);
+    }
+
+    // Crisp continuous white road shoulder edge lines (left & right)
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillRect(22, 0, 10, 512);
+    ctx.fillRect(480, 0, 10, 512);
+
+    // Crisp dashed white center lane divider line
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(250, 36, 12, 180);
+    ctx.fillRect(250, 292, 12, 180);
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1, repeatY);
+  texture.anisotropy = 8;
+  return texture;
+}
+
+/**
+ * Creates a matching grayscale bump/roughness map for the stylized asphalt road.
+ */
+export function createAsphaltBumpTexture(repeatY = 6): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 512);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    ctx.fillStyle = '#787878';
+    ctx.fillRect(0, 0, 512, 512);
+
+    const grainShades = ['#5c5c5c', '#929292', '#686868', '#888888'];
+    for (let i = 0; i < 900; i++) {
+      const sx = (i * 137 + (i % 17) * 29) % 512;
+      const sy = (i * 251 + (i % 23) * 19) % 512;
+      const size = (i % 3) + 2;
+      ctx.fillStyle = grainShades[i % grainShades.length];
+      ctx.fillRect(sx, sy, size, size);
+    }
+
+    // Slightly raised thermoplastic paint lines
+    ctx.fillStyle = '#d4d4d4';
+    ctx.fillRect(22, 0, 10, 512);
+    ctx.fillRect(480, 0, 10, 512);
+    ctx.fillRect(250, 36, 12, 180);
+    ctx.fillRect(250, 292, 12, 180);
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1, repeatY);
+  texture.anisotropy = 8;
+  return texture;
+}
+
+/**
+ * Creates a Stylized 3D City Zebra Crosswalk (vạch qua đường) texture at road intersections.
+ */
+export function createCrosswalkTexture(): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 256);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    // Matching dark asphalt base
+    ctx.fillStyle = '#333d4b';
+    ctx.fillRect(0, 0, 512, 256);
+
+    // Subtle aggregate grain
+    const speckleColors = ['#28313e', '#3f4b5b', '#495668'];
+    for (let i = 0; i < 350; i++) {
+      const sx = (i * 149) % 512;
+      const sy = (i * 89) % 256;
+      ctx.fillStyle = speckleColors[i % speckleColors.length];
+      ctx.fillRect(sx, sy, 3, 3);
+    }
+
+    // Top & bottom stop lines
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillRect(20, 14, 472, 10);
+    ctx.fillRect(20, 232, 472, 10);
+
+    // 6 Crisp White Zebra Crosswalk Stripes
+    const stripeCount = 6;
+    const totalSpan = 432;
+    const startX = 40;
+    const slotWidth = totalSpan / stripeCount;
+    const barWidth = slotWidth * 0.58;
+
+    for (let i = 0; i < stripeCount; i++) {
+      const bx = startX + i * slotWidth + (slotWidth - barWidth) * 0.5;
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(bx, 38, barWidth, 180);
+
+      // Subtle bevel highlight on each white stripe
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillRect(bx, 212, barWidth, 6);
+    }
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.anisotropy = 8;
+  return texture;
+}
+
+/**
+ * Creates a Rectangular Running-Bond Brick/Stone Sidewalk Paver texture (vỉa hè lát gạch)
+ * with warm gray and subtle terracotta-sandstone tones and clean mortar lines.
+ */
+export function createSidewalkPaverTexture(repeatX = 3, repeatY = 12): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 512);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    // Subtle warm mortar joint base (not overly dark)
+    ctx.fillStyle = '#b8b2a8';
+    ctx.fillRect(0, 0, 512, 512);
+
+    const rows = 8;
+    const cols = 4;
+    const brickH = 512 / rows;
+    const brickW = 512 / cols;
+    const paverTones = [
+      '#e6dfd5',
+      '#ded6ca',
+      '#eadfd3',
+      '#d8d0c5',
+      '#e2dad0',
+      '#e5d8cb',
+    ];
+
+    for (let r = 0; r < rows; r++) {
+      const offsetX = (r % 2) * (brickW * 0.5);
+      for (let c = -1; c <= cols; c++) {
+        const bx = c * brickW + offsetX;
+        const by = r * brickH;
+        const tone = paverTones[((r * 5 + (c + 4) * 3) & 0x7fffffff) % paverTones.length];
+
+        ctx.fillStyle = tone;
+        ctx.fillRect(bx + 2.5, by + 2.5, brickW - 5, brickH - 5);
+
+        // Top/left sunlit paver edge highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.58)';
+        ctx.fillRect(bx + 2.5, by + 2.5, brickW - 5, 2);
+        ctx.fillRect(bx + 2.5, by + 2.5, 2, brickH - 5);
+
+        // Bottom/right subtle shadow
+        ctx.fillStyle = 'rgba(100, 92, 82, 0.25)';
+        ctx.fillRect(bx + 2.5, by + brickH - 4.5, brickW - 5, 2);
+        ctx.fillRect(bx + brickW - 4.5, by + 2.5, 2, brickH - 5);
+      }
+    }
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeatX, repeatY);
+  texture.anisotropy = 8;
+  return texture;
+}
+
+/**
+ * Creates a decorative compass-rose & radial cobble mosaic floor medallion texture
+ * for the Central Pedestrian Plaza.
  */
 export function createPlazaMedallionTexture(): THREE.CanvasTexture {
   const canvas = createCanvasElement(512, 512);
@@ -590,42 +793,81 @@ export function createPlazaMedallionTexture(): THREE.CanvasTexture {
     const cy = 256;
     ctx.clearRect(0, 0, 512, 512);
 
-    // Outer stone ring
+    // Outer granite curb border ring
     ctx.beginPath();
-    ctx.arc(cx, cy, 248, 0, Math.PI * 2);
-    ctx.fillStyle = '#f1f5f9';
+    ctx.arc(cx, cy, 250, 0, Math.PI * 2);
+    ctx.fillStyle = '#d6d3d1';
     ctx.fill();
-    ctx.lineWidth = 10;
-    ctx.strokeStyle = '#0ea5e9';
+
+    // Main warm travertine & sandstone plaza disc
+    ctx.beginPath();
+    ctx.arc(cx, cy, 238, 0, Math.PI * 2);
+    ctx.fillStyle = '#efeae1';
+    ctx.fill();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = '#a8a29e';
     ctx.stroke();
 
-    // Radial 12-segment plaza paving lines
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 3;
-    for (let i = 0; i < 12; i++) {
-      const angle = (i * Math.PI) / 6;
+    // Concentric decorative stone paver rings
+    const ringRadii = [214, 186, 152, 118, 84];
+    const ringFills = ['#e5dec9', '#f3efe6', '#e2d9c5', '#ede8dc', '#dfd5be'];
+    ringRadii.forEach((r, idx) => {
       ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(angle) * 76, cy + Math.sin(angle) * 76);
-      ctx.lineTo(cx + Math.cos(angle) * 240, cy + Math.sin(angle) * 240);
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = ringFills[idx];
+      ctx.fill();
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#b8b0a2';
+      ctx.stroke();
+    });
+
+    // Radial 16-segment cobble joint lines
+    ctx.strokeStyle = 'rgba(148, 138, 124, 0.55)';
+    ctx.lineWidth = 2.5;
+    for (let i = 0; i < 16; i++) {
+      const angle = (i * Math.PI) / 8;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(angle) * 58, cy + Math.sin(angle) * 58);
+      ctx.lineTo(cx + Math.cos(angle) * 236, cy + Math.sin(angle) * 236);
       ctx.stroke();
     }
 
-    // Golden compass ring
-    ctx.beginPath();
-    ctx.arc(cx, cy, 172, 0, Math.PI * 2);
-    ctx.lineWidth = 8;
-    ctx.strokeStyle = '#f59e0b';
-    ctx.stroke();
+    // 8-Point Architectural Compass Rose Star in the Central Plaza
+    for (let i = 0; i < 8; i++) {
+      const angle = (i * Math.PI) / 4;
+      const outerR = i % 2 === 0 ? 178 : 142;
+      const halfSpread = 0.16;
 
-    // Inner azure ring
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(
+        cx + Math.cos(angle - halfSpread) * 72,
+        cy + Math.sin(angle - halfSpread) * 72
+      );
+      ctx.lineTo(cx + Math.cos(angle) * outerR, cy + Math.sin(angle) * outerR);
+      ctx.lineTo(
+        cx + Math.cos(angle + halfSpread) * 72,
+        cy + Math.sin(angle + halfSpread) * 72
+      );
+      ctx.closePath();
+      ctx.fillStyle = i % 2 === 0 ? '#d97706' : '#0284c7';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#f8fafc';
+      ctx.stroke();
+    }
+
+    // Inner stone medallion ring around monument plinth
     ctx.beginPath();
-    ctx.arc(cx, cy, 118, 0, Math.PI * 2);
-    ctx.fillStyle = '#e0f2fe';
+    ctx.arc(cx, cy, 68, 0, Math.PI * 2);
+    ctx.fillStyle = '#f8fafc';
     ctx.fill();
     ctx.lineWidth = 5;
-    ctx.strokeStyle = '#0284c7';
+    ctx.strokeStyle = '#d97706';
     ctx.stroke();
   }
 
-  return registerTrackedTexture(canvas);
+  const texture = registerTrackedTexture(canvas);
+  texture.anisotropy = 8;
+  return texture;
 }

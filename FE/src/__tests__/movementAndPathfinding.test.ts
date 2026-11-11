@@ -21,6 +21,10 @@ import {
   createPlazaTileTexture,
   createPlazaTileBumpTexture,
   createPlazaMedallionTexture,
+  createAsphaltRoadTexture,
+  createAsphaltBumpTexture,
+  createCrosswalkTexture,
+  createSidewalkPaverTexture,
   getActiveCanvasTextureCount,
 } from '../scene/sceneTextures';
 import {
@@ -286,12 +290,16 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     });
     const tex7 = createPlazaTileTexture();
     const tex8 = createPlazaMedallionTexture();
+    const tex9 = createAsphaltRoadTexture();
+    const tex10 = createAsphaltBumpTexture();
+    const tex11 = createCrosswalkTexture();
+    const tex12 = createSidewalkPaverTexture();
 
-    expect(getActiveCanvasTextureCount()).toBe(baseline + 8);
+    expect(getActiveCanvasTextureCount()).toBe(baseline + 12);
 
     tex1.dispose();
     tex1.dispose(); // idempotent double-dispose check
-    expect(getActiveCanvasTextureCount()).toBe(baseline + 7);
+    expect(getActiveCanvasTextureCount()).toBe(baseline + 11);
 
     tex2.dispose();
     tex3.dispose();
@@ -300,6 +308,10 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     tex6.dispose();
     tex7.dispose();
     tex8.dispose();
+    tex9.dispose();
+    tex10.dispose();
+    tex11.dispose();
+    tex12.dispose();
     expect(getActiveCanvasTextureCount()).toBe(baseline);
   });
 

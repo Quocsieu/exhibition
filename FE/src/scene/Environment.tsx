@@ -4,10 +4,14 @@ import { Billboard, Instance, Instances } from '@react-three/drei';
 import * as THREE from 'three';
 import { WORLD_BOUNDS } from '../types/expo';
 import {
+  createAsphaltBumpTexture,
+  createAsphaltRoadTexture,
   createBannerSignTexture,
+  createCrosswalkTexture,
   createPlazaMedallionTexture,
   createPlazaTileBumpTexture,
   createPlazaTileTexture,
+  createSidewalkPaverTexture,
 } from './sceneTextures';
 import { cloneCachedAsset, type GlbAssetId } from './assetLoader';
 
@@ -66,15 +70,20 @@ const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
   },
 ];
 
+// Task A: Perimeter & Avenue Trees positioned strictly along outer boulevard edges, street corners,
+// and side gaps between booths — ZERO trees placed in front of the 6 booths so all facades,
+// entrance doors, signboards, and radial walkways remain 100% unobstructed.
 const PERIMETER_TREES: [number, number, number][] = [
   [-20.5, -18.5, 1.15],
   [20.5, -18.5, 1.1],
-  [-20.5, 18.5, 1.05],
-  [20.5, 18.5, 1.15],
-  [-21.2, -1.0, 1.2],
-  [21.2, -1.0, 1.2],
-  [-9.5, -20.5, 1.0],
-  [9.5, -20.5, 1.0],
+  [-20.5, 18.5, 1.08],
+  [20.5, 18.5, 1.12],
+  [-21.2, 0.0, 1.18],
+  [21.2, 0.0, 1.18],
+  [-7.5, -20.2, 1.02],
+  [7.5, -20.2, 1.02],
+  [-9.2, 20.2, 1.05],
+  [9.2, 20.2, 1.05],
 ];
 
 const ALL_TREES: {
@@ -84,13 +93,6 @@ const ALL_TREES: {
   ry: number;
   assetId: GlbAssetId;
 }[] = [
-  ...CENTRAL_PLANTER_ISLANDS.map((island, idx) => ({
-    x: island.x,
-    z: island.z,
-    scale: 1.05,
-    ry: idx * 1.15,
-    assetId: (idx % 2 === 0 ? 'env-tree-oak' : 'env-tree-blossom') as GlbAssetId,
-  })),
   ...PERIMETER_TREES.map(([x, z, scale], idx) => ({
     x,
     z,
@@ -104,7 +106,7 @@ const ALL_TREES: {
           : 'env-tree-blossom'
     ) as GlbAssetId,
   })),
-  // Outer parkland trees framing the avenue (zero collision)
+  // Outer parkland trees framing the avenue outside the courtyard (zero collision)
   { x: -26.5, z: -12, scale: 1.35, ry: 0.4, assetId: 'env-tree-pine' },
   { x: 26.5, z: -12, scale: 1.35, ry: 1.8, assetId: 'env-tree-pine' },
   { x: -26.5, z: 8, scale: 1.28, ry: 2.1, assetId: 'env-tree-oak' },
@@ -211,25 +213,25 @@ const FESTIVAL_TOTEMS: { x: number; z: number; ry: number }[] = [
   { x: 22.6, z: 12.5, ry: -Math.PI / 2 },
 ];
 
-// Colorful Flower Clusters placed inside central planters & entrance beds
+// Colorful Flower Clusters placed inside low-profile central planters & entrance beds
 const FLOWER_CLUSTERS_PINK: [number, number, number][] = [
-  [-6.45, 0.62, -5.45],
-  [-5.55, 0.62, -4.55],
-  [6.45, 0.62, -5.45],
-  [5.55, 0.62, -4.55],
-  [-6.45, 0.62, 5.45],
-  [6.45, 0.62, 5.45],
+  [-6.35, 0.46, -5.35],
+  [-5.65, 0.46, -4.65],
+  [6.35, 0.46, -5.35],
+  [5.65, 0.46, -4.65],
+  [-6.35, 0.46, 5.35],
+  [6.35, 0.46, 5.35],
   [-6.2, 0.42, 20.8],
   [6.2, 0.42, 20.8],
 ];
 
 const FLOWER_CLUSTERS_GOLD: [number, number, number][] = [
-  [-6.45, 0.62, -4.55],
-  [6.45, 0.62, -4.55],
-  [-5.55, 0.62, 5.45],
-  [-6.45, 0.62, 4.55],
-  [5.55, 0.62, 5.45],
-  [6.45, 0.62, 4.55],
+  [-6.35, 0.46, -4.65],
+  [6.35, 0.46, -4.65],
+  [-5.65, 0.46, 5.35],
+  [-6.35, 0.46, 4.65],
+  [5.65, 0.46, 5.35],
+  [6.35, 0.46, 4.65],
   [-6.6, 0.42, 21.1],
   [6.6, 0.42, 21.1],
 ];
@@ -314,10 +316,58 @@ const HORIZON_HILL_MAT = new THREE.MeshStandardMaterial({
   roughness: 0.82,
 });
 
-const PLANTER_BOX_GEOM = new THREE.BoxGeometry(1.52, 0.48, 1.52);
-const PLANTER_SOIL_GEOM = new THREE.BoxGeometry(1.3, 0.08, 1.3);
+const PLANTER_BOX_GEOM = new THREE.BoxGeometry(1.48, 0.36, 1.48);
+const PLANTER_SOIL_GEOM = new THREE.BoxGeometry(1.26, 0.06, 1.26);
 const PLANTER_BOX_MAT = new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.65 });
 const PLANTER_SOIL_MAT = new THREE.MeshStandardMaterial({ color: '#065f46', roughness: 0.9 });
+const CURB_STONE_MAT = new THREE.MeshStandardMaterial({
+  color: '#cbd5e1',
+  roughness: 0.52,
+  metalness: 0.08,
+});
+
+// Stylized 3D City Asphalt Road Network Segments (Outside Central Pedestrian Plaza r = 8.4m)
+const ASPHALT_ROAD_SEGMENTS: {
+  x: number;
+  z: number;
+  w: number;
+  length: number;
+  ry: number;
+}[] = [
+  // South Grand Entrance Boulevard (from Entrance Gate z=21.4 to South Plaza edge z=8.4)
+  { x: 0, z: 14.9, w: 5.4, length: 13.0, ry: 0 },
+  // West Cross-Avenue (from West perimeter x=-21.6 to West Plaza edge x=-8.4)
+  { x: -15.0, z: 0, w: 5.2, length: 13.2, ry: Math.PI / 2 },
+  // East Cross-Avenue (from East Plaza edge x=8.4 to East perimeter x=21.6)
+  { x: 15.0, z: 0, w: 5.2, length: 13.2, ry: Math.PI / 2 },
+  // Outer Perimeter Ring Road Segments (Stylized 3D City Boulevard loop)
+  { x: 0, z: -19.8, w: 3.4, length: 42.4, ry: Math.PI / 2 },
+  { x: -13.2, z: 19.8, w: 3.2, length: 16.0, ry: Math.PI / 2 },
+  { x: 13.2, z: 19.8, w: 3.2, length: 16.0, ry: Math.PI / 2 },
+  { x: -20.2, z: 0, w: 3.4, length: 36.2, ry: 0 },
+  { x: 20.2, z: 0, w: 3.4, length: 36.2, ry: 0 },
+];
+
+// Zebra Crosswalks at Avenue & Plaza Intersections
+const ZEBRA_CROSSWALKS: {
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  ry: number;
+}[] = [
+  // 3 Main Avenue Crossings into Central Pedestrian Plaza
+  { x: -9.5, z: 0, w: 4.8, d: 2.1, ry: Math.PI / 2 },
+  { x: 9.5, z: 0, w: 4.8, d: 2.1, ry: Math.PI / 2 },
+  { x: 0, z: 9.5, w: 5.0, d: 2.1, ry: 0 },
+  // Grand South Entrance Gate Crossing
+  { x: 0, z: 17.6, w: 5.0, d: 2.2, ry: 0 },
+  // Outer Boulevard Pedestrian Crossings
+  { x: -18.5, z: -3.2, w: 4.8, d: 1.9, ry: Math.PI / 2 },
+  { x: 18.5, z: -3.2, w: 4.8, d: 1.9, ry: Math.PI / 2 },
+  { x: -18.5, z: 3.2, w: 4.8, d: 1.9, ry: Math.PI / 2 },
+  { x: 18.5, z: 3.2, w: 4.8, d: 1.9, ry: Math.PI / 2 },
+];
 
 export const Environment: React.FC<EnvironmentProps> = React.memo(
   ({ onGroundClick, clickMarker }) => {
@@ -328,9 +378,13 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const outerRingRef = useRef<THREE.Mesh>(null);
     const markerGroupRef = useRef<THREE.Group>(null);
 
+    const sidewalkPaverTexture = useMemo(() => createSidewalkPaverTexture(14, 14), []);
     const plazaTileTexture = useMemo(() => createPlazaTileTexture(), []);
     const plazaTileBumpTexture = useMemo(() => createPlazaTileBumpTexture(), []);
     const plazaMedallionTexture = useMemo(() => createPlazaMedallionTexture(), []);
+    const asphaltRoadTexture = useMemo(() => createAsphaltRoadTexture(4), []);
+    const asphaltBumpTexture = useMemo(() => createAsphaltBumpTexture(4), []);
+    const crosswalkTexture = useMemo(() => createCrosswalkTexture(), []);
 
     const treeClones = useMemo(
       () => ALL_TREES.map((t) => ({ ...t, object: cloneCachedAsset(t.assetId) })),
@@ -390,38 +444,30 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       []
     );
 
-    const wayfindingTextures = useMemo(
-      () =>
-        CENTRAL_PLANTER_ISLANDS.map((island) =>
-          island.signText
-            ? createBannerSignTexture({
-                title: island.signText.title,
-                subtitle: island.signText.subtitle,
-                accentColor: island.signText.color,
-              })
-            : null
-        ),
-      []
-    );
-
     useEffect(() => {
       return () => {
+        sidewalkPaverTexture.dispose();
         plazaTileTexture.dispose();
         plazaTileBumpTexture.dispose();
         plazaMedallionTexture.dispose();
+        asphaltRoadTexture.dispose();
+        asphaltBumpTexture.dispose();
+        crosswalkTexture.dispose();
         plazaBannerTexture.dispose();
         entranceBannerTexture.dispose();
         directoryKioskTexture.dispose();
-        wayfindingTextures.forEach((tex) => tex?.dispose());
       };
     }, [
+      sidewalkPaverTexture,
       plazaTileTexture,
       plazaTileBumpTexture,
       plazaMedallionTexture,
+      asphaltRoadTexture,
+      asphaltBumpTexture,
+      crosswalkTexture,
       plazaBannerTexture,
       entranceBannerTexture,
       directoryKioskTexture,
-      wayfindingTextures,
     ]);
 
     useFrame(({ clock }, delta) => {
@@ -499,7 +545,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           <meshBasicMaterial color="#0ea5e9" />
         </mesh>
 
-        {/* Interactive Main Courtyard Ground Plane with PBR Stone Tile & Bump/Roughness Relief */}
+        {/* Interactive Main Courtyard Pedestrian Sidewalk Base with Running-Bond Paver Tiles & PBR Relief */}
         <mesh
           rotation={[-Math.PI / 2, 0, 0]}
           position={[0, 0, 0]}
@@ -511,97 +557,143 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         >
           <planeGeometry args={[width, depth]} />
           <meshStandardMaterial
-            map={plazaTileTexture}
+            map={sidewalkPaverTexture}
             bumpMap={plazaTileBumpTexture}
-            bumpScale={0.032}
+            bumpScale={0.028}
             roughnessMap={plazaTileBumpTexture}
             color="#f8fafc"
-            roughness={0.68}
-            metalness={0.06}
+            roughness={0.66}
+            metalness={0.05}
           />
         </mesh>
 
         {/* ================================================================
-            2. STRUCTURED WALKWAY, BOULEVARD & 6 RADIAL CENTRAL PLAZA AVENUES
+            2. STYLIZED 3D CITY ASPHALT ROAD NETWORK, ZEBRA CROSSWALKS,
+               RAISED GRANITE CURBS & 6 TILED SIDEWALK PROMENADES
            ================================================================ */}
-        <group position={[0, 0.014, 1.5]}>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-            <planeGeometry args={[5.8, depth - 3.6]} />
-            <meshStandardMaterial color="#f8fafc" roughness={0.58} />
-          </mesh>
-          <mesh position={[-2.95, 0.018, 0]}>
-            <boxGeometry args={[0.22, 0.036, depth - 3.6]} />
-            <meshStandardMaterial color="#0ea5e9" roughness={0.45} />
-          </mesh>
-          <mesh position={[2.95, 0.018, 0]}>
-            <boxGeometry args={[0.22, 0.036, depth - 3.6]} />
-            <meshStandardMaterial color="#0ea5e9" roughness={0.45} />
-          </mesh>
-        </group>
+        {/* Stylized 3D City Asphalt Road Segments with White Shoulder Lines, Dashed Center Divider & Raised 3D Curbs */}
+        {ASPHALT_ROAD_SEGMENTS.map((road, idx) => (
+          <group
+            key={`asphalt-road-${idx}`}
+            position={[road.x, 0.011, road.z]}
+            rotation={[0, road.ry, 0]}
+          >
+            <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+              <planeGeometry args={[road.w, road.length]} />
+              <meshStandardMaterial
+                map={asphaltRoadTexture}
+                bumpMap={asphaltBumpTexture}
+                bumpScale={0.022}
+                roughnessMap={asphaltBumpTexture}
+                roughness={0.78}
+                metalness={0.05}
+              />
+            </mesh>
+            {/* 3D Raised Granite Curbs (Bó vỉa hè) separating Asphalt Road from Tiled Sidewalks */}
+            <mesh position={[-road.w / 2 - 0.14, 0.028, 0]} receiveShadow material={CURB_STONE_MAT}>
+              <boxGeometry args={[0.28, 0.056, road.length]} />
+            </mesh>
+            <mesh position={[road.w / 2 + 0.14, 0.028, 0]} receiveShadow material={CURB_STONE_MAT}>
+              <boxGeometry args={[0.28, 0.056, road.length]} />
+            </mesh>
+          </group>
+        ))}
 
-        <group position={[0, 0.016, -0.5]}>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-            <planeGeometry args={[width - 3.6, 5.6]} />
-            <meshStandardMaterial color="#f8fafc" roughness={0.58} />
+        {/* High-Contrast White Zebra Crosswalks at Avenue & Plaza Intersections */}
+        {ZEBRA_CROSSWALKS.map((cw, idx) => (
+          <mesh
+            key={`crosswalk-${idx}`}
+            position={[cw.x, 0.015, cw.z]}
+            rotation={[-Math.PI / 2, 0, cw.ry]}
+            receiveShadow
+          >
+            <planeGeometry args={[cw.w, cw.d]} />
+            <meshStandardMaterial
+              map={crosswalkTexture}
+              bumpMap={asphaltBumpTexture}
+              bumpScale={0.015}
+              roughness={0.62}
+              metalness={0.04}
+            />
           </mesh>
-          <mesh position={[0, 0.018, -2.85]}>
-            <boxGeometry args={[width - 3.6, 0.036, 0.22]} />
-            <meshStandardMaterial color="#38bdf8" roughness={0.45} />
-          </mesh>
-          <mesh position={[0, 0.018, 2.85]}>
-            <boxGeometry args={[width - 3.6, 0.036, 0.22]} />
-            <meshStandardMaterial color="#38bdf8" roughness={0.45} />
-          </mesh>
-        </group>
+        ))}
 
-        {/* 6 Radial Avenues from Central Plaza Ring to All 6 Booth Entrances */}
+        {/* 6 Tiled Pedestrian Sidewalk Promenades from Central Plaza Ring to All 6 Booth Entrances */}
         {BOOTH_CONNECTOR_PATHS.map((conn, idx) => (
           <group
             key={`conn-${idx}`}
-            position={[conn.x, 0.013, conn.z]}
+            position={[conn.x, 0.018, conn.z]}
             rotation={[0, conn.ry, 0]}
           >
             <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
               <planeGeometry args={[conn.w, conn.d]} />
-              <meshStandardMaterial color="#f1f5f9" roughness={0.62} />
+              <meshStandardMaterial
+                map={plazaTileTexture}
+                bumpMap={plazaTileBumpTexture}
+                bumpScale={0.024}
+                roughnessMap={plazaTileBumpTexture}
+                color="#f8fafc"
+                roughness={0.58}
+                metalness={0.05}
+              />
             </mesh>
-            <mesh position={[-conn.w / 2, 0.016, 0]}>
-              <boxGeometry args={[0.16, 0.032, conn.d]} />
+            {/* Raised Granite Sidewalk Curbs along Booth Approach Walkways */}
+            <mesh position={[-conn.w / 2 - 0.11, 0.024, 0]} receiveShadow material={CURB_STONE_MAT}>
+              <boxGeometry args={[0.22, 0.048, conn.d]} />
+            </mesh>
+            <mesh position={[conn.w / 2 + 0.11, 0.024, 0]} receiveShadow material={CURB_STONE_MAT}>
+              <boxGeometry args={[0.22, 0.048, conn.d]} />
+            </mesh>
+            <mesh position={[-conn.w / 2, 0.026, 0]}>
+              <boxGeometry args={[0.1, 0.052, conn.d]} />
               <meshBasicMaterial color={conn.accent} />
             </mesh>
-            <mesh position={[conn.w / 2, 0.016, 0]}>
-              <boxGeometry args={[0.16, 0.032, conn.d]} />
+            <mesh position={[conn.w / 2, 0.026, 0]}>
+              <boxGeometry args={[0.1, 0.052, conn.d]} />
               <meshBasicMaterial color={conn.accent} />
             </mesh>
           </group>
         ))}
 
-        {/* Entrance Welcome Carpet */}
-        <group position={[0, 0.02, 18.6]}>
+        {/* Entrance Welcome Promenade Plaza Carpet */}
+        <group position={[0, 0.02, 19.6]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-            <planeGeometry args={[4.8, 4.8]} />
+            <planeGeometry args={[5.0, 2.8]} />
             <meshStandardMaterial color="#0284c7" roughness={0.62} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
-            <planeGeometry args={[4.2, 4.3]} />
+            <planeGeometry args={[4.4, 2.4]} />
             <meshStandardMaterial color="#0ea5e9" roughness={0.55} />
           </mesh>
         </group>
 
         {/* ================================================================
-            3. CENTRAL PLAZA COMPASS MEDALLION & LOW ARCHITECTURAL CENTERPIECE
+            3. CENTRAL PEDESTRIAN PLAZA COMPASS MEDALLION & CENTERPIECE
            ================================================================ */}
         <group position={[0, 0, 0]}>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.022, 0]} receiveShadow>
-            <circleGeometry args={[8.2, 48]} />
-            <meshStandardMaterial map={plazaMedallionTexture} roughness={0.52} />
+          {/* 3D Raised Circular Granite Curb Ring framing Central Pedestrian Plaza */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.032, 0]} receiveShadow material={CURB_STONE_MAT}>
+            <ringGeometry args={[8.18, 8.52, 64]} />
           </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.026, 0]}>
-            <ringGeometry args={[7.15, 7.5, 48]} />
+          <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.034, 0]} receiveShadow material={CURB_STONE_MAT}>
+            <torusGeometry args={[8.35, 0.055, 12, 64]} />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.024, 0]} receiveShadow>
+            <circleGeometry args={[8.22, 64]} />
+            <meshStandardMaterial
+              map={plazaMedallionTexture}
+              bumpMap={plazaTileBumpTexture}
+              bumpScale={0.02}
+              roughness={0.48}
+              metalness={0.06}
+            />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.027, 0]}>
+            <ringGeometry args={[7.15, 7.48, 64]} />
             <meshBasicMaterial color="#0ea5e9" transparent opacity={0.82} />
           </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.028, 0]}>
-            <ringGeometry args={[5.35, 5.55, 48]} />
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.029, 0]}>
+            <ringGeometry args={[5.35, 5.55, 64]} />
             <meshBasicMaterial color="#f59e0b" transparent opacity={0.88} />
           </mesh>
 
@@ -737,35 +829,24 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         </group>
 
         {/* ================================================================
-            5. CENTRAL PLANTER ISLANDS & WAYFINDING SIGNS
+            5. LOW-PROFILE ORNAMENTAL FLOWER PLANTER BEDS (Zero Sightline Obstruction)
            ================================================================ */}
-        {CENTRAL_PLANTER_ISLANDS.map((island, idx) => {
-          const signTexture = wayfindingTextures[idx];
-          return (
-            <group key={`planter-island-${idx}`} position={[island.x, 0, island.z]}>
-              <mesh
-                geometry={PLANTER_BOX_GEOM}
-                material={PLANTER_BOX_MAT}
-                position={[0, 0.24, 0]}
-                castShadow
-                receiveShadow
-              />
-              <mesh
-                geometry={PLANTER_SOIL_GEOM}
-                material={PLANTER_SOIL_MAT}
-                position={[0, 0.5, 0]}
-              />
-              {signTexture && (
-                <Billboard position={[0, 3.65, 0]}>
-                  <mesh>
-                    <planeGeometry args={[3.6, 0.76]} />
-                    <meshBasicMaterial map={signTexture} transparent depthWrite={false} />
-                  </mesh>
-                </Billboard>
-              )}
-            </group>
-          );
-        })}
+        {CENTRAL_PLANTER_ISLANDS.map((island, idx) => (
+          <group key={`planter-island-${idx}`} position={[island.x, 0, island.z]}>
+            <mesh
+              geometry={PLANTER_BOX_GEOM}
+              material={PLANTER_BOX_MAT}
+              position={[0, 0.18, 0]}
+              castShadow
+              receiveShadow
+            />
+            <mesh
+              geometry={PLANTER_SOIL_GEOM}
+              material={PLANTER_SOIL_MAT}
+              position={[0, 0.37, 0]}
+            />
+          </group>
+        ))}
 
         {/* ================================================================
             6. ASSET-DRIVEN TREES (`env-tree-*.glb`), BENCHES (`env-park-bench.glb`),
