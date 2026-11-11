@@ -84,13 +84,40 @@ export const BoothPanel: React.FC<BoothPanelProps> = ({
           ← Quay lại khu triển lãm <kbd>Esc</kbd>
         </button>
 
-        <div className="shop-showcase-booth-banner">
+        <div
+          className="shop-showcase-booth-banner"
+          title={
+            booth.description
+              ? `${booth.companyName || booth.name} — ${booth.tagline}\n${booth.description}`
+              : booth.tagline
+          }
+        >
+          {booth.logoUrl && (
+            <img
+              src={booth.logoUrl}
+              alt={booth.companyName || booth.name}
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 6,
+                objectFit: 'cover',
+                border: `1.5px solid ${booth.color}`,
+                flexShrink: 0,
+              }}
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          )}
           <span className="expo-dialog__badge" style={{ backgroundColor: booth.color }}>
             {booth.category}
           </span>
           <strong className="shop-showcase-booth-banner__title">
             {booth.companyName || booth.name}
           </strong>
+          {booth.companyName && booth.companyName !== booth.name && (
+            <span className="shop-showcase-booth-banner__sub">({booth.name})</span>
+          )}
           {occupiedSlotCount !== undefined && (
             <span className="shop-showcase-booth-banner__sub">
               · {occupiedSlotCount}/6 sản phẩm
@@ -106,6 +133,14 @@ export const BoothPanel: React.FC<BoothPanelProps> = ({
             className="btn btn--outline btn--sm"
           >
             🌐 Website ↗
+          </a>
+        )}
+        {!booth.contactUrl && booth.contactEmail && (
+          <a
+            href={`mailto:${booth.contactEmail}`}
+            className="btn btn--outline btn--sm"
+          >
+            ✉️ {booth.contactEmail}
           </a>
         )}
       </div>

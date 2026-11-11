@@ -739,9 +739,12 @@ export function createEnterpriseBackdropTexture(options: {
   companyName?: string;
   category: string;
   tagline: string;
+  description?: string;
   color: string;
   logoUrl?: string;
   bannerUrl?: string;
+  contactUrl?: string;
+  contactEmail?: string;
   occupiedSlots: number;
   totalSlots: number;
   theme?: BoothVisualTheme;
@@ -849,7 +852,7 @@ export function createEnterpriseBackdropTexture(options: {
     ctx.fillStyle = pal.border;
     ctx.fillRect(56, 224, 912, 4);
 
-    // Enterprise Value Proposition / Tagline Box
+    // Enterprise Value Proposition / Tagline & Description Box
     ctx.save();
     createRoundRectPath(ctx, 56, 252, 620, 196, 22);
     ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
@@ -859,31 +862,38 @@ export function createEnterpriseBackdropTexture(options: {
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '700 22px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '700 21px Inter, Segoe UI, Arial, sans-serif';
     ctx.fillStyle = pal.textSub;
-    ctx.fillText('GIẢI PHÁP & SẢN PHẨM TRƯNG BÀY CHÍNH HÃNG', 84, 296);
+    ctx.fillText('GIẢI PHÁP & SẢN PHẨM TRƯNG BÀY CHÍNH HÃNG', 84, 290);
 
     const tagline = options.tagline || 'Trải nghiệm trực tiếp sản phẩm trên kệ trưng bày 3D';
-    const words = tagline.split(/\s+/);
-    let line1 = '';
-    let line2 = '';
-    for (const w of words) {
-      if ((line1 + ' ' + w).trim().length <= 42) {
-        line1 = (line1 + ' ' + w).trim();
-      } else {
-        line2 = (line2 + ' ' + w).trim();
-      }
-    }
-    ctx.font = '600 28px Inter, Segoe UI, Arial, sans-serif';
+    ctx.font = '700 26px Inter, Segoe UI, Arial, sans-serif';
     ctx.fillStyle = '#f8fafc';
-    ctx.fillText(truncateText(line1, 44), 84, 348);
-    if (line2) {
-      ctx.fillText(truncateText(line2, 44), 84, 388);
-    }
+    ctx.fillText(truncateText(tagline, 42), 84, 334);
 
-    ctx.font = '600 20px Inter, Segoe UI, Arial, sans-serif';
-    ctx.fillStyle = '#cbd5e1';
-    ctx.fillText('✦ Bấm trực tiếp vào sản phẩm trên quầy hoặc kệ 2 bên để xem chi tiết', 84, 426);
+    const descriptionText = (options.description || '').trim();
+    if (descriptionText) {
+      const descWords = descriptionText.split(/\s+/);
+      let descLine1 = '';
+      let descLine2 = '';
+      for (const w of descWords) {
+        if ((descLine1 + ' ' + w).trim().length <= 48) {
+          descLine1 = (descLine1 + ' ' + w).trim();
+        } else {
+          descLine2 = (descLine2 + ' ' + w).trim();
+        }
+      }
+      ctx.font = '500 20px Inter, Segoe UI, Arial, sans-serif';
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillText(truncateText(descLine1, 50), 84, 374);
+      if (descLine2) {
+        ctx.fillText(truncateText(descLine2, 50), 84, 404);
+      }
+    } else {
+      ctx.font = '600 20px Inter, Segoe UI, Arial, sans-serif';
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillText('✦ Bấm trực tiếp vào sản phẩm trên quầy hoặc kệ 2 bên để xem chi tiết', 84, 392);
+    }
 
     // Right Visual Recognition Card
     ctx.save();
@@ -908,7 +918,7 @@ export function createEnterpriseBackdropTexture(options: {
     ctx.fillStyle = '#ffffff';
     ctx.fillText(`${options.occupiedSlots} / ${options.totalSlots} VỊ TRÍ`, 836, 420);
 
-    // Bottom Exhibition Footer Strip
+    // Bottom Exhibition Footer Strip (Includes Website / Contact Email if provided)
     ctx.save();
     createRoundRectPath(ctx, 56, 474, 912, 56, 16);
     ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
@@ -918,11 +928,17 @@ export function createEnterpriseBackdropTexture(options: {
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '700 22px Inter, Segoe UI, Arial, sans-serif';
+    const contactSuffix = options.contactUrl
+      ? ` · ${options.contactUrl.replace(/^https?:\/\//i, '')}`
+      : options.contactEmail
+        ? ` · ${options.contactEmail}`
+        : '';
+
+    ctx.font = '700 21px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(
-      `★ GIAN HÀNG TRIỂN LÃM CHÍNH THỨC · ${companyTitle} ★`,
+      truncateText(`★ GIAN HÀNG TRIỂN LÃM · ${companyTitle}${contactSuffix} ★`, 64),
       512,
       510
     );
@@ -943,6 +959,9 @@ export function createEnterpriseBackdropTexture(options: {
         bannerImg = img;
         renderBackdrop(bannerImg, logoImg);
       };
+      img.onerror = () => {
+        renderBackdrop(undefined, logoImg);
+      };
       img.src = options.bannerUrl;
     }
 
@@ -952,6 +971,9 @@ export function createEnterpriseBackdropTexture(options: {
       img.onload = () => {
         logoImg = img;
         renderBackdrop(bannerImg, logoImg);
+      };
+      img.onerror = () => {
+        renderBackdrop(bannerImg, undefined);
       };
       img.src = options.logoUrl;
     }

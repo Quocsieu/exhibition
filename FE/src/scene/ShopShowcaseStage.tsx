@@ -36,7 +36,7 @@ const STAFF_TORSO_GEOM = new THREE.CapsuleGeometry(0.18, 0.36, 5, 10);
 const STAFF_HEAD_GEOM = new THREE.SphereGeometry(0.19, 12, 12);
 const STAFF_ARM_GEOM = new THREE.CapsuleGeometry(0.065, 0.24, 4, 8);
 const STAFF_APRON_GEOM = new THREE.BoxGeometry(0.32, 0.38, 0.04);
-const STAFF_BADGE_GEOM = new THREE.PlaneGeometry(1.95, 0.42);
+const STAFF_BADGE_GEOM = new THREE.PlaneGeometry(1.38, 0.3);
 
 const COURTYARD_STONE_MAT = new THREE.MeshStandardMaterial({
   color: '#334155',
@@ -152,9 +152,9 @@ export const ShopShowcaseStage: React.FC<ShopShowcaseStageProps> = React.memo(
         <mesh position={[0, 0.018, vd / 2 + 1.45]} receiveShadow geometry={COURTYARD_PAD_GEOM} material={COURTYARD_STONE_MAT} />
         <mesh position={[0, 0.032, vd / 2 + 3.45]} geometry={COURTYARD_TRIM_GEOM} material={brandAwningMat} />
 
-        {/* Hanging Warm Storefront Lanterns under Front Roof Header */}
-        {[-vw * 0.38, -vw * 0.14, vw * 0.14, vw * 0.38].map((lx, idx) => (
-          <group key={`lantern-${idx}`} position={[lx, 3.12, vd / 2 + 0.32]}>
+        {/* Hanging Warm Storefront Lanterns at Outer Corners Only (Zero Central Backdrop Obstruction) */}
+        {[-vw * 0.44, vw * 0.44].map((lx, idx) => (
+          <group key={`lantern-${idx}`} position={[lx, 3.16, vd / 2 + 0.32]}>
             <mesh position={[0, 0.15, 0]} geometry={LANTERN_CORD_GEOM} material={CORD_DARK_MAT} />
             <mesh geometry={LANTERN_GLOBE_GEOM} material={WARM_LANTERN_MAT} />
           </group>
@@ -237,9 +237,12 @@ export const ShopShowcaseStage: React.FC<ShopShowcaseStageProps> = React.memo(
         )}
 
         {/* ================================================================
-            2. MIDGROUND LAYER: DECORATIVE SPECIALIST BEHIND FRONT COUNTER
+            2. WELCOMING SPECIALIST AT RIGHT ENTRANCE PILLAR
+               (Positioned at x = vw/2 - 0.56, z = vd/2 + 0.62 so the rear
+                enterprise backdrop, front counter, and all 6 product slots
+                are 100% unobstructed)
            ================================================================ */}
-        <group ref={staffGroupRef} position={[0, 0.18, 0.52]}>
+        <group ref={staffGroupRef} position={[vw / 2 - 0.56, 0.18, vd / 2 + 0.62]}>
           <mesh position={[0, 0.72, 0]} geometry={STAFF_TORSO_GEOM} material={brandAwningMat} />
           <mesh position={[0, 0.68, 0.17]} geometry={STAFF_APRON_GEOM} material={WHITE_APRON_MAT} />
           <mesh position={[0, 1.18, 0]} geometry={STAFF_HEAD_GEOM} material={STAFF_SKIN_MAT} />

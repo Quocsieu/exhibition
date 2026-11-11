@@ -42,6 +42,31 @@ export function buildBoothSlotViews(
   });
 }
 
+export const EXPO_DATA_SYNC_CHANNEL = 'virtual-expo-data-sync';
+export const EXPO_DATA_UPDATED_STORAGE_KEY = 'expo_data_updated_at';
+export const EXPO_DATA_MUTATED_EVENT = 'expo:data-mutated';
+
+export function notifyExpoDataMutated(reason = 'mutation'): void {
+  const timestamp = String(Date.now());
+  try {
+    localStorage.setItem(EXPO_DATA_UPDATED_STORAGE_KEY, `${timestamp}:${reason}`);
+  } catch {
+    // Ignore storage quota or private mode restrictions
+  }
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel(EXPO_DATA_SYNC_CHANNEL);
+      bc.postMessage({ type: 'EXPO_DATA_MUTATED', reason, timestamp });
+      bc.close();
+    }
+  } catch {
+    // Ignore BroadcastChannel unsupported environments
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(EXPO_DATA_MUTATED_EVENT, { detail: { reason, timestamp } }));
+  }
+}
+
 async function requestJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('expo_admin_token');
   const headers: Record<string, string> = {
@@ -55,21 +80,20 @@ async function requestJson<T>(path: string, options: RequestInit = {}): Promise<
 
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   const primaryUrl = buildApiUrl(normalizedPath);
+  const fetchOptions: RequestInit = {
+    cache: 'no-store',
+    ...options,
+    headers,
+  };
 
   let response: Response;
   try {
-    response = await fetch(primaryUrl, {
-      ...options,
-      headers,
-    });
+    response = await fetch(primaryUrl, fetchOptions);
   } catch (err) {
     // If direct cross-origin request fails (e.g. CORS mismatch before Render redeploy),
     // fallback to same-origin relative path handled by Vercel Rewrites (/api/:path*).
     if (API_BASE_URL) {
-      response = await fetch(normalizedPath, {
-        ...options,
-        headers,
-      });
+      response = await fetch(normalizedPath, fetchOptions);
     } else {
       throw err;
     }
@@ -122,25 +146,29 @@ export const apiClient = {
     slotId: string,
     productId: string | null
   ): Promise<{ slot: BoothSlotView; slots: BoothSlotView[] }> {
-    return requestJson<{ slot: BoothSlotView; slots: BoothSlotView[] }>(
+    const res = await requestJson<{ slot: BoothSlotView; slots: BoothSlotView[] }>(
       `/api/booths/${encodeURIComponent(boothId)}/slots/${encodeURIComponent(slotId)}`,
       {
         method: 'PUT',
         body: JSON.stringify({ productId }),
       }
     );
+    notifyExpoDataMutated('assign-slot');
+    return res;
   },
 
   async clearBoothSlot(
     boothId: string,
     slotId: string
   ): Promise<{ slot: BoothSlotView; slots: BoothSlotView[] }> {
-    return requestJson<{ slot: BoothSlotView; slots: BoothSlotView[] }>(
+    const res = await requestJson<{ slot: BoothSlotView; slots: BoothSlotView[] }>(
       `/api/booths/${encodeURIComponent(boothId)}/slots/${encodeURIComponent(slotId)}`,
       {
         method: 'DELETE',
       }
     );
+    notifyExpoDataMutated('clear-slot');
+    return res;
   },
 
   async loginAdmin(username: string, password: string): Promise<{ token: string; username: string }> {
@@ -159,6 +187,7 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(input),
     });
+    notifyExpoDataMutated('create-booth');
     return res.booth;
   },
 
@@ -167,6 +196,7 @@ export const apiClient = {
       method: 'PUT',
       body: JSON.stringify(input),
     });
+    notifyExpoDataMutated('update-booth');
     return res.booth;
   },
 
@@ -174,6 +204,7 @@ export const apiClient = {
     await requestJson<{ success: boolean }>(`/api/booths/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
+    notifyExpoDataMutated('delete-booth');
   },
 
   async createProduct(input: CreateProductInput): Promise<Product> {
@@ -181,6 +212,7 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(input),
     });
+    notifyExpoDataMutated('create-product');
     return res.product;
   },
 
@@ -189,6 +221,7 @@ export const apiClient = {
       method: 'PUT',
       body: JSON.stringify(input),
     });
+    notifyExpoDataMutated('update-product');
     return res.product;
   },
 
@@ -196,6 +229,7 @@ export const apiClient = {
     await requestJson<{ success: boolean }>(`/api/products/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
+    notifyExpoDataMutated('delete-product');
   },
 
   async extractProductFromUrl(url: string): Promise<ExtractedProductDraft> {
@@ -211,12 +245,14 @@ export const apiClient = {
     format: 'json' | 'csv',
     content: string
   ): Promise<{ importedCount: number; products: Product[] }> {
-    return requestJson<{ importedCount: number; products: Product[] }>(
+    const res = await requestJson<{ importedCount: number; products: Product[] }>(
       '/api/integrations/import-batch',
       {
         method: 'POST',
         body: JSON.stringify({ boothId, format, content }),
       }
     );
+    notifyExpoDataMutated('import-batch');
+    return res;
   },
 };

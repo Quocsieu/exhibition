@@ -17,7 +17,13 @@ import { MobileJoystick } from '../controls/MobileJoystick';
 import { BoothPanel } from '../components/BoothPanel';
 import { LoadingScreen } from '../components/LoadingScreen';
 import { useRealtime } from '../hooks/useRealtime';
-import { apiClient, buildBoothSlotViews } from '../services/api';
+import {
+  apiClient,
+  buildBoothSlotViews,
+  EXPO_DATA_MUTATED_EVENT,
+  EXPO_DATA_SYNC_CHANNEL,
+  EXPO_DATA_UPDATED_STORAGE_KEY,
+} from '../services/api';
 
 const AVATAR_COLORS = [
   '#0ea5e9',
@@ -149,22 +155,102 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     }
   }, []);
 
+  /**
+   * Silent background refresh for Scenarios B, C, and D:
+   * Fetches latest booths, products, and slot assignments from SQLite without
+   * triggering the full-screen loading overlay, and synchronizes active booth/product state.
+   */
+  const refreshExpoDataSilently = useCallback(async () => {
+    try {
+      const [fetchedBooths, fetchedProducts, fetchedSlots] = await Promise.all([
+        apiClient.getBooths(),
+        apiClient.getProducts(),
+        apiClient.getSlots(),
+      ]);
+      setBooths(fetchedBooths);
+      setProducts(fetchedProducts);
+      setSlotAssignments(fetchedSlots.assignments);
+      setDataWarning(null);
+    } catch {
+      // Keep current in-memory state if background refresh encounters transient network error
+    }
+  }, []);
+
   useEffect(() => {
     void loadExpoData();
   }, [loadExpoData]);
 
-  const handleSelectBooth = useCallback((booth: Booth) => {
-    setCameraMode((prev) => {
-      if (prev === 'overview' || prev === 'explore') {
-        previousExteriorModeRef.current = prev;
+  // Keep selectedBooth, focusedBooth, and selectedProduct synchronized whenever
+  // booths or products state refreshes so the 3D scene & panels never hold stale snapshots.
+  useEffect(() => {
+    setSelectedBooth((prev) => (prev ? booths.find((b) => b.id === prev.id) ?? null : null));
+    setFocusedBooth((prev) => (prev ? booths.find((b) => b.id === prev.id) ?? null : null));
+  }, [booths]);
+
+  useEffect(() => {
+    setSelectedProduct((prev) => (prev ? products.find((p) => p.id === prev.id) ?? null : null));
+  }, [products]);
+
+  // Listen for window focus, visibility change, and cross-tab BroadcastChannel/storage events
+  // so edits made in Admin (in another tab or window) immediately sync to the 3D visitor view.
+  useEffect(() => {
+    const handleFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshExpoDataSilently();
       }
-      return 'focus';
-    });
-    setSelectedBooth(booth);
-    setSelectedProduct(null);
-    setFocusedBooth(booth);
-    setZoom(FOCUS_DEFAULT_ZOOM);
-  }, []);
+    };
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === EXPO_DATA_UPDATED_STORAGE_KEY) {
+        void refreshExpoDataSilently();
+      }
+    };
+    const handleCustomMutated = () => {
+      void refreshExpoDataSilently();
+    };
+
+    window.addEventListener('focus', handleFocusOrVisible);
+    document.addEventListener('visibilitychange', handleFocusOrVisible);
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener(EXPO_DATA_MUTATED_EVENT, handleCustomMutated);
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel(EXPO_DATA_SYNC_CHANNEL);
+        bc.onmessage = () => {
+          void refreshExpoDataSilently();
+        };
+      }
+    } catch {
+      bc = null;
+    }
+
+    return () => {
+      window.removeEventListener('focus', handleFocusOrVisible);
+      document.removeEventListener('visibilitychange', handleFocusOrVisible);
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener(EXPO_DATA_MUTATED_EVENT, handleCustomMutated);
+      bc?.close();
+    };
+  }, [refreshExpoDataSilently]);
+
+  const handleSelectBooth = useCallback(
+    (booth: Booth) => {
+      setCameraMode((prev) => {
+        if (prev === 'overview' || prev === 'explore') {
+          previousExteriorModeRef.current = prev;
+        }
+        return 'focus';
+      });
+      const latestBooth = booths.find((b) => b.id === booth.id) || booth;
+      setSelectedBooth(latestBooth);
+      setSelectedProduct(null);
+      setFocusedBooth(latestBooth);
+      setZoom(FOCUS_DEFAULT_ZOOM);
+      void refreshExpoDataSilently();
+    },
+    [booths, refreshExpoDataSilently]
+  );
 
   useEffect(() => {
     if (!initialFocusBoothId || loadingData) return;
@@ -174,18 +260,23 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     }
   }, [initialFocusBoothId, loadingData, booths, handleSelectBooth]);
 
-  const handleReachBooth = useCallback((booth: Booth) => {
-    setCameraMode((prev) => {
-      if (prev === 'overview' || prev === 'explore') {
-        previousExteriorModeRef.current = prev;
-      }
-      return 'focus';
-    });
-    setSelectedBooth(booth);
-    setSelectedProduct(null);
-    setFocusedBooth(booth);
-    setZoom(FOCUS_DEFAULT_ZOOM);
-  }, []);
+  const handleReachBooth = useCallback(
+    (booth: Booth) => {
+      setCameraMode((prev) => {
+        if (prev === 'overview' || prev === 'explore') {
+          previousExteriorModeRef.current = prev;
+        }
+        return 'focus';
+      });
+      const latestBooth = booths.find((b) => b.id === booth.id) || booth;
+      setSelectedBooth(latestBooth);
+      setSelectedProduct(null);
+      setFocusedBooth(latestBooth);
+      setZoom(FOCUS_DEFAULT_ZOOM);
+      void refreshExpoDataSilently();
+    },
+    [booths, refreshExpoDataSilently]
+  );
 
   const emitMovementRef = useRef<
     ((payload: {

@@ -22,18 +22,20 @@ export interface EnvironmentProps {
   clickMarker: { x: number; z: number } | null;
 }
 
-interface PlanterIslandConfig {
+export interface PlanterIslandConfig {
   x: number;
   z: number;
   benchOffsetZ: number;
+  signPos: [number, number];
   signText?: { title: string; subtitle: string; color: string };
 }
 
-const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
+export const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
   {
     x: -6,
     z: -5,
     benchOffsetZ: 0.62,
+    signPos: [-5.6, -18.2],
     signText: {
       title: '↖ KHU CÔNG NGHỆ & NỘI THẤT',
       subtitle: 'Aether Tech · Nordic Living',
@@ -44,6 +46,7 @@ const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
     x: 6,
     z: -5,
     benchOffsetZ: 0.62,
+    signPos: [5.6, -18.2],
     signText: {
       title: '↗ KHU NÔNG SẢN & ĐẶC SẢN',
       subtitle: 'EcoVita Roastery · Bắc Sân',
@@ -54,6 +57,7 @@ const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
     x: -6,
     z: 5,
     benchOffsetZ: -0.62,
+    signPos: [-5.6, 18.2],
     signText: {
       title: '↙ KHU ROBOTICS & TỰ ĐỘNG HÓA',
       subtitle: 'Kinetix AI · Tây Nam',
@@ -64,6 +68,7 @@ const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
     x: 6,
     z: 5,
     benchOffsetZ: -0.62,
+    signPos: [5.6, 18.2],
     signText: {
       title: '↘ KHU THIẾT KẾ & NĂNG LƯỢNG',
       subtitle: 'Lumina Design · Solaris Energy',
@@ -75,7 +80,7 @@ const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
 // Task A: Perimeter & Avenue Trees positioned strictly along outer boulevard edges, street corners,
 // and side gaps between booths — ZERO trees placed in front of the 6 booths so all facades,
 // entrance doors, signboards, and radial walkways remain 100% unobstructed.
-const PERIMETER_TREES: [number, number, number][] = [
+export const PERIMETER_TREES: [number, number, number][] = [
   [-20.5, -18.5, 1.15],
   [20.5, -18.5, 1.1],
   [-20.5, 18.5, 1.08],
@@ -88,7 +93,7 @@ const PERIMETER_TREES: [number, number, number][] = [
   [9.2, 20.2, 1.05],
 ];
 
-const ALL_TREES: {
+export const ALL_TREES: {
   x: number;
   z: number;
   scale: number;
@@ -115,13 +120,13 @@ const ALL_TREES: {
   { x: 26.5, z: 8, scale: 1.28, ry: 0.9, assetId: 'env-tree-oak' },
 ];
 
-const PLANTER_URN_POSITIONS: [number, number][] = [
+export const PLANTER_URN_POSITIONS: [number, number][] = [
   [-5.8, 19.6],
   [5.8, 19.6],
-  [-4.2, 8.2],
-  [4.2, 8.2],
-  [-4.2, -8.2],
-  [4.2, -8.2],
+  [-5.8, -19.2],
+  [5.8, -19.2],
+  [-18.8, -3.2],
+  [18.8, -3.2],
 ];
 
 const ALL_BENCHES: { x: number; z: number; rotationY: number }[] = [
@@ -136,15 +141,15 @@ const ALL_BENCHES: { x: number; z: number; rotationY: number }[] = [
   })),
 ];
 
-const PERIMETER_LAMPS: [number, number][] = [
-  [-3.8, 15.5],
-  [3.8, 15.5],
-  [-3.8, -8.5],
-  [3.8, -8.5],
-  [-16.5, -3.5],
-  [16.5, -3.5],
-  [-16.5, 3.5],
-  [16.5, 3.5],
+export const PERIMETER_LAMPS: [number, number][] = [
+  [-5.6, 17.2],
+  [5.6, 17.2],
+  [-5.6, -17.2],
+  [5.6, -17.2],
+  [-18.4, -3.6],
+  [18.4, -3.6],
+  [-18.4, 3.6],
+  [18.4, 3.6],
 ];
 
 const BOOTH_CONNECTOR_PATHS: {
@@ -259,26 +264,24 @@ const BIN_BODY_GEOM = new THREE.CylinderGeometry(0.2, 0.17, 0.64, 12);
 const BIN_TOP_GEOM = new THREE.CylinderGeometry(0.22, 0.21, 0.08, 12);
 const SIGNPOST_POLE_GEOM = new THREE.CylinderGeometry(0.055, 0.07, 2.05, 10);
 
-const PLAZA_BOLLARD_POSITIONS: [number, number][] = [
-  [-3.1, 18.4],
-  [3.1, 18.4],
-  [-3.1, 13.8],
-  [3.1, 13.8],
-  [-3.1, 10.6],
-  [3.1, 10.6],
-  [-11.8, -2.9],
-  [-11.8, 2.9],
-  [11.8, -2.9],
-  [11.8, 2.9],
+export const PLAZA_BOLLARD_POSITIONS: [number, number][] = [
+  [-4.8, 18.8],
+  [4.8, 18.8],
+  [-5.2, 16.2],
+  [5.2, 16.2],
+  [-12.2, -2.6],
+  [-12.2, 2.6],
+  [12.2, -2.6],
+  [12.2, 2.6],
   [-17.4, -18.2],
   [17.4, -18.2],
 ];
 
-const EXHIBITION_BIN_POSITIONS: [number, number][] = [
-  [-6.85, -4.35],
-  [6.85, -4.35],
-  [-6.85, 4.35],
-  [6.85, 4.35],
+export const EXHIBITION_BIN_POSITIONS: [number, number][] = [
+  [-5.6, -17.6],
+  [5.6, -17.6],
+  [-5.6, 17.6],
+  [5.6, 17.6],
   [-17.6, -15.5],
   [17.6, -15.5],
   [-17.6, 14.8],
@@ -909,42 +912,51 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         </group>
 
         {/* ================================================================
-            5. LOW-PROFILE ORNAMENTAL FLOWER PLANTER BEDS & WAYFINDING SIGNS
+            5. LOW-PROFILE ORNAMENTAL FLOWER PLANTER BEDS & OUTER WAYFINDING SIGNS
+               (Planter beds at (±6, ±5) are strictly low-profile y <= 0.48m so diagonal
+                Shop Showcase camera sightlines to Aether, EcoVita, Kinetix, and Lumina
+                are 100% unobstructed; tall wayfinding signposts stand at outer avenue
+                corners (±5.6, ±16.8) outside all 6 camera frustum corridors)
            ================================================================ */}
         {CENTRAL_PLANTER_ISLANDS.map((island, idx) => (
-          <group key={`planter-island-${idx}`} position={[island.x, 0, island.z]}>
-            <mesh
-              geometry={PLANTER_BOX_GEOM}
-              material={PLANTER_BOX_MAT}
-              position={[0, 0.18, 0]}
-              castShadow
-              receiveShadow
-            />
-            <mesh
-              geometry={PLANTER_SOIL_GEOM}
-              material={PLANTER_SOIL_MAT}
-              position={[0, 0.37, 0]}
-            />
-            <mesh
-              geometry={SIGNPOST_POLE_GEOM}
-              material={LAMP_POLE_MAT}
-              position={[0, 1.38, 0]}
-              castShadow
-            />
-            {islandSignTextures[idx] && (
-              <Billboard position={[0, 2.58, 0]}>
-                <mesh>
-                  <planeGeometry args={[2.65, 0.56]} />
-                  <meshBasicMaterial
-                    map={islandSignTextures[idx]}
-                    transparent
-                    depthWrite={false}
-                    toneMapped={false}
-                  />
-                </mesh>
-              </Billboard>
-            )}
-          </group>
+          <React.Fragment key={`planter-island-${idx}`}>
+            <group position={[island.x, 0, island.z]}>
+              <mesh
+                geometry={PLANTER_BOX_GEOM}
+                material={PLANTER_BOX_MAT}
+                position={[0, 0.18, 0]}
+                castShadow
+                receiveShadow
+              />
+              <mesh
+                geometry={PLANTER_SOIL_GEOM}
+                material={PLANTER_SOIL_MAT}
+                position={[0, 0.37, 0]}
+              />
+            </group>
+
+            <group position={[island.signPos[0], 0, island.signPos[1]]}>
+              <mesh
+                geometry={SIGNPOST_POLE_GEOM}
+                material={LAMP_POLE_MAT}
+                position={[0, 1.02, 0]}
+                castShadow
+              />
+              {islandSignTextures[idx] && (
+                <Billboard position={[0, 2.24, 0]}>
+                  <mesh>
+                    <planeGeometry args={[2.55, 0.54]} />
+                    <meshBasicMaterial
+                      map={islandSignTextures[idx]}
+                      transparent
+                      depthWrite={false}
+                      toneMapped={false}
+                    />
+                  </mesh>
+                </Billboard>
+              )}
+            </group>
+          </React.Fragment>
         ))}
 
         {/* Instanced Illuminated Plaza Bollards & Modern Recycling Bins */}

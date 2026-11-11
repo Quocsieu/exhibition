@@ -450,4 +450,182 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
     expect(clearData.slot.productId).toBeNull();
     expect(clearData.slot.product).toBeNull();
   });
+
+  it('verifies full Admin -> API -> SQLite -> Client data sync across Booth Info (Test 1), Slot Assign/Replace/Clear (Tests 2-4), and Product Details in Slot (Test 5)', async () => {
+    const loginRes = await fetch(`${baseUrl}/api/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'admin',
+        password: process.env.ADMIN_PASSWORD || 'expo-admin-2026',
+      }),
+    });
+    expect(loginRes.status).toBe(200);
+    const { token } = (await loginRes.json()) as { token: string };
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+
+    // TEST 1: Update all Booth Management fields on booth-lumina-design
+    const updateBoothRes = await fetch(`${baseUrl}/api/booths/booth-lumina-design`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({
+        companyName: 'Lumina Creative Group Global',
+        name: 'Lumina Studio Pavilion 2026',
+        tagline: 'Không gian nghệ thuật số & thiết kế tương tác 3D',
+        description: 'Trưng bày các tác phẩm điêu khắc ánh sáng và giải pháp trình chiếu kiến trúc.',
+        category: 'Thiết kế & Nghệ thuật Số',
+        color: '#d946ef',
+        logoUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=200',
+        bannerUrl: 'https://images.unsplash.com/photo-1558655146-d09347e92766?w=800',
+        contactUrl: 'https://lumina-creative.example.com',
+        contactEmail: 'hello@lumina-creative.example.com',
+      }),
+    });
+    expect(updateBoothRes.status).toBe(200);
+
+    // Client fetches GET /api/booths -> must receive fresh updated booth fields (cache invalidated)
+    const getBoothsRes = await fetch(`${baseUrl}/api/booths`);
+    expect(getBoothsRes.status).toBe(200);
+    const { booths } = (await getBoothsRes.json()) as {
+      booths: Array<{
+        id: string;
+        companyName: string;
+        name: string;
+        tagline: string;
+        description: string;
+        category: string;
+        color: string;
+        logoUrl: string;
+        bannerUrl: string;
+        contactUrl: string;
+        contactEmail: string;
+      }>;
+    };
+    const lumina = booths.find((b) => b.id === 'booth-lumina-design')!;
+    expect(lumina.companyName).toBe('Lumina Creative Group Global');
+    expect(lumina.name).toBe('Lumina Studio Pavilion 2026');
+    expect(lumina.tagline).toBe('Không gian nghệ thuật số & thiết kế tương tác 3D');
+    expect(lumina.description).toBe(
+      'Trưng bày các tác phẩm điêu khắc ánh sáng và giải pháp trình chiếu kiến trúc.'
+    );
+    expect(lumina.category).toBe('Thiết kế & Nghệ thuật Số');
+    expect(lumina.color).toBe('#d946ef');
+    expect(lumina.logoUrl).toBe('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=200');
+    expect(lumina.bannerUrl).toBe('https://images.unsplash.com/photo-1558655146-d09347e92766?w=800');
+    expect(lumina.contactUrl).toBe('https://lumina-creative.example.com');
+    expect(lumina.contactEmail).toBe('hello@lumina-creative.example.com');
+
+    // TEST 2: Create a new product and assign it to an empty slot (after clearing slot_05)
+    await fetch(`${baseUrl}/api/booths/booth-lumina-design/slots/slot_05`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    });
+    const createNewProdRes = await fetch(`${baseUrl}/api/products`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        boothId: 'booth-lumina-design',
+        name: 'Đèn Điêu Khắc Hologram Lumina Halo X',
+        price: 12900000,
+        currency: 'VND',
+        description: 'Đèn nghệ thuật 3D chiếu sáng chuẩn studio.',
+        images: ['https://images.unsplash.com/photo-1507473885765-e6ed057f782c?w=600'],
+        sourceUrl: 'https://lumina-creative.example.com/products/halo-x',
+        sku: 'LUM-HALO-X',
+      }),
+    });
+    expect(createNewProdRes.status).toBe(201);
+    const { product: newProd } = (await createNewProdRes.json()) as {
+      product: { id: string; name: string };
+    };
+
+    const assignEmptySlotRes = await fetch(
+      `${baseUrl}/api/booths/booth-lumina-design/slots/slot_05`,
+      {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({ productId: newProd.id }),
+      }
+    );
+    expect(assignEmptySlotRes.status).toBe(200);
+
+    // TEST 3: Replace product in occupied slot_01 with newProd
+    const replaceSlotRes = await fetch(`${baseUrl}/api/booths/booth-lumina-design/slots/slot_01`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({ productId: newProd.id }),
+    });
+    expect(replaceSlotRes.status).toBe(200);
+    const replaceBody = (await replaceSlotRes.json()) as {
+      slot: { productId: string; product: { name: string } };
+    };
+    expect(replaceBody.slot.productId).toBe(newProd.id);
+    expect(replaceBody.slot.product.name).toBe('Đèn Điêu Khắc Hologram Lumina Halo X');
+
+    // TEST 4: Remove product from slot_05 without deleting the product from warehouse
+    const clearSlot05Res = await fetch(`${baseUrl}/api/booths/booth-lumina-design/slots/slot_05`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    });
+    expect(clearSlot05Res.status).toBe(200);
+    const clearSlot05Body = (await clearSlot05Res.json()) as {
+      slot: { productId: string | null; product: unknown };
+    };
+    expect(clearSlot05Body.slot.productId).toBeNull();
+    expect(clearSlot05Body.slot.product).toBeNull();
+
+    // Verify product still exists in warehouse
+    const warehouseRes = await fetch(`${baseUrl}/api/products?boothId=booth-lumina-design`);
+    const { products: luminaProducts } = (await warehouseRes.json()) as {
+      products: Array<{ id: string }>;
+    };
+    expect(luminaProducts.some((p) => p.id === newProd.id)).toBe(true);
+
+    // TEST 5: Update product details (name, price, description, images, sourceUrl, sku) while displayed in slot_01
+    const updateProdInSlotRes = await fetch(`${baseUrl}/api/products/${newProd.id}`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({
+        name: 'Đèn Điêu Khắc Hologram Lumina Halo X Pro',
+        price: 14500000,
+        description: 'Phiên bản Pro nâng cấp độ sáng 1200 lumens và cảm biến chuyển động.',
+        images: ['https://images.unsplash.com/photo-1513506003901-1e6a229e2d15?w=600'],
+        sourceUrl: 'https://lumina-creative.example.com/products/halo-x-pro',
+        sku: 'LUM-HALO-X-PRO',
+      }),
+    });
+    expect(updateProdInSlotRes.status).toBe(200);
+
+    // Verify GET /api/booths/booth-lumina-design/slots reflects updated product in slot_01
+    const boothSlotsRes = await fetch(`${baseUrl}/api/booths/booth-lumina-design/slots`);
+    expect(boothSlotsRes.status).toBe(200);
+    const { slots } = (await boothSlotsRes.json()) as {
+      slots: Array<{
+        slot: { slotId: string };
+        product: {
+          id: string;
+          name: string;
+          price: number;
+          description: string;
+          images: string[];
+          sourceUrl: string;
+          sku: string;
+        } | null;
+      }>;
+    };
+    const slot01 = slots.find((s) => s.slot.slotId === 'slot_01')!;
+    expect(slot01.product?.name).toBe('Đèn Điêu Khắc Hologram Lumina Halo X Pro');
+    expect(slot01.product?.price).toBe(14500000);
+    expect(slot01.product?.description).toBe(
+      'Phiên bản Pro nâng cấp độ sáng 1200 lumens và cảm biến chuyển động.'
+    );
+    expect(slot01.product?.images).toEqual([
+      'https://images.unsplash.com/photo-1513506003901-1e6a229e2d15?w=600',
+    ]);
+    expect(slot01.product?.sourceUrl).toBe('https://lumina-creative.example.com/products/halo-x-pro');
+    expect(slot01.product?.sku).toBe('LUM-HALO-X-PRO');
+  });
 });

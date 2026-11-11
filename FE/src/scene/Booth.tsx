@@ -254,7 +254,19 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
         accentColor,
         selected: isSelected,
       });
-    }, [product, slot.slotId, slot.label, accentColor, isSelected]);
+    }, [
+      product,
+      product?.id,
+      product?.name,
+      product?.price,
+      product?.currency,
+      product?.sku,
+      product?.images?.[0],
+      slot.slotId,
+      slot.label,
+      accentColor,
+      isSelected,
+    ]);
 
     useEffect(() => {
       return () => {
@@ -469,9 +481,12 @@ export const Booth: React.FC<BoothProps> = React.memo(
           companyName: enterpriseTitle,
           category: booth.category,
           tagline: booth.tagline,
+          description: booth.description,
           color: booth.color,
           logoUrl: booth.logoUrl,
           bannerUrl: booth.bannerUrl,
+          contactUrl: booth.contactUrl,
+          contactEmail: booth.contactEmail,
           occupiedSlots: occupiedSlotCount || productCount,
           totalSlots: BOOTH_SLOT_DEFINITIONS.length,
           theme,
@@ -498,9 +513,12 @@ export const Booth: React.FC<BoothProps> = React.memo(
       booth.companyName,
       booth.category,
       booth.tagline,
+      booth.description,
       booth.color,
       booth.logoUrl,
       booth.bannerUrl,
+      booth.contactUrl,
+      booth.contactEmail,
       occupiedSlotCount,
       productCount,
       theme,

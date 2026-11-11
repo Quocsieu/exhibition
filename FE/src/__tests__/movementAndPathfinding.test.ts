@@ -50,6 +50,14 @@ import {
   computeThirdPersonCameraTargets,
 } from '../scene/ExhibitionScene';
 import {
+  ALL_TREES,
+  CENTRAL_PLANTER_ISLANDS,
+  EXHIBITION_BIN_POSITIONS,
+  PERIMETER_LAMPS,
+  PLANTER_URN_POSITIONS,
+  PLAZA_BOLLARD_POSITIONS,
+} from '../scene/Environment';
+import {
   DEFAULT_PRODUCTION_BACKEND_URL,
   normalizeBackendOrigin,
 } from '../config/apiConfig';
@@ -648,5 +656,58 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     facadeTex.dispose();
     skyTex.dispose();
     expect(getActiveCanvasTextureCount()).toBe(baseline);
+  });
+
+  it('guarantees zero camera sightline obstruction from street lamps, wayfinding signposts, trees, bollards, urns, or bins across all 6 booths in Shop Showcase mode', () => {
+    const pointToSegmentDistance2D = (
+      px: number,
+      pz: number,
+      ax: number,
+      az: number,
+      bx: number,
+      bz: number
+    ): number => {
+      const abx = bx - ax;
+      const abz = bz - az;
+      const lenSq = abx * abx + abz * abz;
+      if (lenSq < 1e-6) return Math.hypot(px - ax, pz - az);
+      const t = Math.max(0, Math.min(1, ((px - ax) * abx + (pz - az) * abz) / lenSq));
+      const projX = ax + t * abx;
+      const projZ = az + t * abz;
+      return Math.hypot(px - projX, pz - projZ);
+    };
+
+    const tallEnvironmentalProps: { label: string; x: number; z: number }[] = [
+      ...PERIMETER_LAMPS.map(([x, z], idx) => ({ label: `lamp-${idx}`, x, z })),
+      ...CENTRAL_PLANTER_ISLANDS.map((island, idx) => ({
+        label: `wayfinding-sign-${idx}`,
+        x: island.signPos[0],
+        z: island.signPos[1],
+      })),
+      ...ALL_TREES.map((t, idx) => ({ label: `tree-${idx}`, x: t.x, z: t.z })),
+      ...PLANTER_URN_POSITIONS.map(([x, z], idx) => ({ label: `urn-${idx}`, x, z })),
+      ...PLAZA_BOLLARD_POSITIONS.map(([x, z], idx) => ({ label: `bollard-${idx}`, x, z })),
+      ...EXHIBITION_BIN_POSITIONS.map(([x, z], idx) => ({ label: `bin-${idx}`, x, z })),
+    ];
+
+    for (const booth of DEFAULT_BOOTHS) {
+      const { cameraPosition } = computeShopShowcaseCameraTargets(booth, 1440, 900, false);
+
+      for (const prop of tallEnvironmentalProps) {
+        const clearance = pointToSegmentDistance2D(
+          prop.x,
+          prop.z,
+          cameraPosition.x,
+          cameraPosition.z,
+          booth.positionX,
+          booth.positionZ
+        );
+        // Every street lamp, signpost, tree, bollard, urn, and bin must stay > 3.8m clear of the camera-to-booth sightline ray
+        expect(
+          clearance,
+          `${prop.label} (${prop.x}, ${prop.z}) is too close (${clearance.toFixed(2)}m) to Shop Showcase sightline of ${booth.id}`
+        ).toBeGreaterThan(3.8);
+      }
+    }
   });
 });

@@ -867,6 +867,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                           <button
                             type="button"
                             className="btn btn--secondary btn--sm"
+                            onClick={() => handleEditBooth(b)}
+                            title="Chỉnh sửa tên doanh nghiệp, logo, backdrop, mô tả của gian hàng này"
+                          >
+                            ✏️ Sửa TT
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--sm"
                             onClick={() => onBackToExpo(b.id)}
                             title="Mở không gian 3D và xem trực tiếp gian hàng này"
                           >
@@ -960,6 +968,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 </div>
 
                 <div className="slot-detail-header-card__actions">
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => handleEditBooth(selectedBoothForSlots)}
+                  >
+                    ✏️ Sửa thông tin &amp; Backdrop
+                  </button>
                   <button
                     type="button"
                     className="btn btn--secondary"
