@@ -1,0 +1,74 @@
+{
+  "booth-tech.glb": {
+    "bytes": 523000,
+    "meshes": 22,
+    "vertices": 16707,
+    "triangles": 6612
+  },
+  "booth-living.glb": {
+    "bytes": 838544,
+    "meshes": 34,
+    "vertices": 29904,
+    "triangles": 9972
+  },
+  "booth-coffee.glb": {
+    "bytes": 524192,
+    "meshes": 52,
+    "vertices": 45252,
+    "triangles": 15860
+  },
+  "booth-robotics.glb": {
+    "bytes": 270180,
+    "meshes": 19,
+    "vertices": 8835,
+    "triangles": 3436
+  },
+  "booth-design.glb": {
+    "bytes": 562648,
+    "meshes": 17,
+    "vertices": 16778,
+    "triangles": 6892
+  },
+  "booth-energy.glb": {
+    "bytes": 369484,
+    "meshes": 30,
+    "vertices": 18619,
+    "triangles": 7704
+  },
+  "env-tree-oak.glb": {
+    "bytes": 332668,
+    "meshes": 12,
+    "vertices": 7122,
+    "triangles": 2872
+  },
+  "env-tree-blossom.glb": {
+    "bytes": 332664,
+    "meshes": 12,
+    "vertices": 7122,
+    "triangles": 2872
+  },
+  "env-tree-pine.glb": {
+    "bytes": 22684,
+    "meshes": 6,
+    "vertices": 284,
+    "triangles": 390
+  },
+  "env-street-lamp.glb": {
+    "bytes": 40516,
+    "meshes": 6,
+    "vertices": 801,
+    "triangles": 1320
+  },
+  "env-park-bench.glb": {
+    "bytes": 46812,
+    "meshes": 11,
+    "vertices": 6948,
+    "triangles": 3188
+  },
+  "env-planter-urn.glb": {
+    "bytes": 71060,
+    "meshes": 7,
+    "vertices": 2895,
+    "triangles": 1144
+  }
+}

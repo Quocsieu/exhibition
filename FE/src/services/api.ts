@@ -7,8 +7,7 @@ import type {
   UpdateProductInput,
   ExtractedProductDraft,
 } from '../types/expo';
-
-const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) || '').replace(/\/+$/, '');
+import { API_BASE_URL, buildApiUrl } from '../config/apiConfig';
 
 async function requestJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('expo_admin_token');
@@ -21,10 +20,27 @@ async function requestJson<T>(path: string, options: RequestInit = {}): Promise<
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-  });
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const primaryUrl = buildApiUrl(normalizedPath);
+
+  let response: Response;
+  try {
+    response = await fetch(primaryUrl, {
+      ...options,
+      headers,
+    });
+  } catch (err) {
+    // If direct cross-origin request fails (e.g. CORS mismatch before Render redeploy),
+    // fallback to same-origin relative path handled by Vercel Rewrites (/api/:path*).
+    if (API_BASE_URL) {
+      response = await fetch(normalizedPath, {
+        ...options,
+        headers,
+      });
+    } else {
+      throw err;
+    }
+  }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

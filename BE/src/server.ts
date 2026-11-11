@@ -10,7 +10,39 @@ import { ExpoController } from './controllers/expoController.js';
 import { createApiRoutes } from './routes/apiRoutes.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 
-export function createApp(db: ExpoDatabase, corsOrigin: string | string[] = '*'): Express {
+export type CorsOriginConfig =
+  | string
+  | string[]
+  | ((origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => void);
+
+export function buildCorsOriginChecker(rawCors: string = '*'): CorsOriginConfig {
+  const trimmed = rawCors.trim();
+  if (!trimmed || trimmed === '*') {
+    return '*';
+  }
+
+  const allowedList = trimmed
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+
+  return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    const normalized = origin.replace(/\/+$/, '');
+    const isAllowed =
+      allowedList.includes('*') ||
+      allowedList.includes(normalized) ||
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized) ||
+      /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(normalized);
+
+    callback(null, isAllowed);
+  };
+}
+
+export function createApp(db: ExpoDatabase, corsOrigin: CorsOriginConfig = '*'): Express {
   const app = express();
   app.use(cors({ origin: corsOrigin }));
   app.use(express.json({ limit: '1mb' }));
@@ -28,14 +60,7 @@ const isMain =
 
 if (isMain) {
   const PORT = Number(process.env.PORT || 4000);
-  const rawCors = process.env.CORS_ORIGIN || '*';
-  const CORS_ORIGIN =
-    rawCors === '*'
-      ? '*'
-      : rawCors
-          .split(',')
-          .map((origin) => origin.trim().replace(/\/+$/, ''))
-          .filter(Boolean);
+  const CORS_ORIGIN = buildCorsOriginChecker(process.env.CORS_ORIGIN || '*');
   const dbPath = process.env.SQLITE_DB_PATH || './data/expo.db';
 
   const db = new ExpoDatabase(dbPath);

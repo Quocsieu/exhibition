@@ -1,0 +1,21 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build -w FE",
+  "outputDirectory": "FE/dist",
+  "installCommand": "npm install",
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://exhibition-xl20.onrender.com/api/:path*"
+    },
+    {
+      "source": "/socket.io/:path*",
+      "destination": "https://exhibition-xl20.onrender.com/socket.io/:path*"
+    },
+    {
+      "source": "/((?!api/|socket\\.io/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

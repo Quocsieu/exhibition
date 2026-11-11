@@ -19,11 +19,24 @@ import {
   createProductTagTexture,
   createAvatarNametagTexture,
   createPlazaTileTexture,
+  createPlazaTileBumpTexture,
   createPlazaMedallionTexture,
   getActiveCanvasTextureCount,
 } from '../scene/sceneTextures';
+import {
+  GLB_ASSET_PATHS,
+  type GlbAssetId,
+  cloneCachedAsset,
+  disposeCachedAssets,
+  getBoothGlbAssetId,
+  getCachedAssetStats,
+} from '../scene/assetLoader';
 import { resolveBoothTheme } from '../scene/Booth';
 import { computeShopShowcaseCameraTargets } from '../scene/ExhibitionScene';
+import {
+  DEFAULT_PRODUCTION_BACKEND_URL,
+  normalizeBackendOrigin,
+} from '../config/apiConfig';
 
 describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => {
   it('enforces world boundary limits accurately', () => {
@@ -376,5 +389,82 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     // When rotationY = PI, local +Z points along world -Z, so camera stands at Z < booth.positionZ looking +Z
     expect(rotatedTargets.cameraPosition.z).toBeLessThan(rotatedBooth.positionZ - 8);
     expect(rotatedTargets.lookAtTarget.z).toBeGreaterThan(rotatedTargets.cameraPosition.z);
+  });
+
+  it('compiles, caches, clones, and disposes 12 distinct 3D GLB assets with shared GPU geometries', () => {
+    disposeCachedAssets();
+    expect(getCachedAssetStats().cachedAssetCount).toBe(0);
+
+    const allAssetIds = Object.keys(GLB_ASSET_PATHS) as GlbAssetId[];
+    expect(allAssetIds.length).toBe(12);
+
+    // Verify all 6 booth architectural shells have distinct triangle counts (not recolored identical boxes)
+    const boothTriangleSignatures = new Set<number>();
+    for (const booth of DEFAULT_BOOTHS) {
+      const theme = resolveBoothTheme(booth);
+      const assetId = getBoothGlbAssetId(theme);
+      const cloneA = cloneCachedAsset(assetId);
+      const cloneB = cloneCachedAsset(assetId);
+
+      let tris = 0;
+      cloneA.traverse((obj) => {
+        const mesh = obj as { isMesh?: boolean; geometry?: { index?: { count: number } | null; attributes: { position?: { count: number } } } };
+        if (mesh.isMesh && mesh.geometry?.attributes.position) {
+          tris += mesh.geometry.index
+            ? Math.floor(mesh.geometry.index.count / 3)
+            : Math.floor(mesh.geometry.attributes.position.count / 3);
+        }
+      });
+      expect(tris).toBeGreaterThan(2500);
+      boothTriangleSignatures.add(tris);
+
+      // Verify cloneA and cloneB share the exact same underlying BufferGeometry reference
+      const firstMeshA = cloneA.children.find((c) => (c as { isMesh?: boolean }).isMesh) as { geometry?: unknown } | undefined;
+      const firstMeshB = cloneB.children.find((c) => (c as { isMesh?: boolean }).isMesh) as { geometry?: unknown } | undefined;
+      expect(firstMeshA?.geometry).toBeDefined();
+      expect(firstMeshA?.geometry).toBe(firstMeshB?.geometry);
+    }
+    expect(boothTriangleSignatures.size).toBe(6);
+
+    // Load all 6 landscape/streetscape GLB assets as well
+    for (const envId of [
+      'env-tree-oak',
+      'env-tree-blossom',
+      'env-tree-pine',
+      'env-street-lamp',
+      'env-park-bench',
+      'env-planter-urn',
+    ] as GlbAssetId[]) {
+      const envClone = cloneCachedAsset(envId);
+      expect(envClone.children.length).toBeGreaterThanOrEqual(4);
+    }
+
+    const stats = getCachedAssetStats();
+    expect(stats.cachedAssetCount).toBe(12);
+    expect(stats.totalTriangles).toBeGreaterThan(40000);
+
+    // Also verify bump texture tracking & deterministic disposal
+    const bumpBaseline = getActiveCanvasTextureCount();
+    const bumpTex = createPlazaTileBumpTexture();
+    expect(getActiveCanvasTextureCount()).toBe(bumpBaseline + 1);
+    bumpTex.dispose();
+    expect(getActiveCanvasTextureCount()).toBe(bumpBaseline);
+
+    disposeCachedAssets();
+    expect(getCachedAssetStats().cachedAssetCount).toBe(0);
+  });
+
+  it('normalizes production Backend Render URLs accurately across all env formats', () => {
+    expect(DEFAULT_PRODUCTION_BACKEND_URL).toBe('https://exhibition-xl20.onrender.com');
+    expect(normalizeBackendOrigin('https://exhibition-xl20.onrender.com/')).toBe(
+      'https://exhibition-xl20.onrender.com'
+    );
+    expect(normalizeBackendOrigin('https://exhibition-xl20.onrender.com/api')).toBe(
+      'https://exhibition-xl20.onrender.com'
+    );
+    expect(normalizeBackendOrigin('exhibition-xl20.onrender.com/api/')).toBe(
+      'https://exhibition-xl20.onrender.com'
+    );
+    expect(normalizeBackendOrigin('localhost:4000/')).toBe('http://localhost:4000');
   });
 });

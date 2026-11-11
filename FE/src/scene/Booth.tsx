@@ -9,6 +9,7 @@ import {
   createBoothPosterTexture,
   createBoothSignTexture,
 } from './sceneTextures';
+import { cloneCachedAsset, getBoothGlbAssetId } from './assetLoader';
 
 export interface BoothProps {
   booth: BoothType;
@@ -138,28 +139,6 @@ const EV_CHARGER_BODY_GEOM = new THREE.BoxGeometry(0.46, 1.62, 0.34);
 const PLANT_BUSH_GEOM = new THREE.DodecahedronGeometry(0.28, 0);
 const PLANT_POT_GEOM = new THREE.CylinderGeometry(0.26, 0.2, 0.38, 10);
 
-// Stylized 3D City Architectural Exterior & Roof Superstructure Geometries
-const ROOF_DECK_SLAB_GEOM = new THREE.BoxGeometry(6.16, 0.22, 4.46);
-const ROOF_TIER_SLAB_GEOM = new THREE.BoxGeometry(5.6, 0.16, 3.85);
-const ROOF_SKYLIGHT_FRAME_GEOM = new THREE.BoxGeometry(2.6, 0.18, 1.55);
-const ROOF_SKYLIGHT_GLASS_GEOM = new THREE.BoxGeometry(2.36, 0.22, 1.32);
-const RIGHT_CURTAIN_GLASS_GEOM = new THREE.BoxGeometry(0.08, WALL_HEIGHT - 0.36, 2.35);
-const RIGHT_MULLION_POST_GEOM = new THREE.BoxGeometry(0.16, WALL_HEIGHT - 0.16, 0.14);
-const EXTERIOR_PLANTER_BOX_GEOM = new THREE.BoxGeometry(0.48, 0.36, 1.85);
-const REAR_PILASTER_GEOM = new THREE.BoxGeometry(0.28, WALL_HEIGHT + 0.18, 0.16);
-const REAR_CORNICE_GEOM = new THREE.BoxGeometry(6.24, 0.38, 0.32);
-const REAR_ACCENT_BAR_GEOM = new THREE.BoxGeometry(4.8, 0.12, 0.08);
-const REAR_WINDOW_PANEL_GEOM = new THREE.BoxGeometry(1.42, 1.68, 0.06);
-const TECH_RADAR_DOME_GEOM = new THREE.SphereGeometry(0.42, 14, 10);
-const TECH_SPIRE_POLE_GEOM = new THREE.CylinderGeometry(0.04, 0.08, 1.25, 8);
-const CAFE_CHIMNEY_GEOM = new THREE.CylinderGeometry(0.24, 0.28, 0.95, 12);
-const CAFE_CHIMNEY_CAP_GEOM = new THREE.ConeGeometry(0.38, 0.24, 12);
-const ROBO_HVAC_BOX_GEOM = new THREE.BoxGeometry(1.15, 0.52, 0.88);
-const ROBO_TURBINE_GEOM = new THREE.CylinderGeometry(0.32, 0.32, 0.28, 12);
-const DESIGN_ROOF_FIN_GEOM = new THREE.BoxGeometry(0.16, 0.72, 3.4);
-const ECO_TURBINE_MAST_GEOM = new THREE.CylinderGeometry(0.05, 0.08, 1.15, 8);
-const ECO_TURBINE_ROTOR_GEOM = new THREE.TorusGeometry(0.32, 0.045, 8, 18);
-
 // ============================================================================
 // Shared Module-Level Materials across all 6 booths
 // ============================================================================
@@ -171,11 +150,8 @@ const DARK_NAVY_MAT = new THREE.MeshStandardMaterial({
 const SLATE_DARK_MAT = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.45 });
 const SLATE_MID_MAT = new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.5 });
 const WHITE_GLOSS_MAT = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.24 });
-const LIGHT_SURFACE_MAT = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.34 });
 const CREAM_WALL_MAT = new THREE.MeshStandardMaterial({ color: '#fffbeb', roughness: 0.55 });
 const CREAM_SOFA_MAT = new THREE.MeshStandardMaterial({ color: '#fef3c7', roughness: 0.65 });
-const GALLERY_WALL_MAT = new THREE.MeshStandardMaterial({ color: '#fdf4ff', roughness: 0.42 });
-const ECO_MINT_WALL_MAT = new THREE.MeshStandardMaterial({ color: '#f0fdf4', roughness: 0.45 });
 const CARPET_MAT = new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.72 });
 const CHROME_PILLAR_MAT = new THREE.MeshStandardMaterial({
   color: '#cbd5e1',
@@ -252,6 +228,10 @@ export const Booth: React.FC<BoothProps> = React.memo(
     const vd = Math.max(d, 4.4);
     const active = hovered || isSelected;
     const theme = useMemo(() => resolveBoothTheme(booth), [booth]);
+    const exteriorShell = useMemo(
+      () => cloneCachedAsset(getBoothGlbAssetId(theme)),
+      [theme]
+    );
 
     const brandStandardMat = useMemo(
       () =>
@@ -349,31 +329,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
       }
     });
 
-    // Select distinct floor, wall, and roof base materials per industry theme
-    const floorSurfaceMat =
-      theme === 'living'
-        ? WARM_OAK_MAT
-        : theme === 'coffee'
-          ? TERRACOTTA_FLOOR_MAT
-          : theme === 'robotics'
-            ? SLATE_DARK_MAT
-            : theme === 'design'
-              ? WHITE_GLOSS_MAT
-              : theme === 'energy'
-                ? ECO_MINT_WALL_MAT
-                : LIGHT_SURFACE_MAT;
-
-    const backWallMat =
-      theme === 'living'
-        ? CREAM_WALL_MAT
-        : theme === 'coffee'
-          ? ESPRESSO_WOOD_MAT
-          : theme === 'design'
-            ? GALLERY_WALL_MAT
-            : theme === 'energy'
-              ? ECO_MINT_WALL_MAT
-              : DARK_NAVY_MAT;
-
     return (
       <group
         visible={visible}
@@ -394,24 +349,24 @@ export const Booth: React.FC<BoothProps> = React.memo(
         }}
       >
         {/* ================================================================
-            1. DISTINCT FLOOR DECK & FOREGROUND ENTRANCE ZONE
+            1. BESPOKE 3D ARCHITECTURAL BUILDING SHELL (`booth-*.glb` asset)
+               Unique sculpted roof, facade, wings, entrance steps & rooftop crown!
            ================================================================ */}
+        <primitive object={exteriorShell} />
+
+        {/* Active Selection Glow Trim & Interactive Entrance Beacon */}
         <mesh position={[0, 0.03, 0]}>
-          <boxGeometry args={[vw + 0.36, 0.05, vd + 0.36]} />
+          <boxGeometry args={[vw + 1.35, 0.04, vd + 1.15]} />
           <meshBasicMaterial
             color={booth.color}
             transparent
-            opacity={active ? 1.0 : 0.75}
+            opacity={active ? 0.95 : 0.45}
           />
-        </mesh>
-
-        <mesh position={[0, 0.09, 0]} receiveShadow material={floorSurfaceMat}>
-          <boxGeometry args={[vw, 0.18, vd]} />
         </mesh>
 
         {/* Inner Showroom Rug / Zone Mat */}
         <mesh
-          position={[0, 0.185, 0.08]}
+          position={[0, 0.325, 0.08]}
           receiveShadow
           material={
             theme === 'living' || theme === 'coffee'
@@ -424,54 +379,21 @@ export const Booth: React.FC<BoothProps> = React.memo(
           <boxGeometry args={[vw - 0.56, 0.015, vd - 0.52]} />
         </mesh>
 
-        {/* Front Welcome Step Ramp & Interactive Beacon */}
-        <group position={[0, 0.04, vd / 2 + 0.36]}>
-          <mesh receiveShadow material={theme === 'coffee' || theme === 'living' ? ESPRESSO_WOOD_MAT : SLATE_DARK_MAT}>
-            <boxGeometry args={[vw * 0.64, 0.06, 0.64]} />
-          </mesh>
-          <mesh position={[0, 0.036, 0]} material={brandBasicMat}>
-            <boxGeometry args={[vw * 0.56, 0.012, 0.44]} />
-          </mesh>
-
-          <group position={[-vw * 0.18, 0.045, 0.62]} rotation={[-Math.PI / 2, 0, 0]}>
-            <mesh
-              ref={beaconRingRef}
-              geometry={BEACON_RING_GEOM}
-              material={active ? GOLD_BASIC_MAT : brandBasicMat}
-            />
-            <mesh geometry={BEACON_CORE_GEOM} material={DARK_NAVY_MAT} />
-          </group>
+        {/* Interactive Approach Beacon on Front Entrance Terrace */}
+        <group position={[-vw * 0.18, 0.08, vd / 2 + 1.02]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh
+            ref={beaconRingRef}
+            geometry={BEACON_RING_GEOM}
+            material={active ? GOLD_BASIC_MAT : brandBasicMat}
+          />
+          <mesh geometry={BEACON_CORE_GEOM} material={DARK_NAVY_MAT} />
         </group>
 
         {/* ================================================================
-            2. BACKGROUND LAYER: THEME-SPECIFIC BACKWALL, POSTER & SHELVING
+            2. INTERIOR BACKWALL PRESENTATION POSTER & 3-TIER DISPLAY RACK
            ================================================================ */}
-        {/* Primary Backwall (Shadow Caster 1/3) */}
-        <mesh
-          position={[0, WALL_HEIGHT / 2 + 0.18, -vd / 2 + 0.14]}
-          castShadow
-          receiveShadow
-          material={backWallMat}
-        >
-          <boxGeometry args={[vw, WALL_HEIGHT, 0.26]} />
-        </mesh>
-
-        {/* Brand Accent Framing Trim on Backwall */}
-        <mesh
-          position={[0, WALL_HEIGHT / 2 + 0.18, -vd / 2 + 0.29]}
-          material={
-            theme === 'living'
-              ? WARM_OAK_MAT
-              : theme === 'coffee'
-                ? COPPER_CRAFT_MAT
-                : brandStandardMat
-          }
-        >
-          <boxGeometry args={[vw - 0.38, WALL_HEIGHT - 0.32, 0.04]} />
-        </mesh>
-
         {/* Background Presentation Poster / Screen */}
-        <group position={[0.62, 1.92, -vd / 2 + 0.36]}>
+        <group position={[0.62, 1.98, -vd / 2 + 0.04]}>
           <mesh geometry={POSTER_FRAME_GEOM} material={DARK_NAVY_MAT} />
           <mesh position={[0, 0, 0.045]} geometry={POSTER_PLANE_GEOM}>
             <meshBasicMaterial map={posterTexture} />
@@ -479,7 +401,7 @@ export const Booth: React.FC<BoothProps> = React.memo(
         </group>
 
         {/* Background-Left 3-Tier Product Display Rack */}
-        <group position={[-vw * 0.31, 0.18, -vd / 2 + 0.48]}>
+        <group position={[-vw * 0.31, 0.28, -vd / 2 + 0.22]}>
           <mesh
             position={[0, 1.16, -0.16]}
             geometry={SHELF_BACK_GEOM}
@@ -510,110 +432,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
           ))}
         </group>
 
-        {/* Left Wing Partition Wall (Shadow Caster 2/3) */}
-        <group position={[-vw / 2 + 0.12, 0.18, 0]}>
-          <mesh
-            position={[0, WALL_HEIGHT / 2, -vd * 0.2]}
-            castShadow
-            receiveShadow
-            material={theme === 'living' || theme === 'coffee' ? WARM_OAK_MAT : SLATE_DARK_MAT}
-          >
-            <boxGeometry args={[0.2, WALL_HEIGHT, vd * 0.56]} />
-          </mesh>
-          {[-0.05, 0.44, 0.92].map((finZ, idx) => (
-            <mesh
-              key={`fin-${idx}`}
-              position={[0.04, WALL_HEIGHT / 2, finZ]}
-              geometry={LOUVER_FIN_GEOM}
-              material={theme === 'living' ? CREAM_WALL_MAT : brandStandardMat}
-            />
-          ))}
-        </group>
-
-        {/* Right Wing Architectural Glass Curtain Bay & Exterior Planter */}
-        <group position={[vw / 2 - 0.12, 0.18, -vd * 0.12]}>
-          <mesh
-            position={[0, WALL_HEIGHT / 2, 0]}
-            geometry={RIGHT_CURTAIN_GLASS_GEOM}
-            material={GLASS_TINT_MAT}
-          />
-          {[-1.12, 0, 1.12].map((mz, idx) => (
-            <mesh
-              key={`mullion-${idx}`}
-              position={[0, WALL_HEIGHT / 2, mz]}
-              geometry={RIGHT_MULLION_POST_GEOM}
-              material={theme === 'living' || theme === 'coffee' ? WARM_OAK_MAT : SLATE_DARK_MAT}
-            />
-          ))}
-          {/* Exterior Side Planter Box with Low-Poly Shrubs */}
-          <group position={[0.32, 0, 0.1]}>
-            <mesh position={[0, 0.18, 0]} geometry={EXTERIOR_PLANTER_BOX_GEOM} material={SLATE_MID_MAT} />
-            {[-0.52, 0, 0.52].map((pz, pIdx) => (
-              <mesh
-                key={`side-shrub-${pIdx}`}
-                position={[0, 0.48, pz]}
-                geometry={PLANT_BUSH_GEOM}
-                material={EMERALD_PLANT_MAT}
-              />
-            ))}
-          </group>
-        </group>
-
-        {/* 360-Degree Rear Architectural Facade (Visible from Isometric View on South Booths) */}
-        <group position={[0, 0.18, -vd / 2 - 0.02]}>
-          <mesh position={[0, WALL_HEIGHT + 0.12, 0]} geometry={REAR_CORNICE_GEOM} material={SLATE_DARK_MAT} />
-          <mesh position={[0, WALL_HEIGHT - 0.18, -0.06]} geometry={REAR_ACCENT_BAR_GEOM} material={brandBasicMat} />
-          {[-vw * 0.44, -vw * 0.16, vw * 0.16, vw * 0.44].map((px, idx) => (
-            <mesh
-              key={`rear-pilaster-${idx}`}
-              position={[px, WALL_HEIGHT / 2, -0.04]}
-              geometry={REAR_PILASTER_GEOM}
-              material={theme === 'living' || theme === 'coffee' ? WARM_OAK_MAT : SLATE_MID_MAT}
-            />
-          ))}
-          {[-vw * 0.3, vw * 0.3].map((wx, idx) => (
-            <mesh
-              key={`rear-win-${idx}`}
-              position={[wx, WALL_HEIGHT * 0.54, -0.05]}
-              geometry={REAR_WINDOW_PANEL_GEOM}
-              material={GLASS_TINT_MAT}
-            />
-          ))}
-        </group>
-
-        {/* Stylized 3D City Stepped Roof Deck & Central Glass Skylight Atrium */}
-        <group position={[0, WALL_HEIGHT + 0.16, -0.04]}>
-          <mesh
-            receiveShadow
-            geometry={ROOF_DECK_SLAB_GEOM}
-            material={
-              theme === 'living'
-                ? WARM_OAK_MAT
-                : theme === 'coffee'
-                  ? TERRACOTTA_FLOOR_MAT
-                  : theme === 'design' || theme === 'energy'
-                    ? WHITE_GLOSS_MAT
-                    : SLATE_DARK_MAT
-            }
-          />
-          <mesh
-            position={[0, 0.14, -0.08]}
-            geometry={ROOF_TIER_SLAB_GEOM}
-            material={
-              theme === 'living' || theme === 'coffee'
-                ? CREAM_WALL_MAT
-                : theme === 'design'
-                  ? VIOLET_ART_MAT
-                  : SLATE_MID_MAT
-            }
-          />
-          {/* Central Skylight Atrium */}
-          <group position={[0, 0.24, -0.15]}>
-            <mesh geometry={ROOF_SKYLIGHT_FRAME_GEOM} material={DARK_NAVY_MAT} />
-            <mesh position={[0, 0.06, 0]} geometry={ROOF_SKYLIGHT_GLASS_GEOM} material={GLASS_TINT_MAT} />
-          </group>
-        </group>
-
         {/* ================================================================
             3. UNIQUE ARCHITECTURAL ROOF, FAÇADE & FOREGROUND/MIDGROUND BY THEME
            ================================================================ */}
@@ -635,10 +453,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
               </mesh>
               <mesh position={[-vw * 0.22, -0.12, 0]} geometry={CEIL_LIGHT_GEOM} material={CYAN_GLOW_MAT} />
               <mesh position={[vw * 0.22, -0.12, 0]} geometry={CEIL_LIGHT_GEOM} material={WHITE_LIGHT_MAT} />
-              {/* Rooftop 5G Communication Dome & Telemetry Spire */}
-              <mesh position={[-1.95, 0.38, -0.65]} geometry={TECH_RADAR_DOME_GEOM} material={WHITE_GLOSS_MAT} />
-              <mesh position={[1.95, 0.65, -0.65]} geometry={TECH_SPIRE_POLE_GEOM} material={CHROME_PILLAR_MAT} />
-              <mesh position={[1.95, 1.28, -0.65]} geometry={SHELF_SPHERE_GEOM} material={CYAN_GLOW_MAT} />
             </group>
 
             {/* Front Right Cyber Pillar & Dual Holographic Totem */}
@@ -812,11 +626,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
                   material={WARM_BULB_MAT}
                 />
               ))}
-              {/* Rooftop Copper Roaster Chimney Flue & Warm Vent Cap */}
-              <group position={[-1.95, 0.54, -0.75]}>
-                <mesh geometry={CAFE_CHIMNEY_GEOM} material={COPPER_CRAFT_MAT} />
-                <mesh position={[0, 0.58, 0]} geometry={CAFE_CHIMNEY_CAP_GEOM} material={ESPRESSO_WOOD_MAT} />
-              </group>
             </group>
 
             {/* Warm Timber Café Columns & Entrance Greenery */}
@@ -882,10 +691,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
                 <planeGeometry args={[vw + 0.2, 0.56]} />
                 <meshBasicMaterial map={fasciaTexture} />
               </mesh>
-              {/* Rooftop Industrial Cooling Unit & Telemetry Dish */}
-              <mesh position={[-1.85, 0.34, -0.75]} geometry={ROBO_HVAC_BOX_GEOM} material={SLATE_MID_MAT} />
-              <mesh position={[-1.85, 0.68, -0.75]} geometry={ROBO_TURBINE_GEOM} material={CHROME_PILLAR_MAT} />
-              <mesh position={[1.85, 0.36, -0.75]} geometry={TECH_RADAR_DOME_GEOM} material={GOLD_SHOWCASE_MAT} />
             </group>
 
             {/* Dual Industrial Chrome Gantry Truss Columns */}
@@ -965,15 +770,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
                   material={MAGENTA_ART_MAT}
                 />
               </group>
-              {/* Sculptural Rooftop Gallery Fins */}
-              {[-2.1, -1.4, 1.4, 2.1].map((fx, idx) => (
-                <mesh
-                  key={`design-fin-${idx}`}
-                  position={[fx, 0.38, -0.35]}
-                  geometry={DESIGN_ROOF_FIN_GEOM}
-                  material={idx % 2 === 0 ? MAGENTA_ART_MAT : GOLD_SHOWCASE_MAT}
-                />
-              ))}
             </group>
 
             {/* Foreground Right: Sculptural Studio Reception Podium */}
@@ -1056,25 +852,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
                   material={SOLAR_CELL_MAT}
                 />
               ))}
-              {/* Rear Array of Solar PV Modules + Vertical-Axis Eco Wind Turbine */}
-              {[-1.5, 1.5].map((sx, idx) => (
-                <mesh
-                  key={`solar-pv-rear-${idx}`}
-                  position={[sx, 0.48, -1.15]}
-                  rotation={[0.42, 0, 0]}
-                  geometry={SOLAR_PANEL_GEOM}
-                  material={SOLAR_CELL_MAT}
-                />
-              ))}
-              <group position={[2.25, 0.62, -1.15]}>
-                <mesh geometry={ECO_TURBINE_MAST_GEOM} material={WHITE_GLOSS_MAT} />
-                <mesh
-                  ref={showcaseSecondaryRef as React.RefObject<THREE.Mesh>}
-                  position={[0, 0.48, 0]}
-                  geometry={ECO_TURBINE_ROTOR_GEOM}
-                  material={EMERALD_GLOW_MAT}
-                />
-              </group>
             </group>
 
             {/* Living Green Biophilic Columns at Front Corners */}

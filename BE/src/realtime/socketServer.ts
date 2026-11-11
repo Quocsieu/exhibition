@@ -12,6 +12,7 @@ import {
   isPointWalkable,
 } from '../schemas/expoSchemas.js';
 import type { ExpoDatabase } from '../database/db.js';
+import type { CorsOriginConfig } from '../server.js';
 
 interface InternalVisitorRecord {
   state: VisitorState;
@@ -30,7 +31,7 @@ const DEFAULT_COLORS = [
 export function attachSocketServer(
   httpServer: HttpServer,
   db: ExpoDatabase,
-  corsOrigin: string | string[] = '*'
+  corsOrigin: CorsOriginConfig = '*'
 ): Server<ClientToServerEvents, ServerToClientEvents> {
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: {

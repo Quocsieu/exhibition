@@ -462,41 +462,57 @@ export function createPlazaTileTexture(): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
-    // Warm architectural limestone base
-    ctx.fillStyle = '#e2e8f0';
+    // Warm architectural travertine/limestone mortar base
+    ctx.fillStyle = '#cbd5e1';
     ctx.fillRect(0, 0, 512, 512);
 
     const tileSize = 128;
-    const tones = ['#e8eef5', '#dde5ef', '#e4ebf3', '#d8e1ec'];
+    const tones = ['#ebe6dc', '#e4dfd4', '#ede9e0', '#dfd9cd', '#e8e2d6', '#e2dcd0'];
 
     for (let row = 0; row < 4; row++) {
       for (let col = 0; col < 4; col++) {
         const x = col * tileSize;
         const y = row * tileSize;
-        ctx.fillStyle = tones[(row * 3 + col) % tones.length];
-        ctx.fillRect(x + 3, y + 3, tileSize - 6, tileSize - 6);
+        const baseTone = tones[(row * 5 + col * 3) % tones.length];
 
-        // Subtle sunlit top/left bevel highlight
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-        ctx.fillRect(x + 3, y + 3, tileSize - 6, 3);
-        ctx.fillRect(x + 3, y + 3, 3, tileSize - 6);
+        // Subtle stone slab gradient for depth
+        const grad = ctx.createLinearGradient(x, y, x + tileSize, y + tileSize);
+        grad.addColorStop(0, '#f5f2eb');
+        grad.addColorStop(0.5, baseTone);
+        grad.addColorStop(1, '#d6cfc2');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x + 4, y + 4, tileSize - 8, tileSize - 8);
 
-        // Subtle bottom/right recess shadow
-        ctx.fillStyle = 'rgba(100, 116, 139, 0.28)';
-        ctx.fillRect(x + 3, y + tileSize - 6, tileSize - 6, 3);
-        ctx.fillRect(x + tileSize - 6, y + 3, 3, tileSize - 6);
+        // Subtle inner ashlar border line
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x + 12, y + 12, tileSize - 24, tileSize - 24);
 
-        // Architectural corner inlay dot
-        ctx.fillStyle = 'rgba(148, 163, 184, 0.45)';
+        // Sunlit top/left bevel highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+        ctx.fillRect(x + 4, y + 4, tileSize - 8, 3);
+        ctx.fillRect(x + 4, y + 4, 3, tileSize - 8);
+
+        // Bottom/right recess AO shadow
+        ctx.fillStyle = 'rgba(71, 85, 105, 0.36)';
+        ctx.fillRect(x + 4, y + tileSize - 7, tileSize - 8, 3);
+        ctx.fillRect(x + tileSize - 7, y + 4, 3, tileSize - 8);
+
+        // Architectural brass/stone corner inlay diamond
+        ctx.fillStyle = '#94a3b8';
         ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.moveTo(x, y - 5);
+        ctx.lineTo(x + 5, y);
+        ctx.lineTo(x, y + 5);
+        ctx.lineTo(x - 5, y);
+        ctx.closePath();
         ctx.fill();
       }
     }
 
-    // Grout lines
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 3;
+    // Deep recessed mortar grout lines
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 4;
     for (let i = 0; i <= 4; i++) {
       const p = i * tileSize;
       ctx.beginPath();
@@ -514,7 +530,51 @@ export function createPlazaTileTexture(): THREE.CanvasTexture {
   const texture = registerTrackedTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(14, 14);
+  texture.repeat.set(16, 16);
+  return texture;
+}
+
+/**
+ * Creates a matching grayscale height/bump & roughness map for the plaza stone tiles
+ * so directional sunlight produces realistic micro-relief along stone joints and bevels.
+ */
+export function createPlazaTileBumpTexture(): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 512);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    // Deep recessed mortar (dark = low elevation)
+    ctx.fillStyle = '#262626';
+    ctx.fillRect(0, 0, 512, 512);
+
+    const tileSize = 128;
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 4; col++) {
+        const x = col * tileSize;
+        const y = row * tileSize;
+
+        // Outer chamfer slope
+        ctx.fillStyle = '#9a9a9a';
+        ctx.fillRect(x + 3, y + 3, tileSize - 6, tileSize - 6);
+
+        // Raised stone slab plateau (bright = high elevation)
+        const shade = 225 + ((row * 7 + col * 5) % 24);
+        ctx.fillStyle = `rgb(${shade}, ${shade}, ${shade})`;
+        ctx.fillRect(x + 7, y + 7, tileSize - 14, tileSize - 14);
+
+        // Subtle carved inner border groove
+        ctx.strokeStyle = '#b0b0b0';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 14, y + 14, tileSize - 28, tileSize - 28);
+      }
+    }
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(16, 16);
   return texture;
 }
 

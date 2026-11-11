@@ -326,6 +326,11 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
           orthographic
           shadows
           dpr={[1, 1.5]}
+          gl={{
+            toneMapping: THREE.ACESFilmicToneMapping,
+            toneMappingExposure: 1.06,
+            outputColorSpace: THREE.SRGBColorSpace,
+          }}
           camera={{
             position: [16, 26, 28],
             zoom: 34,

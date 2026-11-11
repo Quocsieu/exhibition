@@ -7,6 +7,7 @@ import {
   type VisitorMovePayload,
   MOVE_EVENT_MIN_INTERVAL_MS,
 } from '../types/expo';
+import { SOCKET_BASE_URL } from '../config/apiConfig';
 
 export interface UseRealtimeOptions {
   initialName: string;
@@ -46,10 +47,7 @@ export function useRealtime({
   onMoveRejectedRef.current = onMoveRejected;
 
   useEffect(() => {
-    const rawSocketUrl =
-      (import.meta.env.VITE_SOCKET_URL as string | undefined) ||
-      (import.meta.env.VITE_API_URL as string | undefined);
-    const socketUrl = rawSocketUrl ? rawSocketUrl.replace(/\/+$/, '') : undefined;
+    const socketUrl = SOCKET_BASE_URL;
     const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(socketUrl, {
       autoConnect: false,
       transports: ['websocket', 'polling'],

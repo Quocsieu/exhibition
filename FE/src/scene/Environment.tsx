@@ -6,8 +6,10 @@ import { WORLD_BOUNDS } from '../types/expo';
 import {
   createBannerSignTexture,
   createPlazaMedallionTexture,
+  createPlazaTileBumpTexture,
   createPlazaTileTexture,
 } from './sceneTextures';
+import { cloneCachedAsset, type GlbAssetId } from './assetLoader';
 
 export interface EnvironmentProps {
   onGroundClick: (point: THREE.Vector3) => void;
@@ -75,9 +77,47 @@ const PERIMETER_TREES: [number, number, number][] = [
   [9.5, -20.5, 1.0],
 ];
 
-const ALL_TREES: { x: number; z: number; scale: number }[] = [
-  ...CENTRAL_PLANTER_ISLANDS.map((island) => ({ x: island.x, z: island.z, scale: 1.08 })),
-  ...PERIMETER_TREES.map(([x, z, scale]) => ({ x, z, scale })),
+const ALL_TREES: {
+  x: number;
+  z: number;
+  scale: number;
+  ry: number;
+  assetId: GlbAssetId;
+}[] = [
+  ...CENTRAL_PLANTER_ISLANDS.map((island, idx) => ({
+    x: island.x,
+    z: island.z,
+    scale: 1.05,
+    ry: idx * 1.15,
+    assetId: (idx % 2 === 0 ? 'env-tree-oak' : 'env-tree-blossom') as GlbAssetId,
+  })),
+  ...PERIMETER_TREES.map(([x, z, scale], idx) => ({
+    x,
+    z,
+    scale,
+    ry: idx * 0.85,
+    assetId: (
+      idx % 3 === 0
+        ? 'env-tree-pine'
+        : idx % 3 === 1
+          ? 'env-tree-oak'
+          : 'env-tree-blossom'
+    ) as GlbAssetId,
+  })),
+  // Outer parkland trees framing the avenue (zero collision)
+  { x: -26.5, z: -12, scale: 1.35, ry: 0.4, assetId: 'env-tree-pine' },
+  { x: 26.5, z: -12, scale: 1.35, ry: 1.8, assetId: 'env-tree-pine' },
+  { x: -26.5, z: 8, scale: 1.28, ry: 2.1, assetId: 'env-tree-oak' },
+  { x: 26.5, z: 8, scale: 1.28, ry: 0.9, assetId: 'env-tree-oak' },
+];
+
+const PLANTER_URN_POSITIONS: [number, number][] = [
+  [-5.8, 19.6],
+  [5.8, 19.6],
+  [-4.2, 8.2],
+  [4.2, 8.2],
+  [-4.2, -8.2],
+  [4.2, -8.2],
 ];
 
 const ALL_BENCHES: { x: number; z: number; rotationY: number }[] = [
@@ -195,56 +235,37 @@ const FLOWER_CLUSTERS_GOLD: [number, number, number][] = [
 ];
 
 // Shared module-level Geometries & Materials to minimize WebGL memory & state switches
-const TREE_TRUNK_GEOM = new THREE.CylinderGeometry(0.14, 0.22, 1.2, 7);
-const TREE_LOW_GEOM = new THREE.DodecahedronGeometry(0.92, 0);
-const TREE_MID_GEOM = new THREE.DodecahedronGeometry(0.68, 0);
-const TREE_TOP_GEOM = new THREE.IcosahedronGeometry(0.48, 0);
-const TREE_BASE_GEOM = new THREE.CylinderGeometry(0.85, 0.95, 0.44, 12);
+const TREE_BASE_GEOM = new THREE.CylinderGeometry(0.85, 0.95, 0.44, 16);
 
-const FLOWER_BUSH_GEOM = new THREE.DodecahedronGeometry(0.24, 0);
-const FLOWER_BLOSSOM_GEOM = new THREE.IcosahedronGeometry(0.15, 0);
+const FLOWER_BUSH_GEOM = new THREE.DodecahedronGeometry(0.24, 1);
+const FLOWER_BLOSSOM_GEOM = new THREE.IcosahedronGeometry(0.15, 1);
 
-const PARASOL_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.06, 2.35, 8);
-const PARASOL_CANOPY_GEOM = new THREE.ConeGeometry(1.55, 0.58, 8);
-const LOUNGE_TABLE_TOP_GEOM = new THREE.CylinderGeometry(0.68, 0.68, 0.07, 14);
-const LOUNGE_TABLE_BASE_GEOM = new THREE.CylinderGeometry(0.12, 0.34, 0.72, 10);
+const PARASOL_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.06, 2.35, 10);
+const PARASOL_CANOPY_GEOM = new THREE.ConeGeometry(1.55, 0.58, 12);
+const LOUNGE_TABLE_TOP_GEOM = new THREE.CylinderGeometry(0.68, 0.68, 0.07, 16);
+const LOUNGE_TABLE_BASE_GEOM = new THREE.CylinderGeometry(0.12, 0.34, 0.72, 12);
 
-const FLAG_POLE_GEOM = new THREE.CylinderGeometry(0.04, 0.06, 3.6, 8);
+const FLAG_POLE_GEOM = new THREE.CylinderGeometry(0.04, 0.06, 3.6, 10);
 const FLAG_BANNER_GEOM = new THREE.BoxGeometry(0.04, 1.45, 0.58);
 
-const TREE_TRUNK_MAT = new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.85 });
-const TREE_LOW_MAT = new THREE.MeshStandardMaterial({
-  color: '#059669',
-  roughness: 0.65,
-  flatShading: true,
-});
 const TREE_MID_MAT = new THREE.MeshStandardMaterial({
   color: '#10b981',
   roughness: 0.6,
-  flatShading: true,
 });
-const TREE_TOP_MAT = new THREE.MeshStandardMaterial({
-  color: '#34d399',
-  roughness: 0.55,
-  flatShading: true,
-});
-const SLATE_POT_MAT = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.7 });
+const SLATE_POT_MAT = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.65 });
 
 const FLOWER_PINK_MAT = new THREE.MeshStandardMaterial({
   color: '#f43f5e',
   roughness: 0.45,
-  flatShading: true,
 });
 const FLOWER_GOLD_MAT = new THREE.MeshStandardMaterial({
   color: '#fbbf24',
   roughness: 0.4,
-  flatShading: true,
 });
 
 const PARASOL_CREAM_MAT = new THREE.MeshStandardMaterial({
   color: '#fffbeb',
   roughness: 0.45,
-  flatShading: true,
 });
 const TABLE_WHITE_MAT = new THREE.MeshStandardMaterial({
   color: '#f8fafc',
@@ -255,51 +276,42 @@ const FLAG_ACCENT_MAT = new THREE.MeshStandardMaterial({
   roughness: 0.38,
 });
 
-const BENCH_SEAT_GEOM = new THREE.BoxGeometry(1.28, 0.07, 0.42);
-const BENCH_BACK_GEOM = new THREE.BoxGeometry(1.26, 0.28, 0.06);
-const BENCH_LEG_GEOM = new THREE.BoxGeometry(0.07, 0.48, 0.44);
-const BENCH_WOOD_MAT = new THREE.MeshStandardMaterial({ color: '#d97706', roughness: 0.6 });
 const BENCH_IRON_MAT = new THREE.MeshStandardMaterial({
   color: '#1e293b',
   metalness: 0.5,
   roughness: 0.4,
 });
 
-const LAMP_BASE_GEOM = new THREE.CylinderGeometry(0.18, 0.26, 0.34, 10);
-const LAMP_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.075, 2.65, 10);
-const LAMP_HOOD_GEOM = new THREE.ConeGeometry(0.36, 0.2, 12);
-const LAMP_BULB_GEOM = new THREE.SphereGeometry(0.22, 10, 10);
-const LAMP_POOL_GEOM = new THREE.CircleGeometry(1.55, 20);
+const LAMP_POOL_GEOM = new THREE.CircleGeometry(1.65, 24);
 const LAMP_POLE_MAT = new THREE.MeshStandardMaterial({
   color: '#1e293b',
   metalness: 0.65,
   roughness: 0.32,
 });
-const LAMP_BULB_MAT = new THREE.MeshBasicMaterial({ color: '#fde68a' });
 const LAMP_POOL_MAT = new THREE.MeshBasicMaterial({
   color: '#fef08a',
   transparent: true,
-  opacity: 0.22,
+  opacity: 0.24,
   depthWrite: false,
 });
 
 // Stylized 3D City Horizon & Distant Hills Instanced Geometries & Materials
 const CITY_TOWER_GEOM = new THREE.BoxGeometry(1, 1, 1);
-const CITY_CROWN_GEOM = new THREE.BoxGeometry(0.82, 0.16, 0.82);
-const HORIZON_HILL_GEOM = new THREE.DodecahedronGeometry(1, 1);
+const CITY_CROWN_GEOM = new THREE.ConeGeometry(0.72, 0.42, 4);
+const HORIZON_HILL_GEOM = new THREE.IcosahedronGeometry(1, 2);
 const CITY_TOWER_MAT = new THREE.MeshStandardMaterial({
-  color: '#cbd5e1',
-  roughness: 0.72,
-  metalness: 0.12,
+  color: '#e2e8f0',
+  roughness: 0.62,
+  metalness: 0.15,
 });
 const CITY_CROWN_MAT = new THREE.MeshStandardMaterial({
-  color: '#94a3b8',
-  roughness: 0.6,
+  color: '#475569',
+  roughness: 0.48,
+  metalness: 0.25,
 });
 const HORIZON_HILL_MAT = new THREE.MeshStandardMaterial({
   color: '#86efac',
-  roughness: 0.85,
-  flatShading: true,
+  roughness: 0.82,
 });
 
 const PLANTER_BOX_GEOM = new THREE.BoxGeometry(1.52, 0.48, 1.52);
@@ -317,7 +329,36 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const markerGroupRef = useRef<THREE.Group>(null);
 
     const plazaTileTexture = useMemo(() => createPlazaTileTexture(), []);
+    const plazaTileBumpTexture = useMemo(() => createPlazaTileBumpTexture(), []);
     const plazaMedallionTexture = useMemo(() => createPlazaMedallionTexture(), []);
+
+    const treeClones = useMemo(
+      () => ALL_TREES.map((t) => ({ ...t, object: cloneCachedAsset(t.assetId) })),
+      []
+    );
+    const benchClones = useMemo(
+      () => ALL_BENCHES.map((b) => ({ ...b, object: cloneCachedAsset('env-park-bench') })),
+      []
+    );
+    const lampClones = useMemo(
+      () =>
+        PERIMETER_LAMPS.map(([lx, lz]) => ({
+          x: lx,
+          z: lz,
+          ry: Math.atan2(-lx, -lz),
+          object: cloneCachedAsset('env-street-lamp'),
+        })),
+      []
+    );
+    const urnClones = useMemo(
+      () =>
+        PLANTER_URN_POSITIONS.map(([ux, uz]) => ({
+          x: ux,
+          z: uz,
+          object: cloneCachedAsset('env-planter-urn'),
+        })),
+      []
+    );
 
     const plazaBannerTexture = useMemo(
       () =>
@@ -366,6 +407,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     useEffect(() => {
       return () => {
         plazaTileTexture.dispose();
+        plazaTileBumpTexture.dispose();
         plazaMedallionTexture.dispose();
         plazaBannerTexture.dispose();
         entranceBannerTexture.dispose();
@@ -374,6 +416,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       };
     }, [
       plazaTileTexture,
+      plazaTileBumpTexture,
       plazaMedallionTexture,
       plazaBannerTexture,
       entranceBannerTexture,
@@ -456,7 +499,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           <meshBasicMaterial color="#0ea5e9" />
         </mesh>
 
-        {/* Interactive Main Courtyard Ground Plane with Seamless Stone Tile Texture */}
+        {/* Interactive Main Courtyard Ground Plane with PBR Stone Tile & Bump/Roughness Relief */}
         <mesh
           rotation={[-Math.PI / 2, 0, 0]}
           position={[0, 0, 0]}
@@ -467,7 +510,15 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           }}
         >
           <planeGeometry args={[width, depth]} />
-          <meshStandardMaterial map={plazaTileTexture} color="#f8fafc" roughness={0.72} />
+          <meshStandardMaterial
+            map={plazaTileTexture}
+            bumpMap={plazaTileBumpTexture}
+            bumpScale={0.032}
+            roughnessMap={plazaTileBumpTexture}
+            color="#f8fafc"
+            roughness={0.68}
+            metalness={0.06}
+          />
         </mesh>
 
         {/* ================================================================
@@ -717,45 +768,28 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         })}
 
         {/* ================================================================
-            6. INSTANCED TREES, FLOWER BUSHES, LOUNGE PAVILIONS, BENCHES & LAMPS
+            6. ASSET-DRIVEN TREES (`env-tree-*.glb`), BENCHES (`env-park-bench.glb`),
+               STREET LAMPS (`env-street-lamp.glb`) & PLANTER URNS (`env-planter-urn.glb`)
            ================================================================ */}
-        {/* 12 Instanced Trees (4 draw calls total) */}
-        <Instances geometry={TREE_TRUNK_GEOM} material={TREE_TRUNK_MAT} castShadow>
-          {ALL_TREES.map((t, i) => (
-            <Instance
-              key={`trunk-${i}`}
-              position={[t.x, 0.95 * t.scale, t.z]}
-              scale={[t.scale, t.scale, t.scale]}
-            />
-          ))}
-        </Instances>
-        <Instances geometry={TREE_LOW_GEOM} material={TREE_LOW_MAT} castShadow>
-          {ALL_TREES.map((t, i) => (
-            <Instance
-              key={`low-${i}`}
-              position={[t.x, 1.85 * t.scale, t.z]}
-              scale={[t.scale, t.scale, t.scale]}
-            />
-          ))}
-        </Instances>
-        <Instances geometry={TREE_MID_GEOM} material={TREE_MID_MAT}>
-          {ALL_TREES.map((t, i) => (
-            <Instance
-              key={`mid-${i}`}
-              position={[t.x + 0.24 * t.scale, 2.42 * t.scale, t.z - 0.16 * t.scale]}
-              scale={[t.scale, t.scale, t.scale]}
-            />
-          ))}
-        </Instances>
-        <Instances geometry={TREE_TOP_GEOM} material={TREE_TOP_MAT}>
-          {ALL_TREES.map((t, i) => (
-            <Instance
-              key={`top-${i}`}
-              position={[t.x - 0.18 * t.scale, 2.82 * t.scale, t.z + 0.14 * t.scale]}
-              scale={[t.scale, t.scale, t.scale]}
-            />
-          ))}
-        </Instances>
+        {/* 16 Multi-Species Sculpted 3D Trees (Oak, Blossom & Layered Pine/Cypress) */}
+        {treeClones.map((t, i) => (
+          <primitive
+            key={`glb-tree-${i}`}
+            object={t.object}
+            position={[t.x, 0.22, t.z]}
+            rotation={[0, t.ry, 0]}
+            scale={[t.scale, t.scale, t.scale]}
+          />
+        ))}
+
+        {/* 6 Sculpted Stone Planter Urns along Grand Avenue & Entrance */}
+        {urnClones.map((u, i) => (
+          <primitive
+            key={`glb-urn-${i}`}
+            object={u.object}
+            position={[u.x, 0.02, u.z]}
+          />
+        ))}
 
         {/* Instanced Colorful Flower Bushes & Blossoms in Planters (3 draw calls total) */}
         <Instances geometry={FLOWER_BUSH_GEOM} material={TREE_MID_MAT}>
@@ -819,69 +853,25 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           ))}
         </Instances>
 
-        {/* 8 Instanced Park Benches */}
-        <Instances geometry={BENCH_SEAT_GEOM} material={BENCH_WOOD_MAT} castShadow>
-          {ALL_BENCHES.map((b, i) => (
-            <Instance
-              key={`bseat-${i}`}
-              position={[b.x, 0.34, b.z]}
-              rotation={[0, b.rotationY, 0]}
-            />
-          ))}
-        </Instances>
-        <Instances geometry={BENCH_BACK_GEOM} material={BENCH_WOOD_MAT}>
-          {ALL_BENCHES.map((b, i) => {
-            const sin = Math.sin(b.rotationY);
-            const cos = Math.cos(b.rotationY);
-            return (
-              <Instance
-                key={`bback-${i}`}
-                position={[b.x - sin * 0.17, 0.56, b.z - cos * 0.17]}
-                rotation={[0, b.rotationY, 0]}
-              />
-            );
-          })}
-        </Instances>
-        <Instances geometry={BENCH_LEG_GEOM} material={BENCH_IRON_MAT}>
-          {ALL_BENCHES.flatMap((b, i) => {
-            const cos = Math.cos(b.rotationY);
-            const sin = Math.sin(b.rotationY);
-            return [
-              <Instance
-                key={`bleg-l-${i}`}
-                position={[b.x - cos * 0.54, 0.24, b.z + sin * 0.54]}
-                rotation={[0, b.rotationY, 0]}
-              />,
-              <Instance
-                key={`bleg-r-${i}`}
-                position={[b.x + cos * 0.54, 0.24, b.z - sin * 0.54]}
-                rotation={[0, b.rotationY, 0]}
-              />,
-            ];
-          })}
-        </Instances>
+        {/* 8 Ergonomic Contoured Slat Park Benches (`env-park-bench.glb`) */}
+        {benchClones.map((b, i) => (
+          <primitive
+            key={`glb-bench-${i}`}
+            object={b.object}
+            position={[b.x, 0.02, b.z]}
+            rotation={[0, b.rotationY, 0]}
+          />
+        ))}
 
-        {/* 8 Instanced Boulevard Lamp Posts with Metallic Hoods & Warm Ground Light Pools */}
-        <Instances geometry={LAMP_BASE_GEOM} material={BENCH_IRON_MAT}>
-          {PERIMETER_LAMPS.map(([lx, lz], i) => (
-            <Instance key={`lbase-${i}`} position={[lx, 0.15, lz]} />
-          ))}
-        </Instances>
-        <Instances geometry={LAMP_POLE_GEOM} material={LAMP_POLE_MAT} castShadow>
-          {PERIMETER_LAMPS.map(([lx, lz], i) => (
-            <Instance key={`lpole-${i}`} position={[lx, 1.55, lz]} />
-          ))}
-        </Instances>
-        <Instances geometry={LAMP_BULB_GEOM} material={LAMP_BULB_MAT}>
-          {PERIMETER_LAMPS.map(([lx, lz], i) => (
-            <Instance key={`lbulb-${i}`} position={[lx, 2.95, lz]} />
-          ))}
-        </Instances>
-        <Instances geometry={LAMP_HOOD_GEOM} material={LAMP_POLE_MAT}>
-          {PERIMETER_LAMPS.map(([lx, lz], i) => (
-            <Instance key={`lhood-${i}`} position={[lx, 3.12, lz]} />
-          ))}
-        </Instances>
+        {/* 8 Architectural Swan-Neck Boulevard Street Lamps (`env-street-lamp.glb`) + Warm Light Pools */}
+        {lampClones.map((l, i) => (
+          <primitive
+            key={`glb-lamp-${i}`}
+            object={l.object}
+            position={[l.x, 0.02, l.z]}
+            rotation={[0, l.ry, 0]}
+          />
+        ))}
         <Instances geometry={LAMP_POOL_GEOM} material={LAMP_POOL_MAT}>
           {PERIMETER_LAMPS.map(([lx, lz], i) => (
             <Instance
