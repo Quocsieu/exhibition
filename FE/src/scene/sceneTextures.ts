@@ -720,88 +720,136 @@ export function createPlazaTileBumpTexture(): THREE.CanvasTexture {
 }
 
 /**
- * Creates a Stylized 3D City Asphalt Road texture with mineral aggregate grain,
- * subtle dual-lane wear bands, white shoulder edge lines, and a dashed white center line.
+ * Creates a High-quality Stylized Realistic 3D City Asphalt Road texture with mineral aggregate grain,
+ * subtle dual-lane wear bands, thermoplastic white shoulder lines, dashed center divider, and stop bars.
  */
 export function createAsphaltRoadTexture(repeatY = 6): THREE.CanvasTexture {
-  const canvas = createCanvasElement(512, 512);
+  const canvas = createCanvasElement(1024, 1024);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
-    // Deep charcoal-slate stylized asphalt base
-    ctx.fillStyle = '#333d4b';
-    ctx.fillRect(0, 0, 512, 512);
+    // Rich deep charcoal asphalt base with subtle mineral temperature
+    ctx.fillStyle = '#262a33';
+    ctx.fillRect(0, 0, 1024, 1024);
 
-    // Subtle darker wheel-track wear bands on left and right lanes
-    const leftLaneGrad = ctx.createLinearGradient(64, 0, 224, 0);
-    leftLaneGrad.addColorStop(0, 'rgba(30, 41, 59, 0)');
-    leftLaneGrad.addColorStop(0.5, 'rgba(15, 23, 42, 0.28)');
-    leftLaneGrad.addColorStop(1, 'rgba(30, 41, 59, 0)');
+    // Subtle natural color variation across road width (aggregate grading)
+    const roadNoise = ctx.createLinearGradient(0, 0, 1024, 0);
+    roadNoise.addColorStop(0, '#22262f');
+    roadNoise.addColorStop(0.18, '#2a2e38');
+    roadNoise.addColorStop(0.5, '#242831');
+    roadNoise.addColorStop(0.82, '#2a2e38');
+    roadNoise.addColorStop(1, '#22262f');
+    ctx.fillStyle = roadNoise;
+    ctx.fillRect(0, 0, 1024, 1024);
+
+    // Realistic vehicle wheel-track wear bands (smoother, slightly darker rubber-embedded asphalt)
+    const leftLaneGrad = ctx.createLinearGradient(120, 0, 420, 0);
+    leftLaneGrad.addColorStop(0, 'rgba(20, 24, 32, 0)');
+    leftLaneGrad.addColorStop(0.5, 'rgba(15, 18, 24, 0.42)');
+    leftLaneGrad.addColorStop(1, 'rgba(20, 24, 32, 0)');
     ctx.fillStyle = leftLaneGrad;
-    ctx.fillRect(64, 0, 160, 512);
+    ctx.fillRect(120, 0, 300, 1024);
 
-    const rightLaneGrad = ctx.createLinearGradient(288, 0, 448, 0);
-    rightLaneGrad.addColorStop(0, 'rgba(30, 41, 59, 0)');
-    rightLaneGrad.addColorStop(0.5, 'rgba(15, 23, 42, 0.28)');
-    rightLaneGrad.addColorStop(1, 'rgba(30, 41, 59, 0)');
+    const rightLaneGrad = ctx.createLinearGradient(600, 0, 900, 0);
+    rightLaneGrad.addColorStop(0, 'rgba(20, 24, 32, 0)');
+    rightLaneGrad.addColorStop(0.5, 'rgba(15, 18, 24, 0.42)');
+    rightLaneGrad.addColorStop(1, 'rgba(20, 24, 32, 0)');
     ctx.fillStyle = rightLaneGrad;
-    ctx.fillRect(288, 0, 160, 512);
+    ctx.fillRect(600, 0, 300, 1024);
 
-    // Deterministic mineral aggregate speckle (stylized asphalt grain)
-    const speckleColors = ['#28313e', '#3f4b5b', '#495668', '#242c38'];
-    for (let i = 0; i < 900; i++) {
-      const sx = (i * 137 + (i % 17) * 29) % 512;
-      const sy = (i * 251 + (i % 23) * 19) % 512;
-      const size = (i % 3) + 2;
+    // Dense fine mineral aggregate speckle (crushed granite, basalt and bitumen binder)
+    const speckleColors = [
+      '#1a1d24',
+      '#313743',
+      '#3b4251',
+      '#474f60',
+      '#1e222a',
+      '#2d333e',
+      '#545e72',
+      '#6b768c',
+    ];
+    for (let i = 0; i < 4200; i++) {
+      const sx = (i * 179 + (i % 37) * 41) % 1024;
+      const sy = (i * 283 + (i % 43) * 31) % 1024;
+      const size = (i % 4) + 1;
       ctx.fillStyle = speckleColors[i % speckleColors.length];
       ctx.fillRect(sx, sy, size, size);
     }
 
-    // Crisp continuous white road shoulder edge lines (left & right)
-    ctx.fillStyle = '#cbd5e1';
-    ctx.fillRect(22, 0, 10, 512);
-    ctx.fillRect(480, 0, 10, 512);
+    // Micro tar seam cracks & subtle weather pitting (stylized realism)
+    ctx.strokeStyle = 'rgba(18, 21, 28, 0.55)';
+    ctx.lineWidth = 1.5;
+    for (let j = 0; j < 8; j++) {
+      const startX = ((j * 163) % 800) + 100;
+      const startY = (j * 131) % 900;
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(startX + 18, startY + 24);
+      ctx.lineTo(startX + 32, startY + 16);
+      ctx.lineTo(startX + 48, startY + 36);
+      ctx.stroke();
+    }
 
-    // Crisp dashed white center lane divider line
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(250, 36, 12, 180);
-    ctx.fillRect(250, 292, 12, 180);
+    // Weathered Thermoplastic Road Shoulder Edge Lines (Left & Right)
+    // Slightly off-white with natural edge wear
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillRect(44, 0, 20, 1024);
+    ctx.fillRect(960, 0, 20, 1024);
+    // Shoulder line shadow / edge definition
+    ctx.fillStyle = 'rgba(15, 18, 24, 0.4)';
+    ctx.fillRect(42, 0, 2, 1024);
+    ctx.fillRect(64, 0, 2, 1024);
+    ctx.fillRect(958, 0, 2, 1024);
+    ctx.fillRect(980, 0, 2, 1024);
+
+    // Crisp Dashed White Center Lane Divider Line with subtle bevel
+    ctx.fillStyle = '#f1f5f9';
+    ctx.fillRect(500, 72, 24, 360);
+    ctx.fillRect(500, 584, 24, 360);
+
+    // Center line bevel highlight & shadow
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.fillRect(500, 72, 2, 360);
+    ctx.fillRect(500, 584, 2, 360);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.5)';
+    ctx.fillRect(522, 72, 2, 360);
+    ctx.fillRect(522, 584, 2, 360);
   }
 
   const texture = registerTrackedTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(1, repeatY);
-  texture.anisotropy = 8;
+  texture.anisotropy = 16;
   return texture;
 }
 
 /**
- * Creates a matching grayscale bump/roughness map for the stylized asphalt road.
+ * Creates a matching high-resolution grayscale bump/roughness map for the stylized asphalt road.
  */
 export function createAsphaltBumpTexture(repeatY = 6): THREE.CanvasTexture {
-  const canvas = createCanvasElement(512, 512);
+  const canvas = createCanvasElement(1024, 1024);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
-    ctx.fillStyle = '#787878';
-    ctx.fillRect(0, 0, 512, 512);
+    ctx.fillStyle = '#7a7a7a';
+    ctx.fillRect(0, 0, 1024, 1024);
 
-    const grainShades = ['#5c5c5c', '#929292', '#686868', '#888888'];
-    for (let i = 0; i < 900; i++) {
-      const sx = (i * 137 + (i % 17) * 29) % 512;
-      const sy = (i * 251 + (i % 23) * 19) % 512;
-      const size = (i % 3) + 2;
+    const grainShades = ['#555555', '#999999', '#666666', '#8a8a8a', '#444444', '#aaaaaa'];
+    for (let i = 0; i < 4200; i++) {
+      const sx = (i * 179 + (i % 37) * 41) % 1024;
+      const sy = (i * 283 + (i % 43) * 31) % 1024;
+      const size = (i % 4) + 1;
       ctx.fillStyle = grainShades[i % grainShades.length];
       ctx.fillRect(sx, sy, size, size);
     }
 
-    // Slightly raised thermoplastic paint lines
-    ctx.fillStyle = '#d4d4d4';
-    ctx.fillRect(22, 0, 10, 512);
-    ctx.fillRect(480, 0, 10, 512);
-    ctx.fillRect(250, 36, 12, 180);
-    ctx.fillRect(250, 292, 12, 180);
+    // Thermoplastic paint markings are raised higher than the asphalt substrate
+    ctx.fillStyle = '#dcdcdc';
+    ctx.fillRect(44, 0, 20, 1024);
+    ctx.fillRect(960, 0, 20, 1024);
+    ctx.fillRect(500, 72, 24, 360);
+    ctx.fillRect(500, 584, 24, 360);
   }
 
   const texture = registerTrackedTexture(canvas);
@@ -809,56 +857,72 @@ export function createAsphaltBumpTexture(repeatY = 6): THREE.CanvasTexture {
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(1, repeatY);
-  texture.anisotropy = 8;
+  texture.anisotropy = 16;
   return texture;
 }
 
 /**
- * Creates a Stylized 3D City Zebra Crosswalk (vạch qua đường) texture at road intersections.
+ * Creates a Stylized 3D City Zebra Crosswalk (vạch qua đường) texture at road intersections
+ * with thick thermoplastic paint ridges, aggregate asphalt borders, and stop lines.
  */
 export function createCrosswalkTexture(): THREE.CanvasTexture {
-  const canvas = createCanvasElement(512, 256);
+  const canvas = createCanvasElement(1024, 512);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
-    // Matching dark asphalt base
-    ctx.fillStyle = '#333d4b';
-    ctx.fillRect(0, 0, 512, 256);
+    // Matching dark charcoal asphalt substrate
+    ctx.fillStyle = '#262a33';
+    ctx.fillRect(0, 0, 1024, 512);
 
-    // Subtle aggregate grain
-    const speckleColors = ['#28313e', '#3f4b5b', '#495668'];
-    for (let i = 0; i < 350; i++) {
-      const sx = (i * 149) % 512;
-      const sy = (i * 89) % 256;
+    // Subtle aggregate speckle
+    const speckleColors = ['#1d2128', '#343b47', '#424a59'];
+    for (let i = 0; i < 900; i++) {
+      const sx = (i * 197) % 1024;
+      const sy = (i * 127) % 512;
       ctx.fillStyle = speckleColors[i % speckleColors.length];
       ctx.fillRect(sx, sy, 3, 3);
     }
 
-    // Top & bottom stop lines
-    ctx.fillStyle = '#e2e8f0';
-    ctx.fillRect(20, 14, 472, 10);
-    ctx.fillRect(20, 232, 472, 10);
+    // Solid Stop Bars (vạch dừng trước ngã tư) on top & bottom with edge bevels
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(40, 24, 944, 20);
+    ctx.fillRect(40, 468, 944, 20);
 
-    // 6 Crisp White Zebra Crosswalk Stripes
-    const stripeCount = 6;
-    const totalSpan = 432;
-    const startX = 40;
+    // Stop bar shadows
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.45)';
+    ctx.fillRect(40, 44, 944, 4);
+    ctx.fillRect(40, 488, 944, 4);
+
+    // 8 Wide Thermoplastic Zebra Crosswalk Stripes
+    const stripeCount = 8;
+    const totalSpan = 880;
+    const startX = 72;
     const slotWidth = totalSpan / stripeCount;
-    const barWidth = slotWidth * 0.58;
+    const barWidth = slotWidth * 0.62;
 
     for (let i = 0; i < stripeCount; i++) {
       const bx = startX + i * slotWidth + (slotWidth - barWidth) * 0.5;
+      
+      // Main white body
       ctx.fillStyle = '#f8fafc';
-      ctx.fillRect(bx, 38, barWidth, 180);
+      ctx.fillRect(bx, 76, barWidth, 360);
 
-      // Subtle bevel highlight on each white stripe
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillRect(bx, 212, barWidth, 6);
+      // Top sun highlight
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.fillRect(bx, 76, barWidth, 4);
+
+      // Bottom thermoplastic bevel shadow
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.4)';
+      ctx.fillRect(bx, 432, barWidth, 6);
+
+      // Subtle lateral road grit wear
+      ctx.fillStyle = 'rgba(38, 42, 51, 0.12)';
+      ctx.fillRect(bx + barWidth * 0.25, 120, barWidth * 0.5, 270);
     }
   }
 
   const texture = registerTrackedTexture(canvas);
-  texture.anisotropy = 8;
+  texture.anisotropy = 16;
   return texture;
 }
 
@@ -1312,25 +1376,27 @@ export function createProductDisplayCardTexture(options: {
  * with warm gray and subtle terracotta-sandstone tones and clean mortar lines.
  */
 export function createSidewalkPaverTexture(repeatX = 3, repeatY = 12): THREE.CanvasTexture {
-  const canvas = createCanvasElement(512, 512);
+  const canvas = createCanvasElement(1024, 1024);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
-    // Subtle warm mortar joint base (not overly dark)
-    ctx.fillStyle = '#b8b2a8';
-    ctx.fillRect(0, 0, 512, 512);
+    // Rich architectural stone joint mortar (dark warm slate grout)
+    ctx.fillStyle = '#9ca3af';
+    ctx.fillRect(0, 0, 1024, 1024);
 
     const rows = 8;
     const cols = 4;
-    const brickH = 512 / rows;
-    const brickW = 512 / cols;
+    const brickH = 1024 / rows;
+    const brickW = 1024 / cols;
     const paverTones = [
-      '#e6dfd5',
-      '#ded6ca',
-      '#eadfd3',
-      '#d8d0c5',
-      '#e2dad0',
-      '#e5d8cb',
+      '#f1ede6',
+      '#e8e2d8',
+      '#ebe5dc',
+      '#ded6cb',
+      '#f4eee7',
+      '#e5ded4',
+      '#dcd3c6',
+      '#ede7de',
     ];
 
     for (let r = 0; r < rows; r++) {
@@ -1340,18 +1406,32 @@ export function createSidewalkPaverTexture(repeatX = 3, repeatY = 12): THREE.Can
         const by = r * brickH;
         const tone = paverTones[((r * 5 + (c + 4) * 3) & 0x7fffffff) % paverTones.length];
 
+        // Stone paver body
         ctx.fillStyle = tone;
-        ctx.fillRect(bx + 2.5, by + 2.5, brickW - 5, brickH - 5);
+        ctx.fillRect(bx + 4, by + 4, brickW - 8, brickH - 8);
 
-        // Top/left sunlit paver edge highlight
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.58)';
-        ctx.fillRect(bx + 2.5, by + 2.5, brickW - 5, 2);
-        ctx.fillRect(bx + 2.5, by + 2.5, 2, brickH - 5);
+        // Tactile natural stone grain flecks
+        for (let s = 0; s < 24; s++) {
+          const fx = bx + 8 + ((s * 41 + r * 19) % (brickW - 16));
+          const fy = by + 8 + ((s * 29 + c * 23) % (brickH - 16));
+          ctx.fillStyle = s % 2 === 0 ? 'rgba(120, 110, 100, 0.18)' : 'rgba(255, 255, 255, 0.45)';
+          ctx.fillRect(fx, fy, 2.5, 2.5);
+        }
 
-        // Bottom/right subtle shadow
-        ctx.fillStyle = 'rgba(100, 92, 82, 0.25)';
-        ctx.fillRect(bx + 2.5, by + brickH - 4.5, brickW - 5, 2);
-        ctx.fillRect(bx + brickW - 4.5, by + 2.5, 2, brickH - 5);
+        // Inner carved bevel border
+        ctx.strokeStyle = 'rgba(160, 150, 140, 0.22)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(bx + 10, by + 10, brickW - 20, brickH - 20);
+
+        // Sunlit top & left edges (crisp stone chamfer)
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+        ctx.fillRect(bx + 4, by + 4, brickW - 8, 3);
+        ctx.fillRect(bx + 4, by + 4, 3, brickH - 8);
+
+        // Recessed bottom & right edge ambient shadow
+        ctx.fillStyle = 'rgba(75, 85, 99, 0.35)';
+        ctx.fillRect(bx + 4, by + brickH - 7, brickW - 8, 3);
+        ctx.fillRect(bx + brickW - 7, by + 4, 3, brickH - 8);
       }
     }
   }
@@ -1360,7 +1440,7 @@ export function createSidewalkPaverTexture(repeatX = 3, repeatY = 12): THREE.Can
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(repeatX, repeatY);
-  texture.anisotropy = 8;
+  texture.anisotropy = 16;
   return texture;
 }
 
@@ -1647,5 +1727,194 @@ export function createSkyDomeTexture(): THREE.CanvasTexture {
 
   const texture = registerTrackedTexture(canvas);
   texture.anisotropy = 4;
+  return texture;
+}
+
+/**
+ * Creates an authentic Segmented Granite Curb Stone (bó vỉa đá granite) texture
+ * with carved joints every 1m, stone bevels, and micro-granite grain.
+ */
+export function createCurbStoneTexture(): THREE.CanvasTexture {
+  const canvas = createCanvasElement(256, 128);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    // Light natural granite body
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillRect(0, 0, 256, 128);
+
+    // Natural quartz and mica specks
+    const speckles = ['#94a3b8', '#e2e8f0', '#64748b', '#f8fafc', '#475569'];
+    for (let i = 0; i < 400; i++) {
+      const sx = (i * 73) % 256;
+      const sy = (i * 37) % 128;
+      ctx.fillStyle = speckles[i % speckles.length];
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+
+    // Top chamfer highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+    ctx.fillRect(0, 0, 256, 6);
+
+    // Segment joint grooves (khe phân đoạn giữa các thỏi đá granite 1m)
+    ctx.fillStyle = '#475569';
+    ctx.fillRect(0, 0, 4, 128);
+    ctx.fillRect(128, 0, 4, 128);
+    ctx.fillRect(252, 0, 4, 128);
+
+    // Joint shadow & highlight
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.4)';
+    ctx.fillRect(2, 0, 2, 128);
+    ctx.fillRect(130, 0, 2, 128);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fillRect(4, 0, 2, 128);
+    ctx.fillRect(132, 0, 2, 128);
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = 8;
+  return texture;
+}
+
+/**
+ * High-detail Stylized cast-iron manhole cover texture (512x512)
+ * with concentric grip rings, diamond cross-hatch treads, and utility keyhole slots.
+ */
+export function createManholeCoverTexture(): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 512);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    const cx = 256;
+    const cy = 256;
+    ctx.clearRect(0, 0, 512, 512);
+
+    // Outer cast iron rim
+    ctx.beginPath();
+    ctx.arc(cx, cy, 250, 0, Math.PI * 2);
+    ctx.fillStyle = '#1e242d';
+    ctx.fill();
+    ctx.strokeStyle = '#374151';
+    ctx.lineWidth = 8;
+    ctx.stroke();
+
+    // Secondary stepped flange ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, 234, 0, Math.PI * 2);
+    ctx.fillStyle = '#262d38';
+    ctx.fill();
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Tread ring with radial grip notches
+    for (let a = 0; a < 36; a++) {
+      const angle = (a * Math.PI) / 18;
+      const x1 = cx + Math.cos(angle) * 190;
+      const y1 = cy + Math.sin(angle) * 190;
+      const x2 = cx + Math.cos(angle) * 230;
+      const y2 = cy + Math.sin(angle) * 230;
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+
+    // Inner medallion plate
+    ctx.beginPath();
+    ctx.arc(cx, cy, 185, 0, Math.PI * 2);
+    ctx.fillStyle = '#222832';
+    ctx.fill();
+    ctx.strokeStyle = '#374151';
+    ctx.lineWidth = 5;
+    ctx.stroke();
+
+    // Diamond waffle cross-hatch pattern on main plate
+    ctx.strokeStyle = 'rgba(75, 85, 99, 0.65)';
+    ctx.lineWidth = 3;
+    const step = 24;
+    for (let x = 90; x <= 420; x += step) {
+      for (let y = 90; y <= 420; y += step) {
+        if (Math.hypot(x - cx, y - cy) < 170) {
+          ctx.beginPath();
+          ctx.moveTo(x - 6, y);
+          ctx.lineTo(x + 6, y);
+          ctx.moveTo(x, y - 6);
+          ctx.lineTo(x, y + 6);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Central utility emblem ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, 48, 0, Math.PI * 2);
+    ctx.fillStyle = '#1a1f26';
+    ctx.fill();
+    ctx.strokeStyle = '#64748b';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Dual pry keyhole slots
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(cx - 100, cy - 8, 32, 16);
+    ctx.fillRect(cx + 68, cy - 8, 32, 16);
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.anisotropy = 8;
+  return texture;
+}
+
+/**
+ * Creates a Heavy-Duty Cast-Iron Storm Drain Grate (rãnh thoát nước mặt đường) texture
+ * with slotted drainage openings and perimeter seating frame.
+ */
+export function createStormDrainGrateTexture(): THREE.CanvasTexture {
+  const canvas = createCanvasElement(256, 512);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    ctx.fillStyle = '#1e242d';
+    ctx.fillRect(0, 0, 256, 512);
+
+    // Outer seating frame border
+    ctx.strokeStyle = '#475569';
+    ctx.lineWidth = 10;
+    ctx.strokeRect(6, 6, 244, 500);
+
+    // Inner gutter basin (deep dark recess)
+    ctx.fillStyle = '#090b0e';
+    ctx.fillRect(16, 16, 224, 480);
+
+    // 14 Sturdy Cast-Iron Grate Rib Bars
+    const barCount = 14;
+    const slotH = 480 / barCount;
+    for (let i = 0; i < barCount; i++) {
+      const by = 16 + i * slotH;
+      // Metal grate bar
+      ctx.fillStyle = '#333d4b';
+      ctx.fillRect(20, by + 4, 216, slotH - 8);
+
+      // Sunlit top edge highlight
+      ctx.fillStyle = '#64748b';
+      ctx.fillRect(20, by + 4, 216, 2.5);
+
+      // Shadowed bottom edge
+      ctx.fillStyle = '#111827';
+      ctx.fillRect(20, by + slotH - 5.5, 216, 2.5);
+
+      // Central reinforcing spine
+      ctx.fillStyle = '#475569';
+      ctx.fillRect(122, by + 4, 12, slotH - 8);
+    }
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.anisotropy = 8;
   return texture;
 }

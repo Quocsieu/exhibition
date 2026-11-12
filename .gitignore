@@ -11,3 +11,5 @@ BE/data/*.db-*
 .DS_Store
 coverage/
 *.log
+FE/booth-modeling/tools/
+FE/booth-modeling/sand3d-repo/

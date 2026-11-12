@@ -1,0 +1,253 @@
+{
+  "booth_01": {
+    "file": "booth_01.glb",
+    "file_size_kb": 57.6,
+    "triangles": 576,
+    "vertices": 1152,
+    "mesh_count": 48,
+    "materials": [
+      "brass #d97706 metallic=0.8 roughness=0.3",
+      "concrete #64748b roughness=0.85",
+      "concrete #94a3b8 roughness=0.8",
+      "glossy_plastic #0f172a roughness=0.2",
+      "marble #cbd5e1 roughness=0.6",
+      "oak #78350f roughness=0.5",
+      "oak #8b5a2b roughness=0.5",
+      "oak #92400e roughness=0.55",
+      "pine #374151 roughness=0.7",
+      "pine #b45309 roughness=0.6",
+      "walnut #3e2723 roughness=0.6",
+      "walnut #451a03 roughness=0.5",
+      "walnut #5c3a21 roughness=0.45"
+    ],
+    "material_count": 13,
+    "has_company_sign_surface": true,
+    "bounding_box": {
+      "min": [
+        -2.7,
+        -2.6,
+        0.0
+      ],
+      "max": [
+        2.7,
+        2.1,
+        4.6
+      ],
+      "dimensions": [
+        5.4,
+        4.7,
+        4.6
+      ]
+    },
+    "status": "PASS"
+  },
+  "booth_02": {
+    "file": "booth_02.glb",
+    "file_size_kb": 73.48,
+    "triangles": 1824,
+    "vertices": 2160,
+    "mesh_count": 32,
+    "materials": [
+      "ceramic #c2410c roughness=0.75",
+      "concrete #9ca3af roughness=0.85",
+      "concrete #d1d5db roughness=0.75",
+      "concrete #d1d5db roughness=0.85",
+      "concrete #e5e7eb roughness=0.7",
+      "concrete #e5e7eb roughness=0.8",
+      "concrete #f3f4f6 roughness=0.8",
+      "glossy_plastic #1e3a8a roughness=0.2",
+      "marble #e5e7eb roughness=0.5",
+      "marble #f3f4f6 roughness=0.3",
+      "marble #f9fafb roughness=0.4"
+    ],
+    "material_count": 11,
+    "has_company_sign_surface": true,
+    "bounding_box": {
+      "min": [
+        -2.6,
+        -2.6,
+        0.0
+      ],
+      "max": [
+        2.6,
+        2.1,
+        4.5
+      ],
+      "dimensions": [
+        5.2,
+        4.7,
+        4.5
+      ]
+    },
+    "status": "PASS"
+  },
+  "booth_03": {
+    "file": "booth_03.glb",
+    "file_size_kb": 106.0,
+    "triangles": 2520,
+    "vertices": 3056,
+    "mesh_count": 50,
+    "materials": [
+      "ceramic #991b1b roughness=0.85",
+      "ceramic #b91c1c roughness=0.8",
+      "ceramic #c2410c roughness=0.7",
+      "ceramic #c2410c roughness=0.75",
+      "ceramic #c2410c roughness=0.8",
+      "ceramic #ea580c roughness=0.75",
+      "concrete #fef3c7 roughness=0.8",
+      "concrete #fef3c7 roughness=0.85",
+      "concrete #fef3c7 roughness=0.9",
+      "fabric #15803d roughness=0.9",
+      "glossy_plastic #431407 roughness=0.2",
+      "oak #78350f roughness=0.55",
+      "oak #92400e roughness=0.45",
+      "oak #92400e roughness=0.55",
+      "walnut #78350f roughness=0.6"
+    ],
+    "material_count": 15,
+    "has_company_sign_surface": true,
+    "bounding_box": {
+      "min": [
+        -2.7,
+        -2.6,
+        0.0
+      ],
+      "max": [
+        5.2,
+        2.2,
+        3.98
+      ],
+      "dimensions": [
+        7.9,
+        4.8,
+        3.98
+      ]
+    },
+    "status": "PASS"
+  },
+  "booth_04": {
+    "file": "booth_04.glb",
+    "file_size_kb": 86.67,
+    "triangles": 2316,
+    "vertices": 2648,
+    "mesh_count": 33,
+    "materials": [
+      "brass #f59e0b metallic=0.9 roughness=0.2",
+      "concrete #334155 roughness=0.8",
+      "glass #bae6fd opacity=0.45 roughness=0.08",
+      "glass #e0f2fe opacity=0.4 roughness=0.1",
+      "glass #e0f2fe opacity=0.5 roughness=0.05",
+      "glossy_plastic #0284c7 roughness=0.2",
+      "marble #f8fafc roughness=0.2",
+      "painted_metal #0f172a metallic=0.6 roughness=0.4",
+      "painted_metal #0f172a metallic=0.7 roughness=0.3",
+      "painted_metal #0f172a metallic=0.7 roughness=0.4",
+      "painted_metal #1e293b roughness=0.5",
+      "painted_metal #1e293b roughness=0.6"
+    ],
+    "material_count": 12,
+    "has_company_sign_surface": true,
+    "bounding_box": {
+      "min": [
+        -2.6,
+        -2.6,
+        0.0
+      ],
+      "max": [
+        2.6,
+        2.1,
+        4.53
+      ],
+      "dimensions": [
+        5.2,
+        4.7,
+        4.53
+      ]
+    },
+    "status": "PASS"
+  },
+  "booth_05": {
+    "file": "booth_05.glb",
+    "file_size_kb": 83.43,
+    "triangles": 1920,
+    "vertices": 2352,
+    "mesh_count": 40,
+    "materials": [
+      "brass #b45309 metallic=0.8 roughness=0.3",
+      "brass #f59e0b metallic=0.7 roughness=0.3",
+      "ceramic #111827 roughness=0.6",
+      "ceramic #1f2937 roughness=0.6",
+      "ceramic #dc2626 roughness=0.5",
+      "concrete #374151 roughness=0.9",
+      "concrete #4b5563 roughness=0.85",
+      "glossy_plastic #7f1d1d roughness=0.2",
+      "glossy_plastic #991b1b roughness=0.3",
+      "oak #9a3412 roughness=0.5",
+      "oak #b45309 roughness=0.45",
+      "walnut #78350f roughness=0.4",
+      "walnut #78350f roughness=0.5"
+    ],
+    "material_count": 13,
+    "has_company_sign_surface": true,
+    "bounding_box": {
+      "min": [
+        -2.97,
+        -2.6,
+        0.0
+      ],
+      "max": [
+        2.97,
+        2.3,
+        4.55
+      ],
+      "dimensions": [
+        5.94,
+        4.9,
+        4.55
+      ]
+    },
+    "status": "PASS"
+  },
+  "booth_06": {
+    "file": "booth_06.glb",
+    "file_size_kb": 135.4,
+    "triangles": 4068,
+    "vertices": 4416,
+    "mesh_count": 39,
+    "materials": [
+      "brass #d97706 metallic=0.85 roughness=0.25",
+      "brass #f59e0b metallic=0.9 roughness=0.2",
+      "concrete #64748b roughness=0.85",
+      "concrete #94a3b8 roughness=0.85",
+      "concrete #cbd5e1 roughness=0.8",
+      "concrete #e2e8f0 roughness=0.6",
+      "concrete #e2e8f0 roughness=0.7",
+      "copper #0d9488 metallic=0.6 roughness=0.45",
+      "copper #0f766e metallic=0.6 roughness=0.45",
+      "copper #115e59 metallic=0.6 roughness=0.45",
+      "glossy_plastic #065f46 roughness=0.2",
+      "marble #f1f5f9 roughness=0.4",
+      "oak #78350f roughness=0.6"
+    ],
+    "material_count": 13,
+    "has_company_sign_surface": true,
+    "bounding_box": {
+      "min": [
+        -2.8,
+        -2.8,
+        0.0
+      ],
+      "max": [
+        2.8,
+        2.8,
+        5.32
+      ],
+      "dimensions": [
+        5.6,
+        5.6,
+        5.32
+      ]
+    },
+    "status": "PASS"
+  }
+}

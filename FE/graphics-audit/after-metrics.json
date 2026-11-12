@@ -1,0 +1,55 @@
+{
+  "phase": "after",
+  "timestamp": "2026-11-12T12:34:10.663Z",
+  "metrics": [
+    {
+      "name": "explore",
+      "fps": 76,
+      "calls": 524,
+      "triangles": 86389,
+      "textures": 50,
+      "geometries": 600
+    },
+    {
+      "name": "overview",
+      "fps": 48,
+      "calls": 1028,
+      "triangles": 179449,
+      "textures": 67,
+      "geometries": 704
+    },
+    {
+      "name": "street",
+      "fps": 103,
+      "calls": 154,
+      "triangles": 22474,
+      "textures": 67,
+      "geometries": 704
+    },
+    {
+      "name": "sidewalk",
+      "fps": 109,
+      "calls": 103,
+      "triangles": 16330,
+      "textures": 67,
+      "geometries": 704
+    },
+    {
+      "name": "buildings",
+      "fps": 120,
+      "calls": 152,
+      "triangles": 24384,
+      "textures": 67,
+      "geometries": 704
+    },
+    {
+      "name": "plaza",
+      "fps": 85,
+      "calls": 412,
+      "triangles": 78265,
+      "textures": 67,
+      "geometries": 704
+    }
+  ],
+  "errors": []
+}

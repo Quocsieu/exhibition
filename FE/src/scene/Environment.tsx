@@ -9,12 +9,15 @@ import {
   createBannerSignTexture,
   createCityBuildingFacadeTexture,
   createCrosswalkTexture,
+  createCurbStoneTexture,
+  createManholeCoverTexture,
   createPlazaMedallionTexture,
   createPlazaTileBumpTexture,
   createPlazaTileTexture,
   createSidewalkPaverTexture,
   createSidewalkPaverDataTexture,
   createSkyDomeTexture,
+  createStormDrainGrateTexture,
 } from './sceneTextures';
 import { cloneCachedAsset, type GlbAssetId } from './assetLoader';
 import { ExteriorAssets, type ExteriorAssetId, type ExteriorPlacement } from './ExteriorAssets';
@@ -172,41 +175,39 @@ const BOOTH_CONNECTOR_PATHS: {
   { x: 0, z: 8.8, w: 3.3, d: 6.4, ry: Math.PI, accent: '#14b8a6' },
 ];
 
-// Stylized 3D City Background Skyline Silhouettes with Stepped Setback Facades
+// High-quality Stylized 3D City Background Skyline Architecture with Detailed Facades & Rotations
 const STYLIZED_CITY_BUILDINGS: {
   x: number;
   z: number;
   sx: number;
   sy: number;
   sz: number;
-  setbackY?: number;
-  setbackSx?: number;
-  setbackSz?: number;
+  ry: number;
 }[] = [
-  // North Boulevard Skyline
-  { x: -32, z: -31, sx: 7.2, sy: 12.2, sz: 6.2, setbackY: 8.2, setbackSx: 5.4, setbackSz: 4.8 },
-  { x: -23, z: -33, sx: 6.4, sy: 15.5, sz: 5.8, setbackY: 10.5, setbackSx: 4.8, setbackSz: 4.2 },
-  { x: -13, z: -34, sx: 7.5, sy: 11.2, sz: 6.0, setbackY: 7.5, setbackSx: 5.6, setbackSz: 4.6 },
-  { x: 0, z: -35, sx: 8.2, sy: 17.2, sz: 6.5, setbackY: 12.0, setbackSx: 6.2, setbackSz: 4.8 },
-  { x: 13, z: -34, sx: 7.2, sy: 12.5, sz: 6.0, setbackY: 8.5, setbackSx: 5.2, setbackSz: 4.5 },
-  { x: 23, z: -33, sx: 6.4, sy: 14.8, sz: 5.8, setbackY: 9.8, setbackSx: 4.6, setbackSz: 4.2 },
-  { x: 32, z: -31, sx: 7.2, sy: 11.5, sz: 6.2, setbackY: 7.8, setbackSx: 5.4, setbackSz: 4.8 },
+  // North Boulevard Skyline (Facing South towards Plaza, ry = 0)
+  { x: -32, z: -31, sx: 7.2, sy: 13.5, sz: 6.2, ry: 0 },
+  { x: -23, z: -33, sx: 6.8, sy: 16.5, sz: 6.2, ry: 0 },
+  { x: -13, z: -34, sx: 7.5, sy: 12.5, sz: 6.0, ry: 0 },
+  { x: 0, z: -35, sx: 8.2, sy: 18.2, sz: 6.5, ry: 0 },
+  { x: 13, z: -34, sx: 7.5, sy: 13.5, sz: 6.0, ry: 0 },
+  { x: 23, z: -33, sx: 6.8, sy: 15.8, sz: 6.2, ry: 0 },
+  { x: 32, z: -31, sx: 7.2, sy: 12.8, sz: 6.2, ry: 0 },
 
-  // West Avenue Skyline
-  { x: -34, z: -18, sx: 6.2, sy: 13.5, sz: 6.8, setbackY: 9.2, setbackSx: 4.8, setbackSz: 5.2 },
-  { x: -35, z: -6, sx: 6.4, sy: 10.8, sz: 6.5, setbackY: 7.2, setbackSx: 4.8, setbackSz: 4.8 },
-  { x: -34, z: 7, sx: 6.2, sy: 12.2, sz: 6.5, setbackY: 8.4, setbackSx: 4.6, setbackSz: 5.0 },
-  { x: -33, z: 20, sx: 6.4, sy: 11.0, sz: 6.2, setbackY: 7.6, setbackSx: 4.8, setbackSz: 4.8 },
+  // West Avenue Skyline (Facing East towards Plaza, ry = Math.PI / 2)
+  { x: -34, z: -18, sx: 6.5, sy: 14.5, sz: 7.0, ry: Math.PI / 2 },
+  { x: -35, z: -6, sx: 6.8, sy: 12.0, sz: 6.8, ry: Math.PI / 2 },
+  { x: -34, z: 7, sx: 6.5, sy: 13.5, sz: 6.8, ry: Math.PI / 2 },
+  { x: -33, z: 20, sx: 6.8, sy: 12.5, sz: 6.5, ry: Math.PI / 2 },
 
-  // East Avenue Skyline
-  { x: 34, z: -18, sx: 6.2, sy: 12.5, sz: 6.8, setbackY: 8.5, setbackSx: 4.8, setbackSz: 5.2 },
-  { x: 35, z: -6, sx: 6.4, sy: 10.4, sz: 6.5, setbackY: 7.0, setbackSx: 4.8, setbackSz: 4.8 },
-  { x: 34, z: 7, sx: 6.2, sy: 13.0, sz: 6.5, setbackY: 8.8, setbackSx: 4.6, setbackSz: 5.0 },
-  { x: 33, z: 20, sx: 6.4, sy: 11.2, sz: 6.2, setbackY: 7.8, setbackSx: 4.8, setbackSz: 4.8 },
+  // East Avenue Skyline (Facing West towards Plaza, ry = -Math.PI / 2)
+  { x: 34, z: -18, sx: 6.5, sy: 13.5, sz: 7.0, ry: -Math.PI / 2 },
+  { x: 35, z: -6, sx: 6.8, sy: 11.5, sz: 6.8, ry: -Math.PI / 2 },
+  { x: 34, z: 7, sx: 6.5, sy: 14.2, sz: 6.8, ry: -Math.PI / 2 },
+  { x: 33, z: 20, sx: 6.8, sy: 12.8, sz: 6.5, ry: -Math.PI / 2 },
 
-  // South Entrance Flanking Buildings (Framing Grand Entrance Gate)
-  { x: -22, z: 28, sx: 7.0, sy: 13.2, sz: 6.4, setbackY: 9.0, setbackSx: 5.2, setbackSz: 4.8 },
-  { x: 22, z: 28, sx: 7.0, sy: 13.2, sz: 6.4, setbackY: 9.0, setbackSx: 5.2, setbackSz: 4.8 },
+  // South Entrance Flanking Buildings (Facing North towards Plaza, ry = Math.PI)
+  { x: -22, z: 28, sx: 7.4, sy: 14.2, sz: 6.5, ry: Math.PI },
+  { x: 22, z: 28, sx: 7.4, sy: 14.2, sz: 6.5, ry: Math.PI },
 ];
 
 // Distant Low-Poly Parkland Hills around the outer horizon
@@ -363,11 +364,6 @@ const PLANTER_BOX_GEOM = new THREE.BoxGeometry(1.48, 0.36, 1.48);
 const PLANTER_SOIL_GEOM = new THREE.BoxGeometry(1.26, 0.06, 1.26);
 const PLANTER_BOX_MAT = new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.65 });
 const PLANTER_SOIL_MAT = new THREE.MeshStandardMaterial({ color: '#065f46', roughness: 0.9 });
-const CURB_STONE_MAT = new THREE.MeshStandardMaterial({
-  color: '#cbd5e1',
-  roughness: 0.52,
-  metalness: 0.08,
-});
 
 // Stylized 3D City Asphalt Road Network Segments (Outside Central Pedestrian Plaza r = 8.4m)
 const ASPHALT_ROAD_SEGMENTS: {
@@ -412,6 +408,32 @@ const ZEBRA_CROSSWALKS: {
   { x: 18.5, z: 3.2, w: 4.8, d: 1.9, ry: Math.PI / 2 },
 ];
 
+// Cast-iron manhole covers on asphalt roadways
+const MANHOLE_COVERS: { x: number; z: number }[] = [
+  { x: 0, z: 12.0 },
+  { x: 0, z: 17.0 },
+  { x: -14.5, z: 0 },
+  { x: 14.5, z: 0 },
+  { x: -12.0, z: -19.8 },
+  { x: 12.0, z: -19.8 },
+  { x: -20.2, z: -10.0 },
+  { x: 20.2, z: -10.0 },
+  { x: -20.2, z: 10.0 },
+  { x: 20.2, z: 10.0 },
+];
+
+// Street storm drain grates along road gutters
+const STORM_DRAIN_GRATES: { x: number; z: number; ry: number }[] = [
+  { x: -2.3, z: 11.2, ry: 0 },
+  { x: 2.3, z: 11.2, ry: 0 },
+  { x: -2.3, z: 16.5, ry: 0 },
+  { x: 2.3, z: 16.5, ry: 0 },
+  { x: -14.0, z: -2.3, ry: Math.PI / 2 },
+  { x: -14.0, z: 2.3, ry: Math.PI / 2 },
+  { x: 14.0, z: -2.3, ry: Math.PI / 2 },
+  { x: 14.0, z: 2.3, ry: Math.PI / 2 },
+];
+
 export const Environment: React.FC<EnvironmentProps> = React.memo(
   ({ onGroundClick, clickMarker }) => {
     const width = WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX;
@@ -420,13 +442,18 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const markerGroupRef = useRef<THREE.Group>(null);
 
     const fountainPlacements = useMemo<ExteriorPlacement[]>(() => [{ position: [0, 0.02, 0] }], []);
-    const cityPlacements = useMemo(() => (['city-a', 'city-b'] as const).map((id, variant) => ({
-      id,
-      placements: STYLIZED_CITY_BUILDINGS.filter((_, i) => i % 2 === variant).map(b => ({
-        position: [b.x, -0.65, b.z] as [number, number, number],
-        scale: [b.sx, b.sy, b.sz] as [number, number, number],
-      })),
-    })), []);
+    const cityPlacements = useMemo(
+      () =>
+        (['city-1', 'city-2', 'city-3', 'city-4'] as const).map((id, variant) => ({
+          id,
+          placements: STYLIZED_CITY_BUILDINGS.filter((_, i) => i % 4 === variant).map(b => ({
+            position: [b.x, -0.65, b.z] as [number, number, number],
+            scale: [b.sx, b.sy, b.sz] as [number, number, number],
+            rotation: b.ry,
+          })),
+        })),
+      []
+    );
 
     const sidewalkPaverTexture = useMemo(() => createSidewalkPaverTexture(14, 14), []);
     const sidewalkHeight = useMemo(() => createSidewalkPaverDataTexture('height'), []);
@@ -438,6 +465,19 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const asphaltBumpTexture = useMemo(() => createAsphaltBumpTexture(4), []);
     const crosswalkTexture = useMemo(() => createCrosswalkTexture(), []);
     const skyDomeTexture = useMemo(() => createSkyDomeTexture(), []);
+    const curbStoneTexture = useMemo(() => createCurbStoneTexture(), []);
+    const manholeTexture = useMemo(() => createManholeCoverTexture(), []);
+    const stormDrainTexture = useMemo(() => createStormDrainGrateTexture(), []);
+
+    const curbStoneMat = useMemo(
+      () =>
+        new THREE.MeshStandardMaterial({
+          map: curbStoneTexture,
+          roughness: 0.58,
+          metalness: 0.06,
+        }),
+      [curbStoneTexture]
+    );
 
 
     const islandSignTextures = useMemo(
@@ -515,6 +555,10 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         asphaltBumpTexture.dispose();
         crosswalkTexture.dispose();
         skyDomeTexture.dispose();
+        curbStoneTexture.dispose();
+        manholeTexture.dispose();
+        stormDrainTexture.dispose();
+        curbStoneMat.dispose();
         islandSignTextures.forEach((tex) => tex.dispose());
         plazaBannerTexture.dispose();
         entranceBannerTexture.dispose();
@@ -531,6 +575,10 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       asphaltBumpTexture,
       crosswalkTexture,
       skyDomeTexture,
+      curbStoneTexture,
+      manholeTexture,
+      stormDrainTexture,
+      curbStoneMat,
       islandSignTextures,
       plazaBannerTexture,
       entranceBannerTexture,
@@ -636,10 +684,10 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
               />
             </mesh>
             {/* 3D Raised Granite Curbs (Bó vỉa hè) separating Asphalt Road from Tiled Sidewalks */}
-            <mesh position={[-road.w / 2 - 0.14, 0.028, 0]} receiveShadow material={CURB_STONE_MAT}>
+            <mesh position={[-road.w / 2 - 0.14, 0.028, 0]} receiveShadow material={curbStoneMat}>
               <boxGeometry args={[0.28, 0.056, road.length]} />
             </mesh>
-            <mesh position={[road.w / 2 + 0.14, 0.028, 0]} receiveShadow material={CURB_STONE_MAT}>
+            <mesh position={[road.w / 2 + 0.14, 0.028, 0]} receiveShadow material={curbStoneMat}>
               <boxGeometry args={[0.28, 0.056, road.length]} />
             </mesh>
           </group>
@@ -664,6 +712,41 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           </mesh>
         ))}
 
+        {/* Cast-Iron Manhole Covers on Asphalt Roadways */}
+        {MANHOLE_COVERS.map((mh, idx) => (
+          <mesh
+            key={`manhole-${idx}`}
+            position={[mh.x, 0.018, mh.z]}
+            rotation={[-Math.PI / 2, 0, (idx * 1.1) % Math.PI]}
+            receiveShadow
+          >
+            <circleGeometry args={[0.42, 24]} />
+            <meshStandardMaterial
+              map={manholeTexture}
+              roughness={0.72}
+              metalness={0.65}
+            />
+          </mesh>
+        ))}
+
+        {/* Street Storm Drain Grates along Road Gutters */}
+        {STORM_DRAIN_GRATES.map((sd, idx) => (
+          <mesh
+            key={`drain-${idx}`}
+            position={[sd.x, 0.018, sd.z]}
+            rotation={[-Math.PI / 2, 0, sd.ry]}
+            receiveShadow
+          >
+            <planeGeometry args={[0.48, 0.86]} />
+            <meshStandardMaterial
+              map={stormDrainTexture}
+              transparent
+              roughness={0.7}
+              metalness={0.6}
+            />
+          </mesh>
+        ))}
+
         {/* 6 Tiled Pedestrian Sidewalk Promenades from Central Plaza Ring to All 6 Booth Entrances */}
         {BOOTH_CONNECTOR_PATHS.map((conn, idx) => (
           <group
@@ -684,10 +767,10 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
               />
             </mesh>
             {/* Raised Granite Sidewalk Curbs along Booth Approach Walkways */}
-            <mesh position={[-conn.w / 2 - 0.11, 0.024, 0]} receiveShadow material={CURB_STONE_MAT}>
+            <mesh position={[-conn.w / 2 - 0.11, 0.024, 0]} receiveShadow material={curbStoneMat}>
               <boxGeometry args={[0.22, 0.048, conn.d]} />
             </mesh>
-            <mesh position={[conn.w / 2 + 0.11, 0.024, 0]} receiveShadow material={CURB_STONE_MAT}>
+            <mesh position={[conn.w / 2 + 0.11, 0.024, 0]} receiveShadow material={curbStoneMat}>
               <boxGeometry args={[0.22, 0.048, conn.d]} />
             </mesh>
             {/* Clean paved walkway without fluorescent edge lines */}
@@ -711,10 +794,10 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
            ================================================================ */}
         <group position={[0, 0, 0]}>
           {/* 3D Raised Circular Granite Curb Ring framing Central Pedestrian Plaza */}
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.032, 0]} receiveShadow material={CURB_STONE_MAT}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.032, 0]} receiveShadow material={curbStoneMat}>
             <ringGeometry args={[8.18, 8.52, 64]} />
           </mesh>
-          <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.034, 0]} receiveShadow material={CURB_STONE_MAT}>
+          <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.034, 0]} receiveShadow material={curbStoneMat}>
             <torusGeometry args={[8.35, 0.055, 12, 64]} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.024, 0]} receiveShadow>

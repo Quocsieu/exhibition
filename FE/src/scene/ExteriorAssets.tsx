@@ -16,6 +16,10 @@ const specs = {
   flowers: { file: 'NBUxHir6FJ', bounds: [.5, .12, .5] },
   'city-a': { file: 'ppwtREejXg', bounds: [1, 1, 1] },
   'city-b': { file: 'yKo7F36Qk2', bounds: [1, 1, 1] },
+  'city-1': { file: 'city_building_01', bounds: [1, 1, 1] },
+  'city-2': { file: 'city_building_02', bounds: [1, 1, 1] },
+  'city-3': { file: 'city_building_03', bounds: [1, 1, 1] },
+  'city-4': { file: 'city_building_04', bounds: [1, 1, 1] },
 } satisfies Record<string, { file: string; bounds: number[] }>;
 export type ExteriorAssetId = keyof typeof specs;
 export interface ExteriorPlacement { position: [number, number, number]; rotation?: number; scale?: number | [number, number, number] }
