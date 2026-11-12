@@ -1,0 +1,119 @@
+{
+  "timestamp": "2026-11-12T14:05:18.868Z",
+  "commitHash": "f226e9c",
+  "frontendUrl": "https://exhibitions-3d.vercel.app",
+  "backendUrl": "https://exhibition-xl20.onrender.com/api",
+  "totalTests": 16,
+  "passed": 16,
+  "failed": 0,
+  "testResults": [
+    {
+      "id": "PROD-HEALTH",
+      "name": "Backend Health Check",
+      "status": "PASS",
+      "latencyMs": 781,
+      "detail": {
+        "status": "ok",
+        "service": "virtual-expo-25d-be",
+        "timestamp": "2026-11-12T14:03:34.286Z"
+      }
+    },
+    {
+      "id": "PROD-REG-ADMIN-01",
+      "name": "Admin Authentication & Dashboard Access",
+      "status": "PASS",
+      "detail": "Admin logged in successfully and token stored in localStorage"
+    },
+    {
+      "id": "PROD-REG-VISITOR-01",
+      "name": "Visitor 3D Canvas & 6 Booths Chips Render",
+      "status": "PASS",
+      "detail": "Canvas rendered: true, Booth chips rendered: 6/6"
+    },
+    {
+      "id": "PROD-REG-VISITOR-02",
+      "name": "Socket.IO Multiplayer Status & Presence",
+      "status": "PASS",
+      "detail": "Online visitor status verified: \"2 khách đang trực tuyến\""
+    },
+    {
+      "id": "PROD-REG-VISITOR-03",
+      "name": "WASD Keyboard Navigation Interaction",
+      "status": "PASS",
+      "detail": "WASD keys dispatched without page error or unmount"
+    },
+    {
+      "id": "PROD-RT-01",
+      "name": "Cross-Device Booth Name Realtime Sync",
+      "status": "PASS",
+      "latencyMs": 2675,
+      "detail": "Visitors 1 & 2 received updated booth name in 2675ms without page reload"
+    },
+    {
+      "id": "PROD-RT-02",
+      "name": "Product Price Realtime Update",
+      "status": "PASS",
+      "latencyMs": 2421,
+      "detail": "Product price synchronized live across clients in 2421ms"
+    },
+    {
+      "id": "PROD-RT-03",
+      "name": "Product Detail Modal Realtime Update Without Closing",
+      "status": "PASS",
+      "latencyMs": 2421,
+      "detail": "Modal remained open and dynamically refreshed to 7.627.000 VND in 2421ms"
+    },
+    {
+      "id": "PROD-RT-04",
+      "name": "Assign Product to Slot Realtime Sync",
+      "status": "PASS",
+      "latencyMs": 2371,
+      "detail": "Assigned product prod-aether-hub-x1 to slot_06"
+    },
+    {
+      "id": "PROD-RT-05",
+      "name": "Clear Slot Realtime Sync",
+      "status": "PASS",
+      "latencyMs": 2411,
+      "detail": "Cleared slot_06 and verified live unassignment"
+    },
+    {
+      "id": "PROD-RT-06",
+      "name": "Data Isolation Across Booths & Slots",
+      "status": "PASS",
+      "detail": "Mutations to booth 1 strictly isolated; booth 2 retains pristine state"
+    },
+    {
+      "id": "PROD-RT-07",
+      "name": "Reconnection Resilience & Auto-Sync",
+      "status": "PASS",
+      "detail": "Client reconnect handlers properly re-fetch newest server state"
+    },
+    {
+      "id": "PROD-RT-08",
+      "name": "Multi-Device Independent Session Isolation",
+      "status": "PASS",
+      "detail": "Visitor 1 has no admin token; completely separate browser context and storage"
+    },
+    {
+      "id": "PROD-RT-09",
+      "name": "Burst Updates & In-Flight Debounce Queue",
+      "status": "PASS",
+      "latencyMs": 4843,
+      "detail": "Successfully processed burst mutations without dropping socket connection or lagging 3D scene"
+    },
+    {
+      "id": "PROD-RT-10",
+      "name": "Refresh Persistence & SQLite DB Integrity",
+      "status": "PASS",
+      "detail": "Mutated data is persistently stored in SQLite backend and served on page reload"
+    },
+    {
+      "id": "PROD-REG-RESPONSIVE",
+      "name": "Multi-Device Responsive Viewports (Desktop, Tablet, Mobile)",
+      "status": "PASS",
+      "detail": "All 4 viewports rendered without layout breakage or console crashes"
+    }
+  ],
+  "errors": []
+}
