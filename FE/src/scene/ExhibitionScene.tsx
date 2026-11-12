@@ -723,25 +723,25 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
           />
 
           {/* Stylized 3D City Daylight & Golden-Hour Architectural Lighting */}
-          <ambientLight intensity={0.82} />
-          <hemisphereLight args={['#f0f9ff', '#64748b', 0.78]} />
+          <ambientLight intensity={0.78} />
+          <hemisphereLight args={['#e0f2fe', '#475569', 0.82]} />
           <directionalLight
-            position={[24, 38, 20]}
-            intensity={1.52}
+            position={[26, 42, 22]}
+            intensity={1.68}
             color="#fffbeb"
             castShadow
             shadow-mapSize-width={1024}
             shadow-mapSize-height={1024}
-            shadow-camera-left={-32}
-            shadow-camera-right={32}
-            shadow-camera-top={32}
-            shadow-camera-bottom={-32}
+            shadow-camera-left={-34}
+            shadow-camera-right={34}
+            shadow-camera-top={34}
+            shadow-camera-bottom={-34}
             shadow-camera-near={1}
-            shadow-camera-far={120}
-            shadow-bias={-0.0004}
+            shadow-camera-far={125}
+            shadow-bias={-0.0003}
           />
-          <directionalLight position={[-20, 24, -18]} intensity={0.52} color="#93c5fd" />
-          <pointLight position={[0, 5.2, 0]} intensity={0.75} distance={20} color="#fde68a" />
+          <directionalLight position={[-22, 26, -18]} intensity={0.58} color="#7dd3fc" />
+          <pointLight position={[0, 5.2, 0]} intensity={0.82} distance={22} color="#fde68a" />
 
           <Environment
             onGroundClick={handleEnvironmentGroundClick}

@@ -602,19 +602,19 @@ export function createBannerSignTexture(options: {
 
 /**
  * Creates a seamless, tileable Stylized 3D City architectural stone paving texture
- * for the main exhibition courtyard (1 draw call for the entire ground plane).
+ * with natural travertine veining, warm sand-limestone tones, and crisp recessed mortar.
  */
 export function createPlazaTileTexture(): THREE.CanvasTexture {
   const canvas = createCanvasElement(512, 512);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
-    // Warm architectural travertine/limestone mortar base
-    ctx.fillStyle = '#cbd5e1';
+    // Warm natural mortar grout base
+    ctx.fillStyle = '#94a3b8';
     ctx.fillRect(0, 0, 512, 512);
 
     const tileSize = 128;
-    const tones = ['#ebe6dc', '#e4dfd4', '#ede9e0', '#dfd9cd', '#e8e2d6', '#e2dcd0'];
+    const tones = ['#f8f6f0', '#f1ede4', '#f5f0e8', '#ebe4d8', '#f3ede5', '#e8e1d2'];
 
     for (let row = 0; row < 4; row++) {
       for (let col = 0; col < 4; col++) {
@@ -622,62 +622,54 @@ export function createPlazaTileTexture(): THREE.CanvasTexture {
         const y = row * tileSize;
         const baseTone = tones[(row * 5 + col * 3) % tones.length];
 
-        // Subtle stone slab gradient for depth
-        const grad = ctx.createLinearGradient(x, y, x + tileSize, y + tileSize);
-        grad.addColorStop(0, '#f5f2eb');
-        grad.addColorStop(0.5, baseTone);
-        grad.addColorStop(1, '#d6cfc2');
+        // Smooth multi-stop travertine slab gradient
+        const grad = ctx.createLinearGradient(x + 3, y + 3, x + tileSize - 3, y + tileSize - 3);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.35, baseTone);
+        grad.addColorStop(1, '#ddd4c5');
         ctx.fillStyle = grad;
-        ctx.fillRect(x + 4, y + 4, tileSize - 8, tileSize - 8);
+        ctx.fillRect(x + 3, y + 3, tileSize - 6, tileSize - 6);
 
-        // Subtle inner ashlar border line
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
+        // Tactile natural stone flecks
+        for (let s = 0; s < 16; s++) {
+          const fx = x + 8 + ((s * 29 + row * 17) % (tileSize - 16));
+          const fy = y + 8 + ((s * 43 + col * 23) % (tileSize - 16));
+          ctx.fillStyle = s % 2 === 0 ? 'rgba(120, 105, 90, 0.22)' : 'rgba(255, 255, 255, 0.65)';
+          ctx.fillRect(fx, fy, 2, 2);
+        }
+
+        // Inner carved architectural border line
+        ctx.strokeStyle = 'rgba(180, 165, 150, 0.35)';
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(x + 12, y + 12, tileSize - 24, tileSize - 24);
+        ctx.strokeRect(x + 11, y + 11, tileSize - 22, tileSize - 22);
 
         // Sunlit top/left bevel highlight
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
-        ctx.fillRect(x + 4, y + 4, tileSize - 8, 3);
-        ctx.fillRect(x + 4, y + 4, 3, tileSize - 8);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.fillRect(x + 3, y + 3, tileSize - 6, 2.5);
+        ctx.fillRect(x + 3, y + 3, 2.5, tileSize - 6);
 
         // Bottom/right recess AO shadow
-        ctx.fillStyle = 'rgba(71, 85, 105, 0.36)';
-        ctx.fillRect(x + 4, y + tileSize - 7, tileSize - 8, 3);
-        ctx.fillRect(x + tileSize - 7, y + 4, 3, tileSize - 8);
+        ctx.fillStyle = 'rgba(51, 65, 85, 0.38)';
+        ctx.fillRect(x + 3, y + tileSize - 5.5, tileSize - 6, 2.5);
+        ctx.fillRect(x + tileSize - 5.5, y + 3, 2.5, tileSize - 6);
 
         // Architectural brass/stone corner inlay diamond
-        ctx.fillStyle = '#94a3b8';
+        ctx.fillStyle = '#64748b';
         ctx.beginPath();
-        ctx.moveTo(x, y - 5);
-        ctx.lineTo(x + 5, y);
-        ctx.lineTo(x, y + 5);
-        ctx.lineTo(x - 5, y);
+        ctx.moveTo(x, y - 4);
+        ctx.lineTo(x + 4, y);
+        ctx.lineTo(x, y + 4);
+        ctx.lineTo(x - 4, y);
         ctx.closePath();
         ctx.fill();
       }
-    }
-
-    // Deep recessed mortar grout lines
-    ctx.strokeStyle = '#94a3b8';
-    ctx.lineWidth = 4;
-    for (let i = 0; i <= 4; i++) {
-      const p = i * tileSize;
-      ctx.beginPath();
-      ctx.moveTo(p, 0);
-      ctx.lineTo(p, 512);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(0, p);
-      ctx.lineTo(512, p);
-      ctx.stroke();
     }
   }
 
   const texture = registerTrackedTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(18, 18);
+  texture.repeat.set(16, 16);
   texture.anisotropy = 8;
   return texture;
 }
@@ -692,7 +684,7 @@ export function createPlazaTileBumpTexture(): THREE.CanvasTexture {
 
   if (ctx) {
     // Deep recessed mortar (dark = low elevation)
-    ctx.fillStyle = '#262626';
+    ctx.fillStyle = '#1e293b';
     ctx.fillRect(0, 0, 512, 512);
 
     const tileSize = 128;
@@ -702,18 +694,18 @@ export function createPlazaTileBumpTexture(): THREE.CanvasTexture {
         const y = row * tileSize;
 
         // Outer chamfer slope
-        ctx.fillStyle = '#9a9a9a';
-        ctx.fillRect(x + 3, y + 3, tileSize - 6, tileSize - 6);
+        ctx.fillStyle = '#808080';
+        ctx.fillRect(x + 2, y + 2, tileSize - 4, tileSize - 4);
 
         // Raised stone slab plateau (bright = high elevation)
-        const shade = 225 + ((row * 7 + col * 5) % 24);
+        const shade = 230 + ((row * 7 + col * 5) % 20);
         ctx.fillStyle = `rgb(${shade}, ${shade}, ${shade})`;
-        ctx.fillRect(x + 7, y + 7, tileSize - 14, tileSize - 14);
+        ctx.fillRect(x + 6, y + 6, tileSize - 12, tileSize - 12);
 
         // Subtle carved inner border groove
-        ctx.strokeStyle = '#b0b0b0';
+        ctx.strokeStyle = '#a3a3a3';
         ctx.lineWidth = 2;
-        ctx.strokeRect(x + 14, y + 14, tileSize - 28, tileSize - 28);
+        ctx.strokeRect(x + 12, y + 12, tileSize - 24, tileSize - 24);
       }
     }
   }
@@ -722,7 +714,7 @@ export function createPlazaTileBumpTexture(): THREE.CanvasTexture {
   texture.colorSpace = THREE.NoColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(18, 18);
+  texture.repeat.set(16, 16);
   texture.anisotropy = 8;
   return texture;
 }
@@ -1473,15 +1465,15 @@ export function createCityBuildingFacadeTexture(): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
-    // Warm architectural facade base
+    // Elegant warm limestone & tinted glass architectural facade base
     const baseGrad = ctx.createLinearGradient(0, 0, 0, 512);
-    baseGrad.addColorStop(0, '#e2e8f0');
-    baseGrad.addColorStop(0.5, '#cbd5e1');
-    baseGrad.addColorStop(1, '#94a3b8');
+    baseGrad.addColorStop(0, '#f1f5f9');
+    baseGrad.addColorStop(0.4, '#e2e8f0');
+    baseGrad.addColorStop(1, '#cbd5e1');
     ctx.fillStyle = baseGrad;
     ctx.fillRect(0, 0, 512, 512);
 
-    // Horizontal floor spandrel bands
+    // Multi-tier architectural floors & structural mullions
     const floors = 8;
     const cols = 6;
     const floorH = 512 / floors;
@@ -1489,40 +1481,63 @@ export function createCityBuildingFacadeTexture(): THREE.CanvasTexture {
 
     for (let r = 0; r < floors; r++) {
       const fy = r * floorH;
-      // Floor cornice / spandrel beam
+
+      // Heavy architectural concrete spandrel cornice
       ctx.fillStyle = '#64748b';
-      ctx.fillRect(0, fy, 512, 8);
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillRect(0, fy + 8, 512, 3);
+      ctx.fillRect(0, fy, 512, 7);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, fy + 7, 512, 2.5);
 
       for (let c = 0; c < cols; c++) {
         const cx = c * colW;
-        // Vertical mullion pilaster
+
+        // Vertical fluted stone pilaster
         ctx.fillStyle = '#cbd5e1';
-        ctx.fillRect(cx, fy + 11, 8, floorH - 11);
+        ctx.fillRect(cx, fy + 9.5, 7, floorH - 9.5);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(cx + 1, fy + 9.5, 2, floorH - 9.5);
 
-        // Recessed window pane
-        const winX = cx + 10;
-        const winY = fy + 14;
-        const winW = colW - 16;
-        const winH = floorH - 20;
+        // Recessed curtain-wall window frame
+        const winX = cx + 9;
+        const winY = fy + 12;
+        const winW = colW - 14;
+        const winH = floorH - 18;
 
-        const isWarmLit = ((r * 7 + c * 5) % 5) === 0;
+        // Dark window frame casing
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(winX - 1, winY - 1, winW + 2, winH + 2);
+
+        // High-end architectural tinted glass with sky & daylight reflections
+        const isWarmLit = ((r * 7 + c * 5) % 6) === 0;
         const winGrad = ctx.createLinearGradient(winX, winY, winX + winW, winY + winH);
         if (isWarmLit) {
-          winGrad.addColorStop(0, '#bae6fd');
-          winGrad.addColorStop(1, '#fef08a');
+          winGrad.addColorStop(0, '#e0f2fe');
+          winGrad.addColorStop(0.6, '#fef08a');
+          winGrad.addColorStop(1, '#f59e0b');
         } else {
-          winGrad.addColorStop(0, '#38bdf8');
-          winGrad.addColorStop(0.5, '#0284c7');
-          winGrad.addColorStop(1, '#1e3a8a');
+          winGrad.addColorStop(0, '#7dd3fc');
+          winGrad.addColorStop(0.35, '#0284c7');
+          winGrad.addColorStop(0.75, '#0369a1');
+          winGrad.addColorStop(1, '#0f172a');
         }
         ctx.fillStyle = winGrad;
         ctx.fillRect(winX, winY, winW, winH);
 
-        // Diagonal sky reflection streak
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
-        ctx.fillRect(winX + 3, winY + 3, Math.max(4, winW * 0.28), winH - 6);
+        // Crisp diagonal glass reflection streak (stylized realistic glass glint)
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+        ctx.beginPath();
+        ctx.moveTo(winX + 2, winY + 2);
+        ctx.lineTo(winX + Math.max(5, winW * 0.35), winY + 2);
+        ctx.lineTo(winX + Math.max(2, winW * 0.18), winY + winH - 2);
+        ctx.lineTo(winX + 2, winY + winH - 2);
+        ctx.closePath();
+        ctx.fill();
+
+        // Architectural horizontal louver / sunshade bar
+        if (r > 1) {
+          ctx.fillStyle = 'rgba(241, 245, 249, 0.85)';
+          ctx.fillRect(winX, winY + winH * 0.42, winW, 2);
+        }
       }
     }
   }
@@ -1544,29 +1559,48 @@ export function createSkyDomeTexture(): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
+    // Rich daytime sky gradient from deep atmospheric azure zenith to warm golden-horizon
     const skyGrad = ctx.createLinearGradient(0, 0, 0, 512);
-    skyGrad.addColorStop(0, '#0284c7');
-    skyGrad.addColorStop(0.38, '#38bdf8');
-    skyGrad.addColorStop(0.72, '#bae6fd');
-    skyGrad.addColorStop(0.92, '#f0f9ff');
-    skyGrad.addColorStop(1, '#fef3c7');
+    skyGrad.addColorStop(0, '#0369a1');
+    skyGrad.addColorStop(0.25, '#0284c7');
+    skyGrad.addColorStop(0.55, '#38bdf8');
+    skyGrad.addColorStop(0.78, '#bae6fd');
+    skyGrad.addColorStop(0.92, '#f0fdf4');
+    skyGrad.addColorStop(1, '#fef9c3');
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, 1024, 512);
 
-    // Soft stylized cumulus cloud bands along the mid-horizon
+    // Subtle sun flare glow on upper-east quadrant
+    const sunGrad = ctx.createRadialGradient(280, 140, 10, 280, 140, 260);
+    sunGrad.addColorStop(0, 'rgba(255, 255, 240, 0.45)');
+    sunGrad.addColorStop(0.35, 'rgba(254, 240, 138, 0.22)');
+    sunGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = sunGrad;
+    ctx.fillRect(0, 0, 1024, 512);
+
+    // Multi-layered soft stylized cirrocumulus clouds
     const clouds = [
-      { x: 140, y: 270, rx: 110, ry: 34 },
-      { x: 220, y: 258, rx: 85, ry: 42 },
-      { x: 460, y: 242, rx: 130, ry: 38 },
-      { x: 540, y: 232, rx: 92, ry: 44 },
-      { x: 810, y: 264, rx: 120, ry: 36 },
-      { x: 890, y: 252, rx: 84, ry: 40 },
+      { x: 120, y: 260, rx: 140, ry: 36, alpha: 0.55 },
+      { x: 230, y: 245, rx: 110, ry: 44, alpha: 0.65 },
+      { x: 420, y: 230, rx: 160, ry: 40, alpha: 0.60 },
+      { x: 530, y: 218, rx: 120, ry: 48, alpha: 0.70 },
+      { x: 740, y: 250, rx: 150, ry: 38, alpha: 0.58 },
+      { x: 860, y: 238, rx: 110, ry: 42, alpha: 0.68 },
     ];
     ctx.save();
     for (const c of clouds) {
       ctx.beginPath();
       ctx.ellipse(c.x, c.y, c.rx, c.ry, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+      ctx.fillStyle = `rgba(255, 255, 255, ${c.alpha})`;
+      ctx.fill();
+
+      // Fluffy upper cloud lobes
+      ctx.beginPath();
+      ctx.ellipse(c.x - c.rx * 0.28, c.y - c.ry * 0.35, c.rx * 0.45, c.ry * 0.65, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.ellipse(c.x + c.rx * 0.25, c.y - c.ry * 0.4, c.rx * 0.5, c.ry * 0.7, 0, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();

@@ -96,9 +96,14 @@ function createOrganicFoliageClusterGeometry(
  * root-flared trunk and 4 branching boughs (`TubeGeometry` along 3D splines)
  * crowned by 7 overlapping high-subdivision vertex-AO foliage clusters.
  */
-export function buildOakTreeModel(variant: 'emerald' | 'blossom' = 'emerald'): THREE.Group {
+export function buildOakTreeModel(variant: 'emerald' | 'blossom' | 'autumn' = 'emerald'): THREE.Group {
   const group = new THREE.Group();
-  group.name = variant === 'blossom' ? 'EnvTreeBlossom' : 'EnvTreeOak';
+  group.name =
+    variant === 'blossom'
+      ? 'EnvTreeBlossom'
+      : variant === 'autumn'
+        ? 'EnvTreeAutumn'
+        : 'EnvTreeOak';
 
   const barkMat = new THREE.MeshStandardMaterial({
     color: '#6b4423',
@@ -107,16 +112,21 @@ export function buildOakTreeModel(variant: 'emerald' | 'blossom' = 'emerald'): T
     vertexColors: true,
   });
 
+  const foliagePrimaryColor =
+    variant === 'blossom' ? '#f472b6' : variant === 'autumn' ? '#f59e0b' : '#15803d';
+  const foliageSecondaryColor =
+    variant === 'blossom' ? '#fbcfe8' : variant === 'autumn' ? '#fbbf24' : '#22c55e';
+
   const foliagePrimaryMat = new THREE.MeshStandardMaterial({
-    color: variant === 'blossom' ? '#f472b6' : '#16a34a',
-    roughness: 0.72,
+    color: foliagePrimaryColor,
+    roughness: 0.68,
     metalness: 0.02,
     vertexColors: true,
   });
 
   const foliageSecondaryMat = new THREE.MeshStandardMaterial({
-    color: variant === 'blossom' ? '#fbcfe8' : '#22c55e',
-    roughness: 0.68,
+    color: foliageSecondaryColor,
+    roughness: 0.62,
     metalness: 0.02,
     vertexColors: true,
   });

@@ -81,16 +81,16 @@ export const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
 // and side gaps between booths — ZERO trees placed in front of the 6 booths so all facades,
 // entrance doors, signboards, and radial walkways remain 100% unobstructed.
 export const PERIMETER_TREES: [number, number, number][] = [
-  [-20.5, -18.5, 1.15],
-  [20.5, -18.5, 1.1],
-  [-20.5, 18.5, 1.08],
-  [20.5, 18.5, 1.12],
-  [-21.2, 0.0, 1.18],
-  [21.2, 0.0, 1.18],
-  [-7.5, -20.2, 1.02],
-  [7.5, -20.2, 1.02],
-  [-9.2, 20.2, 1.05],
-  [9.2, 20.2, 1.05],
+  [-20.5, -18.5, 1.18],
+  [20.5, -18.5, 1.15],
+  [-20.5, 18.5, 1.12],
+  [20.5, 18.5, 1.16],
+  [-21.4, 0.0, 1.22],
+  [21.4, 0.0, 1.22],
+  [-7.5, -20.2, 1.05],
+  [7.5, -20.2, 1.05],
+  [-9.2, 20.2, 1.08],
+  [9.2, 20.2, 1.08],
 ];
 
 export const ALL_TREES: {
@@ -114,10 +114,12 @@ export const ALL_TREES: {
     ) as GlbAssetId,
   })),
   // Outer parkland trees framing the avenue outside the courtyard (zero collision)
-  { x: -26.5, z: -12, scale: 1.35, ry: 0.4, assetId: 'env-tree-pine' },
-  { x: 26.5, z: -12, scale: 1.35, ry: 1.8, assetId: 'env-tree-pine' },
-  { x: -26.5, z: 8, scale: 1.28, ry: 2.1, assetId: 'env-tree-oak' },
-  { x: 26.5, z: 8, scale: 1.28, ry: 0.9, assetId: 'env-tree-oak' },
+  { x: -26.5, z: -12, scale: 1.38, ry: 0.4, assetId: 'env-tree-pine' },
+  { x: 26.5, z: -12, scale: 1.38, ry: 1.8, assetId: 'env-tree-pine' },
+  { x: -26.5, z: 8, scale: 1.32, ry: 2.1, assetId: 'env-tree-oak' },
+  { x: 26.5, z: 8, scale: 1.32, ry: 0.9, assetId: 'env-tree-oak' },
+  { x: -27.2, z: -2.5, scale: 1.25, ry: 1.3, assetId: 'env-tree-blossom' },
+  { x: 27.2, z: 2.5, scale: 1.25, ry: 2.7, assetId: 'env-tree-blossom' },
 ];
 
 export const PLANTER_URN_POSITIONS: [number, number][] = [
@@ -168,26 +170,29 @@ const BOOTH_CONNECTOR_PATHS: {
   { x: 0, z: 8.8, w: 3.3, d: 6.4, ry: Math.PI, accent: '#14b8a6' },
 ];
 
-// Stylized 3D City Background Skyline Silhouettes (Placed outside N/W/E perimeter, zero collision)
+// Stylized 3D City Background Skyline Silhouettes with Stepped Setback Facades
 const STYLIZED_CITY_BUILDINGS: {
   x: number;
   z: number;
   sx: number;
   sy: number;
   sz: number;
+  setbackY?: number;
+  setbackSx?: number;
+  setbackSz?: number;
 }[] = [
-  { x: -32, z: -31, sx: 6.5, sy: 9.5, sz: 5.5 },
-  { x: -23, z: -33, sx: 5.8, sy: 12.2, sz: 5.2 },
-  { x: -13, z: -34, sx: 6.8, sy: 8.6, sz: 5.4 },
-  { x: 0, z: -35, sx: 7.4, sy: 13.8, sz: 5.8 },
-  { x: 13, z: -34, sx: 6.4, sy: 9.8, sz: 5.4 },
-  { x: 23, z: -33, sx: 5.8, sy: 11.4, sz: 5.2 },
-  { x: 32, z: -31, sx: 6.5, sy: 8.8, sz: 5.5 },
-  { x: -34, z: -18, sx: 5.5, sy: 10.5, sz: 6.2 },
-  { x: -35, z: -6, sx: 5.6, sy: 8.2, sz: 6.0 },
-  { x: -34, z: 7, sx: 5.4, sy: 9.4, sz: 5.8 },
-  { x: 34, z: -18, sx: 5.5, sy: 9.2, sz: 6.2 },
-  { x: 35, z: -6, sx: 5.6, sy: 7.8, sz: 6.0 },
+  { x: -32, z: -31, sx: 7.2, sy: 11.2, sz: 6.2, setbackY: 8.2, setbackSx: 5.4, setbackSz: 4.8 },
+  { x: -23, z: -33, sx: 6.4, sy: 14.5, sz: 5.8, setbackY: 10.5, setbackSx: 4.8, setbackSz: 4.2 },
+  { x: -13, z: -34, sx: 7.5, sy: 10.2, sz: 6.0, setbackY: 7.5, setbackSx: 5.6, setbackSz: 4.6 },
+  { x: 0, z: -35, sx: 8.2, sy: 16.2, sz: 6.5, setbackY: 12.0, setbackSx: 6.2, setbackSz: 4.8 },
+  { x: 13, z: -34, sx: 7.2, sy: 11.5, sz: 6.0, setbackY: 8.5, setbackSx: 5.2, setbackSz: 4.5 },
+  { x: 23, z: -33, sx: 6.4, sy: 13.8, sz: 5.8, setbackY: 9.8, setbackSx: 4.6, setbackSz: 4.2 },
+  { x: 32, z: -31, sx: 7.2, sy: 10.5, sz: 6.2, setbackY: 7.8, setbackSx: 5.4, setbackSz: 4.8 },
+  { x: -34, z: -18, sx: 6.2, sy: 12.5, sz: 6.8, setbackY: 9.2, setbackSx: 4.8, setbackSz: 5.2 },
+  { x: -35, z: -6, sx: 6.4, sy: 9.8, sz: 6.5, setbackY: 7.2, setbackSx: 4.8, setbackSz: 4.8 },
+  { x: -34, z: 7, sx: 6.2, sy: 11.2, sz: 6.5, setbackY: 8.4, setbackSx: 4.6, setbackSz: 5.0 },
+  { x: 34, z: -18, sx: 6.2, sy: 11.5, sz: 6.8, setbackY: 8.5, setbackSx: 4.8, setbackSz: 5.2 },
+  { x: 35, z: -6, sx: 6.4, sy: 9.4, sz: 6.5, setbackY: 7.0, setbackSx: 4.8, setbackSz: 4.8 },
 ];
 
 // Distant Low-Poly Parkland Hills around the outer horizon
@@ -590,22 +595,29 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           ))}
         </Instances>
 
-        {/* Instanced Stylized 3D City Background Buildings with Architectural Facade Texture */}
+        {/* Instanced Stylized 3D City Background Buildings with Architectural Facade Texture & Stepped Setbacks */}
         <Instances geometry={CITY_TOWER_GEOM} material={cityTowerTexturedMat}>
           {STYLIZED_CITY_BUILDINGS.map((b, i) => (
-            <Instance
-              key={`ctower-${i}`}
-              position={[b.x, b.sy / 2 - 0.65, b.z]}
-              scale={[b.sx, b.sy, b.sz]}
-            />
+            <React.Fragment key={`ctower-grp-${i}`}>
+              <Instance
+                position={[b.x, b.sy / 2 - 0.65, b.z]}
+                scale={[b.sx, b.sy, b.sz]}
+              />
+              {b.setbackY && b.setbackSx && b.setbackSz && (
+                <Instance
+                  position={[b.x, b.setbackY - 0.65 + (b.sy - b.setbackY) * 0.5, b.z]}
+                  scale={[b.setbackSx, b.sy - b.setbackY + 1.8, b.setbackSz]}
+                />
+              )}
+            </React.Fragment>
           ))}
         </Instances>
         <Instances geometry={CITY_CROWN_GEOM} material={CITY_CROWN_MAT}>
           {STYLIZED_CITY_BUILDINGS.map((b, i) => (
             <Instance
               key={`ccrown-${i}`}
-              position={[b.x, b.sy - 0.55, b.z]}
-              scale={[b.sx, 1, b.sz]}
+              position={[b.x, b.sy + (b.setbackY ? 1.25 : 0) - 0.55, b.z]}
+              scale={[b.setbackSx || b.sx, 1.2, b.setbackSz || b.sz]}
             />
           ))}
         </Instances>
@@ -642,11 +654,11 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           <meshStandardMaterial
             map={sidewalkPaverTexture}
             bumpMap={plazaTileBumpTexture}
-            bumpScale={0.028}
+            bumpScale={0.032}
             roughnessMap={plazaTileBumpTexture}
-            color="#f8fafc"
-            roughness={0.66}
-            metalness={0.05}
+            color="#ffffff"
+            roughness={0.62}
+            metalness={0.04}
           />
         </mesh>
 
@@ -713,11 +725,11 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
               <meshStandardMaterial
                 map={plazaTileTexture}
                 bumpMap={plazaTileBumpTexture}
-                bumpScale={0.024}
+                bumpScale={0.03}
                 roughnessMap={plazaTileBumpTexture}
-                color="#f8fafc"
-                roughness={0.58}
-                metalness={0.05}
+                color="#ffffff"
+                roughness={0.52}
+                metalness={0.04}
               />
             </mesh>
             {/* Raised Granite Sidewalk Curbs along Booth Approach Walkways */}
@@ -766,18 +778,18 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
             <meshStandardMaterial
               map={plazaMedallionTexture}
               bumpMap={plazaTileBumpTexture}
-              bumpScale={0.02}
-              roughness={0.48}
-              metalness={0.06}
+              bumpScale={0.025}
+              roughness={0.42}
+              metalness={0.08}
             />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.027, 0]}>
             <ringGeometry args={[7.15, 7.48, 64]} />
-            <meshBasicMaterial color="#0ea5e9" transparent opacity={0.82} />
+            <meshBasicMaterial color="#0ea5e9" transparent opacity={0.88} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.029, 0]}>
             <ringGeometry args={[5.35, 5.55, 64]} />
-            <meshBasicMaterial color="#f59e0b" transparent opacity={0.88} />
+            <meshBasicMaterial color="#f59e0b" transparent opacity={0.92} />
           </mesh>
 
           <mesh position={[0, 0.18, 0]} castShadow receiveShadow>
