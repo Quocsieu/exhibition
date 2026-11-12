@@ -1,0 +1,184 @@
+{
+  "timestamp": "2026-11-12T12:55:56.848Z",
+  "tests": [
+    {
+      "id": "TC-VIS-01",
+      "group": "Visitor Access",
+      "title": "Truy cập trang chủ & Render 3D Canvas",
+      "expected": "Trang load thành công, có 3D Canvas, không màn hình trắng",
+      "status": "FAIL",
+      "notes": "Canvas present: true, initial errors: 1",
+      "screenshot": "visitor_01_initial_load.png"
+    },
+    {
+      "id": "TC-VIS-02",
+      "group": "3D City Environment",
+      "title": "Môi trường 3D thành phố & Thanh trạng thái HUD",
+      "expected": "Hiển thị title Virtual Expo Plaza và badge online",
+      "status": "PASS",
+      "notes": "Title: \"Virtual Expo Plaza\", Online badge: \"2 khách đang trực tuyến\"",
+      "screenshot": "visitor_02_city_environment.png"
+    },
+    {
+      "id": "TC-VIS-03",
+      "group": "6 Booths",
+      "title": "Hiển thị đủ 6 gian hàng và thanh truy cập nhanh",
+      "expected": "Có đầy đủ 6 nút truy cập gian hàng trên thanh HUD bên dưới",
+      "status": "FAIL",
+      "notes": "Found 5 quick access booth pills",
+      "screenshot": "visitor_03_six_booths.png"
+    },
+    {
+      "id": "TC-VIS-04",
+      "group": "Camera Controls",
+      "title": "Chuyển đổi góc nhìn Toàn cảnh (Overview) & Tham quan (Explore)",
+      "expected": "Chuyển đổi mượt mà giữa Overview và Explore, camera cập nhật tọa độ",
+      "status": "PASS",
+      "notes": "Overview and Explore buttons clickable",
+      "screenshot": "visitor_04_camera_overview.png"
+    },
+    {
+      "id": "TC-VIS-05",
+      "group": "Movement & Pathfinding",
+      "title": "Điều khiển nhân vật qua WASD và Click-to-move",
+      "expected": "Nhân vật di chuyển theo phím bấm và điểm click trên mặt sàn",
+      "status": "PASS",
+      "notes": "Character walked towards target and marker rendered",
+      "screenshot": "visitor_05_movement.png"
+    },
+    {
+      "id": "TC-VIS-06",
+      "group": "Booth Interaction",
+      "title": "Mở Drawer thông tin chi tiết gian hàng & 6 vị trí trưng bày",
+      "expected": "Mở thành công Booth Drawer của Aether Tech Lab với danh sách sản phẩm",
+      "status": "FAIL",
+      "notes": "Drawer opened: false",
+      "screenshot": "visitor_06_booth_drawer.png"
+    },
+    {
+      "id": "TC-VIS-07",
+      "group": "Product Interaction",
+      "title": "Mở Modal chi tiết sản phẩm, giá bán, ảnh và thông tin liên hệ",
+      "expected": "Modal hiển thị đầy đủ thông số kỹ thuật, giá và nút mua/liên hệ",
+      "status": "FAIL",
+      "notes": "Modal opened: false",
+      "screenshot": "visitor_07_product_modal.png"
+    },
+    {
+      "id": "TC-VIS-08",
+      "group": "Realtime Multiplayer",
+      "title": "Đồng bộ 2 người tham quan đồng thời & hiển thị số người online",
+      "expected": "Số khách online hiển thị đúng (2 khách), nhân vật avatar được đồng bộ",
+      "status": "PASS",
+      "notes": "Session 1: \"3 khách đang trực tuyến\" | Session 2: \"3 khách đang trực tuyến\"",
+      "screenshot": "visitor_08_multiplayer_session1.png"
+    },
+    {
+      "id": "TC-VIS-09",
+      "group": "Responsive Design",
+      "title": "Kiểm tra giao diện trên 5 kích thước (Desktop, Tablet, Mobile)",
+      "expected": "Không có layout horizontal overflow, joystick xuất hiện trên mobile, các nút HUD không bị che khuất",
+      "status": "PASS",
+      "notes": "Captured screenshots across 1920x1080, 1366x768, 768x1024, 390x844, 375x667",
+      "screenshot": "visitor_09_responsive_mobile_390x844.png"
+    },
+    {
+      "id": "TC-ADM-01",
+      "group": "Admin Authentication",
+      "title": "Cổng bảo vệ xác thực quản trị (Auth Gate)",
+      "expected": "Hiển thị form đăng nhập với username và password, yêu cầu token hợp lệ",
+      "status": "PASS",
+      "notes": "Login form present: true",
+      "screenshot": "admin_01_auth_gate.png"
+    },
+    {
+      "id": "TC-ADM-02",
+      "group": "Admin Authentication",
+      "title": "Từ chối mật khẩu không chính xác",
+      "expected": "Báo lỗi thông tin đăng nhập sai, không cho phép truy cập",
+      "status": "PASS",
+      "notes": "Error message: \"Sai tên đăng nhập hoặc mật khẩu quản trị.\"",
+      "screenshot": "admin_02_auth_invalid.png"
+    },
+    {
+      "id": "TC-ADM-03",
+      "group": "Admin Dashboard",
+      "title": "Đăng nhập thành công & Hiển thị Dashboard quản trị",
+      "expected": "Vào Dashboard, có đầy đủ 3 module: Phân bổ Slot, Gian hàng, Kho sản phẩm",
+      "status": "FAIL",
+      "notes": "Slots: 0, Booths: 2, Products: 7",
+      "screenshot": "admin_03_dashboard_logged_in.png"
+    },
+    {
+      "id": "TC-ADM-04",
+      "group": "Product Catalog",
+      "title": "Xem danh sách sản phẩm, giá bán và bộ lọc",
+      "expected": "Hiển thị danh sách sản phẩm trong kho với ảnh, giá, mô tả",
+      "status": "PASS",
+      "notes": "Found 13 product elements in catalog",
+      "screenshot": "admin_04_product_catalog.png"
+    },
+    {
+      "id": "TC-ADM-05",
+      "group": "Booth Manager",
+      "title": "Xem và quản lý 6 gian hàng doanh nghiệp",
+      "expected": "Hiển thị 6 gian hàng với tên doanh nghiệp, logo, tagline và vị trí",
+      "status": "PASS",
+      "notes": "Found 7 booth management cards",
+      "screenshot": "admin_05_booths_manager.png"
+    },
+    {
+      "id": "TC-E2E-01",
+      "group": "Admin to Visitor Sync",
+      "title": "Đổi tên gian hàng từ Admin -> Đồng bộ sang Visitor",
+      "expected": "Visitor cập nhật tên gian hàng mới trên HUD và không gian 3D",
+      "status": "PASS",
+      "notes": "API status: 200, Visitor detected new name: true",
+      "screenshot": "e2e_01_visitor_updated_name.png"
+    },
+    {
+      "id": "TC-E2E-02",
+      "group": "Admin to Visitor Sync",
+      "title": "Truy vấn Slot Assignments & Tính cách ly giữa các Booth",
+      "expected": "Mỗi gian hàng có đủ 6 slot độc lập, thay đổi một slot không làm ảnh hưởng gian hàng khác",
+      "status": "PASS",
+      "notes": "Booth booth-aether-tech returned 6 assigned slots",
+      "screenshot": "admin_06_slot_manager.png"
+    },
+    {
+      "id": "TC-SEC-01",
+      "group": "Security Audit",
+      "title": "Bảo vệ endpoint PUT /booths/:id khỏi truy cập không có token",
+      "expected": "HTTP 401 Unauthorized khi thiếu Bearer token",
+      "status": "PASS",
+      "notes": "Received HTTP 401"
+    },
+    {
+      "id": "TC-SEC-02",
+      "group": "Security Audit",
+      "title": "Khả năng kháng SQL Injection trên Route params",
+      "expected": "Không bị lỗi 500 hoặc lộ dữ liệu, trả về 404 Not Found an toàn",
+      "status": "PASS",
+      "notes": "SQL injection attempt returned HTTP 404"
+    },
+    {
+      "id": "TC-PROD-01",
+      "group": "Production Check",
+      "title": "Kết nối môi trường Production (Render/Vercel)",
+      "expected": "Kiểm tra trạng thái URL cấu hình tại .env.production",
+      "status": "NOT TESTED",
+      "notes": "URL https://exhibition-xl20.onrender.com không phản hồi (timeout - instance free-tier đang sleep hoặc chưa active). Hệ thống đang được kiểm thử an toàn trên Local dev environment."
+    }
+  ],
+  "metrics": {
+    "vendor": "WebKit",
+    "renderer": "WebKit WebGL",
+    "maxTextureSize": 16384
+  },
+  "consoleErrors": [
+    "[Page 1 Error] Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "[Page 1 Error] Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "[Page 1 Error] Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "networkFailures": []
+}
