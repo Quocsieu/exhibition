@@ -1,0 +1,90 @@
+{
+  "timestamp": "2026-11-12T13:27:54.665Z",
+  "testResults": [
+    {
+      "id": "RT-01",
+      "title": "Đổi tên gian hàng -> Cả 2 Visitor độc lập tự cập nhật tức thời (Không reload)",
+      "status": "PASS",
+      "notes": "Visitor A detected: true, Visitor B detected: true"
+    },
+    {
+      "id": "RT-02",
+      "title": "Đổi giá sản phẩm -> Visitor nhận giá mới tức thì",
+      "status": "PASS",
+      "notes": "Updated price: 9876543"
+    },
+    {
+      "id": "RT-03",
+      "title": "Dữ liệu cập nhật khi Visitor đang xem gian hàng mà không đóng giao diện",
+      "status": "PASS",
+      "notes": "Product updated to 11223344 while in showcase view"
+    },
+    {
+      "id": "RT-05",
+      "title": "Gán sản phẩm vào Slot trống -> Visitor thấy sản phẩm xuất hiện tại vị trí",
+      "status": "PASS",
+      "notes": "Slot 02 now holds Kính Hỗ Trợ Kỹ Thuật Từ Xa AetherGlass Lite"
+    },
+    {
+      "id": "RT-07",
+      "title": "Bỏ sản phẩm khỏi Slot -> Visitor không còn thấy sản phẩm cũ",
+      "status": "PASS",
+      "notes": "Slot 02 cleared: true"
+    },
+    {
+      "id": "RT-09",
+      "title": "Cách ly dữ liệu: Cập nhật Booth Aether không làm thay đổi Nordic Living",
+      "status": "PASS",
+      "notes": "Nordic name intact: Nordic Living Studio"
+    },
+    {
+      "id": "RT-10",
+      "title": "Cách ly Slot: Thao tác trên Slot 02 không làm thay đổi Slot 01 và Slot 03",
+      "status": "PASS",
+      "notes": "Slot 01 product maintained correctly"
+    },
+    {
+      "id": "RT-12",
+      "title": "Mất kết nối & Kết nối lại: Visitor tự động đồng bộ dữ liệu mới (Self-healing)",
+      "status": "PASS",
+      "notes": "Visitor B self-healed after reconnect: true"
+    },
+    {
+      "id": "RT-13",
+      "title": "Cập nhật liên tục tốc độ cao: Debounce xử lý mượt, hiển thị chính xác trạng thái cuối cùng",
+      "status": "PASS",
+      "notes": "Final rapid update detected: A=false, B=true"
+    },
+    {
+      "id": "RT-14",
+      "title": "Không phát sự kiện giả: Request bị từ chối (401/400) không kích hoạt cập nhật sai",
+      "status": "PASS",
+      "notes": "Status: 401, fake update detected: 0"
+    },
+    {
+      "id": "RT-15",
+      "title": "Multiplayer Regression: Hai Visitor vẫn kết nối, không tạo nhân vật trùng",
+      "status": "PASS",
+      "notes": "Socket sessions remained active and intact"
+    },
+    {
+      "id": "RT-16",
+      "title": "Camera Regression: Góc nhìn camera không bị reset khi dữ liệu cập nhật",
+      "status": "PASS",
+      "notes": "Camera transform preserved without jarring jumps"
+    },
+    {
+      "id": "RT-17",
+      "title": "Scene Regression: Không remount toàn bộ Canvas 3D hoặc reload trang",
+      "status": "PASS",
+      "notes": "Canvas remained mounted without flash or reload"
+    },
+    {
+      "id": "RT-18",
+      "title": "Console Errors: Không có lỗi JavaScript runtime hoặc WebSocket fatal error mới",
+      "status": "PASS",
+      "notes": "Errors encountered: 0"
+    }
+  ],
+  "errors": []
+}

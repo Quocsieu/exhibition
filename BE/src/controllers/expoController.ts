@@ -23,8 +23,17 @@ const BatchImportBodySchema = z.object({
   content: z.string().min(2).max(500_000),
 });
 
+export type DataMutationCallback = (payload: {
+  entityType: 'booth' | 'product' | 'slot' | 'all';
+  entityId?: string;
+  boothId?: string;
+}) => void;
+
 export class ExpoController {
-  constructor(private readonly service: ExpoService) {}
+  constructor(
+    private readonly service: ExpoService,
+    private readonly onMutation?: DataMutationCallback
+  ) {}
 
   // Admin Auth
   loginAdmin = (req: Request, res: Response): void => {
@@ -80,6 +89,7 @@ export class ExpoController {
     }
     try {
       const booth = this.service.createBooth(parsed.data);
+      this.onMutation?.({ entityType: 'booth', entityId: booth.id, boothId: booth.id });
       res.status(201).json({ booth });
     } catch (err) {
       res.status(400).json({
@@ -102,6 +112,7 @@ export class ExpoController {
       res.status(404).json({ error: 'Không tìm thấy gian hàng để cập nhật.' });
       return;
     }
+    this.onMutation?.({ entityType: 'booth', entityId: updated.id, boothId: updated.id });
     res.json({ booth: updated });
   };
 
@@ -111,6 +122,7 @@ export class ExpoController {
       res.status(404).json({ error: 'Không tìm thấy gian hàng để xóa.' });
       return;
     }
+    this.onMutation?.({ entityType: 'booth', entityId: String(req.params.id) });
     res.json({ success: true });
   };
 
@@ -140,6 +152,7 @@ export class ExpoController {
     }
     try {
       const product = this.service.createProduct(parsed.data);
+      this.onMutation?.({ entityType: 'product', entityId: product.id, boothId: product.boothId });
       res.status(201).json({ product });
     } catch (err) {
       res.status(400).json({
@@ -163,6 +176,7 @@ export class ExpoController {
         res.status(404).json({ error: 'Không tìm thấy sản phẩm để cập nhật.' });
         return;
       }
+      this.onMutation?.({ entityType: 'product', entityId: updated.id, boothId: updated.boothId });
       res.json({ product: updated });
     } catch (err) {
       res.status(400).json({
@@ -177,6 +191,7 @@ export class ExpoController {
       res.status(404).json({ error: 'Không tìm thấy sản phẩm để xóa.' });
       return;
     }
+    this.onMutation?.({ entityType: 'product', entityId: String(req.params.id) });
     res.json({ success: true });
   };
 
@@ -218,6 +233,7 @@ export class ExpoController {
 
     try {
       const created = this.service.importBatchProducts(boothId, format, content);
+      this.onMutation?.({ entityType: 'product', boothId });
       res.status(201).json({
         importedCount: created.length,
         products: created,
@@ -272,6 +288,7 @@ export class ExpoController {
           ? this.service.clearBoothSlot(boothId, slotId)
           : this.service.assignProductToSlot(boothId, slotId, rawProductId.trim());
       const slots = this.service.getBoothSlots(boothId);
+      this.onMutation?.({ entityType: 'slot', entityId: slotId, boothId });
       res.json({
         slot: updatedSlot,
         slots,
@@ -290,6 +307,7 @@ export class ExpoController {
     try {
       const clearedSlot = this.service.clearBoothSlot(boothId, slotId);
       const slots = this.service.getBoothSlots(boothId);
+      this.onMutation?.({ entityType: 'slot', entityId: slotId, boothId });
       res.json({
         slot: clearedSlot,
         slots,

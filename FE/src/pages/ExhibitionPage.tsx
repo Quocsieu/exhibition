@@ -131,7 +131,9 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   const boothSelectId = useId();
 
   const lastSilentRefreshAtRef = useRef<number>(0);
-  const isSilentRefreshingRef = useRef<boolean>(false);
+  const isSilentRefreshingFlagRef = useRef<boolean>(false);
+  const pendingSocketRefreshRef = useRef<boolean>(false);
+  const socketDebounceTimerRef = useRef<number | null>(null);
 
   const loadExpoData = useCallback(async () => {
     setLoadingData(true);
@@ -159,19 +161,15 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     }
   }, []);
 
-  /**
-   * Silent background refresh for Scenarios B, C, and D:
-   * Fetches latest booths, products, and slot assignments from SQLite without
-   * triggering the full-screen loading overlay, and synchronizes active booth/product state.
-   * Throttled by default (4s cooldown) to prevent duplicate network calls when switching booths/tabs,
-   * while `force = true` refreshes immediately when an explicit Admin mutation event arrives.
-   */
   const refreshExpoDataSilently = useCallback(async (force = false) => {
     const now = Date.now();
-    if (isSilentRefreshingRef.current) return;
+    if (isSilentRefreshingFlagRef.current) {
+      if (force) pendingSocketRefreshRef.current = true;
+      return;
+    }
     if (!force && now - lastSilentRefreshAtRef.current < 4000) return;
 
-    isSilentRefreshingRef.current = true;
+    isSilentRefreshingFlagRef.current = true;
     lastSilentRefreshAtRef.current = now;
     try {
       const [fetchedBooths, fetchedProducts, fetchedSlots] = await Promise.all([
@@ -186,8 +184,30 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     } catch {
       // Keep current in-memory state if background refresh encounters transient network error
     } finally {
-      isSilentRefreshingRef.current = false;
+      isSilentRefreshingFlagRef.current = false;
+      if (pendingSocketRefreshRef.current) {
+        pendingSocketRefreshRef.current = false;
+        void refreshExpoDataSilently(true);
+      }
     }
+  }, []);
+
+  const handleRealtimeDataUpdated = useCallback(() => {
+    if (socketDebounceTimerRef.current) {
+      window.clearTimeout(socketDebounceTimerRef.current);
+    }
+    socketDebounceTimerRef.current = window.setTimeout(() => {
+      socketDebounceTimerRef.current = null;
+      void refreshExpoDataSilently(true);
+    }, 120);
+  }, [refreshExpoDataSilently]);
+
+  useEffect(() => {
+    return () => {
+      if (socketDebounceTimerRef.current) {
+        window.clearTimeout(socketDebounceTimerRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -375,6 +395,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     onMoveRejected: (x, z) => {
       forcePosition(x, z);
     },
+    onDataUpdated: handleRealtimeDataUpdated,
   });
 
   emitMovementRef.current = emitMovement;

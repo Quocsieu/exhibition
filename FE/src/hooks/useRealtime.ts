@@ -5,6 +5,7 @@ import {
   type ClientToServerEvents,
   type VisitorState,
   type VisitorMovePayload,
+  type ExpoDataUpdatedPayload,
   MOVE_EVENT_MIN_INTERVAL_MS,
 } from '../types/expo';
 import { SOCKET_BASE_URL } from '../config/apiConfig';
@@ -15,6 +16,7 @@ export interface UseRealtimeOptions {
   getLiveTransform?: () => { x: number; z: number; rotationY: number } | null;
   onWorldInitSelf?: (self: VisitorState) => void;
   onMoveRejected?: (x: number, z: number, reason: string) => void;
+  onDataUpdated?: (payload: ExpoDataUpdatedPayload) => void;
 }
 
 export function useRealtime({
@@ -23,6 +25,7 @@ export function useRealtime({
   getLiveTransform,
   onWorldInitSelf,
   onMoveRejected,
+  onDataUpdated,
 }: UseRealtimeOptions) {
   const [isConnected, setIsConnected] = useState(false);
   const [onlineCount, setOnlineCount] = useState(1);
@@ -45,6 +48,9 @@ export function useRealtime({
 
   const onMoveRejectedRef = useRef(onMoveRejected);
   onMoveRejectedRef.current = onMoveRejected;
+
+  const onDataUpdatedRef = useRef(onDataUpdated);
+  onDataUpdatedRef.current = onDataUpdated;
 
   useEffect(() => {
     const socketUrl = SOCKET_BASE_URL;
@@ -75,10 +81,16 @@ export function useRealtime({
 
     socket.on('connect', () => {
       setIsConnected(true);
+      // Reconnection self-healing: fetch latest data if reconnecting
+      onDataUpdatedRef.current?.({ entityType: 'all', timestamp: Date.now() });
     });
 
     socket.on('disconnect', () => {
       setIsConnected(false);
+    });
+
+    socket.on('expo:data-updated', (payload) => {
+      onDataUpdatedRef.current?.(payload);
     });
 
     socket.on('world:init', ({ self, visitors, onlineCount: count }) => {

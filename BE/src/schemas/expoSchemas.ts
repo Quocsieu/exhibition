@@ -246,6 +246,13 @@ export interface VisitorState {
   updatedAt: number;
 }
 
+export interface ExpoDataUpdatedPayload {
+  entityType: 'booth' | 'product' | 'slot' | 'all';
+  entityId?: string;
+  boothId?: string;
+  timestamp: number;
+}
+
 export interface ServerToClientEvents {
   'world:init': (payload: {
     self: VisitorState;
@@ -258,6 +265,7 @@ export interface ServerToClientEvents {
   'visitor:left': (payload: { sessionId: string; onlineCount: number }) => void;
   'visitors:count': (payload: { onlineCount: number }) => void;
   'move:rejected': (payload: { x: number; z: number; reason: string }) => void;
+  'expo:data-updated': (payload: ExpoDataUpdatedPayload) => void;
 }
 
 export interface ClientToServerEvents {

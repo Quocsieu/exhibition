@@ -4,11 +4,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express, { type Express } from 'express';
 import cors from 'cors';
+import type { Server } from 'socket.io';
 import { ExpoDatabase } from './database/db.js';
 import { ExpoService } from './services/expoService.js';
-import { ExpoController } from './controllers/expoController.js';
+import { ExpoController, type DataMutationCallback } from './controllers/expoController.js';
 import { createApiRoutes } from './routes/apiRoutes.js';
 import { attachSocketServer } from './realtime/socketServer.js';
+import type { ServerToClientEvents, ClientToServerEvents } from './schemas/expoSchemas.js';
 
 export type CorsOriginConfig =
   | string
@@ -42,13 +44,26 @@ export function buildCorsOriginChecker(rawCors: string = '*'): CorsOriginConfig 
   };
 }
 
-export function createApp(db: ExpoDatabase, corsOrigin: CorsOriginConfig = '*'): Express {
+export function createApp(
+  db: ExpoDatabase,
+  corsOrigin: CorsOriginConfig = '*',
+  onMutation?: DataMutationCallback
+): Express {
   const app = express();
   app.use(cors({ origin: corsOrigin }));
   app.use(express.json({ limit: '1mb' }));
 
   const service = new ExpoService(db);
-  const controller = new ExpoController(service);
+  const controller = new ExpoController(service, (payload) => {
+    onMutation?.(payload);
+    const io = app.get('io') as Server<ClientToServerEvents, ServerToClientEvents> | undefined;
+    if (io) {
+      io.emit('expo:data-updated', {
+        ...payload,
+        timestamp: Date.now(),
+      });
+    }
+  });
   app.use('/api', createApiRoutes(controller));
 
   return app;
@@ -67,7 +82,8 @@ if (isMain) {
   const app = createApp(db, CORS_ORIGIN);
   const httpServer = http.createServer(app);
 
-  attachSocketServer(httpServer, db, CORS_ORIGIN);
+  const io = attachSocketServer(httpServer, db, CORS_ORIGIN);
+  app.set('io', io);
 
   httpServer.listen(PORT, () => {
     console.log(`[Virtual Expo BE] Running on http://localhost:${PORT}`);

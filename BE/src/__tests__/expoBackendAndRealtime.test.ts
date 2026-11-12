@@ -26,7 +26,8 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
     db = new ExpoDatabase(':memory:');
     const app = createApp(db);
     server = http.createServer(app);
-    attachSocketServer(server, db);
+    const io = attachSocketServer(server, db);
+    app.set('io', io);
 
     await new Promise<void>((resolve) => {
       server.listen(0, '127.0.0.1', () => resolve());
@@ -627,5 +628,70 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
     ]);
     expect(slot01.product?.sourceUrl).toBe('https://lumina-creative.example.com/products/halo-x-pro');
     expect(slot01.product?.sku).toBe('LUM-HALO-X-PRO');
+  });
+
+  it('broadcasts expo:data-updated event to connected socket clients on booth/product/slot mutations', async () => {
+    const client: ClientSocket<ServerToClientEvents, ClientToServerEvents> = createClient(baseUrl, {
+      transports: ['websocket'],
+      forceNew: true,
+    });
+
+    const receivedEvents: Array<{ entityType: string; entityId?: string; boothId?: string }> = [];
+    client.on('expo:data-updated', (payload) => {
+      receivedEvents.push(payload);
+    });
+
+    await new Promise<void>((resolve) => client.on('connect', () => resolve()));
+
+    const loginRes = await fetch(`${baseUrl}/api/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'admin',
+        password: process.env.ADMIN_PASSWORD || 'expo-admin-2026',
+      }),
+    });
+    const { token } = (await loginRes.json()) as { token: string };
+
+    // 1. Trigger booth update
+    await fetch(`${baseUrl}/api/booths/booth-aether-tech`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        name: 'Aether Realtime Test',
+        companyName: 'Aether Realtime Corp',
+      }),
+    });
+
+    // 2. Trigger slot assignment
+    const slotPutRes = await fetch(`${baseUrl}/api/booths/booth-aether-tech/slots/slot_02`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        productId: 'prod-aether-glass-ar',
+      }),
+    });
+    expect(slotPutRes.status).toBe(200);
+
+    // Wait for events to arrive at socket client
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(receivedEvents.length).toBeGreaterThanOrEqual(2);
+    const boothEvent = receivedEvents.find((e) => e.entityType === 'booth');
+    expect(boothEvent).toBeDefined();
+    expect(boothEvent?.boothId).toBe('booth-aether-tech');
+
+    const slotEvent = receivedEvents.find((e) => e.entityType === 'slot');
+    expect(slotEvent).toBeDefined();
+    expect(slotEvent?.entityId).toBe('slot_02');
+
+    client.disconnect();
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 });
