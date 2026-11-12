@@ -1,0 +1,165 @@
+{
+  "metrics": [
+    {
+      "name": "explore",
+      "fps": 116.16556032799693,
+      "p95FrameMs": 9.299999999999272,
+      "calls": 367,
+      "triangles": 94894,
+      "memory": {
+        "geometries": 279,
+        "textures": 48
+      },
+      "camera": [
+        0.002118201274495416,
+        2.26,
+        8.999999568579153
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "overview",
+      "fps": 71.06174608861816,
+      "p95FrameMs": 16.80000000000109,
+      "calls": 724,
+      "triangles": 189048,
+      "memory": {
+        "geometries": 371,
+        "textures": 64
+      },
+      "camera": [
+        16,
+        26.200000000001406,
+        22.800000000006914
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "tree",
+      "fps": 87.64822862193411,
+      "p95FrameMs": 16.900000000001455,
+      "calls": 70,
+      "triangles": 28184,
+      "memory": {
+        "geometries": 371,
+        "textures": 64
+      },
+      "camera": [
+        24,
+        5,
+        15
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "fountain",
+      "fps": 79.80150214592291,
+      "p95FrameMs": 17.100000000002183,
+      "calls": 287,
+      "triangles": 93260,
+      "memory": {
+        "geometries": 371,
+        "textures": 64
+      },
+      "camera": [
+        5,
+        4,
+        6
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "building",
+      "fps": 120.04438615958807,
+      "p95FrameMs": 8.700000000000728,
+      "calls": 36,
+      "triangles": 12422,
+      "memory": {
+        "geometries": 371,
+        "textures": 64
+      },
+      "camera": [
+        -16,
+        9,
+        -18
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "mobile",
+      "fps": 120.03227758725063,
+      "p95FrameMs": 8.5,
+      "calls": 210,
+      "triangles": 53204,
+      "memory": {
+        "geometries": 371,
+        "textures": 64
+      },
+      "camera": [
+        0.002118201274495416,
+        2.26,
+        8.999999568579153
+      ],
+      "renderer": "WebKit WebGL"
+    }
+  ],
+  "errors": [],
+  "requests": [
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/ppwtREejXg.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/yKo7F36Qk2.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/7b_tCaBRLCI.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/R7qMWzb7nk.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-variant.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/NBUxHir6FJ.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/kn0sMwbspb.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/RO32ltX6zJ.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/ppwtREejXg-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/yKo7F36Qk2-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-variant-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/R7qMWzb7nk-lod.glb",
+      "status": 200
+    }
+  ]
+}

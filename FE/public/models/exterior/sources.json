@@ -1,0 +1,117 @@
+[
+  {
+    "id": "etFGNvsiFv",
+    "title": "Trees",
+    "author": "Quaternius",
+    "license": "CC0 1.0",
+    "source": "https://poly.pizza/m/etFGNvsiFv",
+    "url": "https://static.poly.pizza/53a83125-e16a-4024-b8f6-1e72679c7ddf.glb",
+    "bytes": 3408276,
+    "optimizedBytes": 388708,
+    "modifications": "Pruned unused variants; welded/deduplicated; textures <=1024px WebP; tree materials non-metallic, leaf alpha-test. Runtime uniform scale and origin normalization.",
+    "lodBytes": 324144
+  },
+  {
+    "id": "oYtDty0fR6",
+    "title": "Pine Trees",
+    "author": "Quaternius",
+    "license": "CC0 1.0",
+    "source": "https://poly.pizza/m/oYtDty0fR6",
+    "url": "https://static.poly.pizza/1d499f8b-5a1b-4966-9a35-10c0d3841e91.glb",
+    "bytes": 99604,
+    "optimizedBytes": 98884,
+    "modifications": "Pruned unused variants; welded/deduplicated; textures <=1024px WebP; tree materials non-metallic, leaf alpha-test. Runtime uniform scale and origin normalization.",
+    "used": false
+  },
+  {
+    "id": "R7qMWzb7nk",
+    "title": "Birch Trees",
+    "author": "Quaternius",
+    "license": "CC0 1.0",
+    "source": "https://poly.pizza/m/R7qMWzb7nk",
+    "url": "https://static.poly.pizza/457b2397-4bfb-41c4-862d-82d1592b2a5f.glb",
+    "bytes": 4194972,
+    "optimizedBytes": 439468,
+    "modifications": "Pruned unused variants; welded/deduplicated; textures <=1024px WebP; tree materials non-metallic, leaf alpha-test. Runtime uniform scale and origin normalization.",
+    "lodBytes": 404288
+  },
+  {
+    "id": "7b_tCaBRLCI",
+    "title": "Santo Spirito Fountain",
+    "author": "Don Carson",
+    "license": "CC-BY 3.0",
+    "source": "https://poly.pizza/m/7b_tCaBRLCI",
+    "url": "https://static.poly.pizza/7ac18bab-d726-424c-a53c-da061eb66753.glb",
+    "bytes": 199216,
+    "optimizedBytes": 152436,
+    "modifications": "Pruned unused variants; welded/deduplicated; textures <=1024px WebP; tree materials non-metallic, leaf alpha-test. Runtime uniform scale and origin normalization."
+  },
+  {
+    "id": "kn0sMwbspb",
+    "title": "Park Bench",
+    "author": "J-Toastie",
+    "license": "CC-BY 3.0",
+    "source": "https://poly.pizza/m/kn0sMwbspb",
+    "url": "https://static.poly.pizza/2fe64f02-e002-45c6-8852-ddc1645a6245.glb",
+    "bytes": 30780,
+    "optimizedBytes": 23864,
+    "modifications": "Pruned unused variants; welded/deduplicated; textures <=1024px WebP; tree materials non-metallic, leaf alpha-test. Runtime uniform scale and origin normalization."
+  },
+  {
+    "id": "RO32ltX6zJ",
+    "title": "Street Lamps",
+    "author": "MiniPoly",
+    "license": "CC0 1.0",
+    "source": "https://poly.pizza/m/RO32ltX6zJ",
+    "url": "https://static.poly.pizza/de7e68d3-0ffe-4957-bb23-32197e50ff15.glb",
+    "bytes": 173032,
+    "optimizedBytes": 37592,
+    "modifications": "Pruned unused variants; welded/deduplicated; textures <=1024px WebP; tree materials non-metallic, leaf alpha-test. Runtime uniform scale and origin normalization."
+  },
+  {
+    "id": "ppwtREejXg",
+    "title": "Large Building",
+    "author": "Kenney",
+    "license": "CC0 1.0",
+    "source": "https://poly.pizza/m/ppwtREejXg",
+    "url": "https://static.poly.pizza/b946d1a0-babe-4249-9964-5c3368f706d5.glb",
+    "bytes": 143788,
+    "optimizedBytes": 98008,
+    "modifications": "Pruned unused variants; welded/deduplicated; textures <=1024px WebP; tree materials non-metallic, leaf alpha-test. Runtime uniform scale and origin normalization.",
+    "lodBytes": 92820
+  },
+  {
+    "id": "yKo7F36Qk2",
+    "title": "Large Building",
+    "author": "Kenney",
+    "license": "CC0 1.0",
+    "source": "https://poly.pizza/m/yKo7F36Qk2",
+    "url": "https://static.poly.pizza/33f4df33-3385-452c-8f8a-d82cd8f02842.glb",
+    "bytes": 59680,
+    "optimizedBytes": 42188,
+    "modifications": "Pruned unused variants; welded/deduplicated; textures <=1024px WebP; tree materials non-metallic, leaf alpha-test. Runtime uniform scale and origin normalization.",
+    "lodBytes": 40060
+  },
+  {
+    "id": "etFGNvsiFv-variant",
+    "title": "Trees",
+    "author": "Quaternius",
+    "license": "CC0 1.0",
+    "source": "https://poly.pizza/m/etFGNvsiFv",
+    "url": "https://static.poly.pizza/53a83125-e16a-4024-b8f6-1e72679c7ddf.glb",
+    "bytes": 3408276,
+    "optimizedBytes": 494684,
+    "modifications": "Pruned unused variants; welded/deduplicated; textures <=1024px WebP; tree materials non-metallic, leaf alpha-test. Runtime uniform scale and origin normalization.",
+    "lodBytes": 432052
+  },
+  {
+    "id": "NBUxHir6FJ",
+    "title": "Flowers",
+    "author": "Quaternius",
+    "license": "CC0 1.0",
+    "source": "https://poly.pizza/m/NBUxHir6FJ",
+    "url": "https://static.poly.pizza/c25cb5dc-3cd3-470c-a08c-045af0c0fe3d.glb",
+    "bytes": 372664,
+    "optimizedBytes": 37760
+  }
+]

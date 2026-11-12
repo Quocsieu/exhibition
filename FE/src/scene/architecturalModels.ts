@@ -106,44 +106,45 @@ export function buildOakTreeModel(variant: 'emerald' | 'blossom' | 'autumn' = 'e
         : 'EnvTreeOak';
 
   const barkMat = new THREE.MeshStandardMaterial({
-    color: '#6b4423',
+    color: '#5c3a21',
     roughness: 0.88,
     metalness: 0.04,
     vertexColors: true,
   });
 
   const foliagePrimaryColor =
-    variant === 'blossom' ? '#f472b6' : variant === 'autumn' ? '#f59e0b' : '#15803d';
+    variant === 'blossom' ? '#f472b6' : variant === 'autumn' ? '#d97706' : '#15803d';
   const foliageSecondaryColor =
-    variant === 'blossom' ? '#fbcfe8' : variant === 'autumn' ? '#fbbf24' : '#22c55e';
+    variant === 'blossom' ? '#fbcfe8' : variant === 'autumn' ? '#f59e0b' : '#22c55e';
 
   const foliagePrimaryMat = new THREE.MeshStandardMaterial({
     color: foliagePrimaryColor,
-    roughness: 0.68,
+    roughness: 0.65,
     metalness: 0.02,
     vertexColors: true,
   });
 
   const foliageSecondaryMat = new THREE.MeshStandardMaterial({
     color: foliageSecondaryColor,
-    roughness: 0.62,
+    roughness: 0.6,
     metalness: 0.02,
     vertexColors: true,
   });
 
   // Tapered Root-Flared Main Trunk (LatheGeometry with organic profile)
   const trunkProfile = [
-    new THREE.Vector2(0.34, 0.0),
-    new THREE.Vector2(0.24, 0.25),
-    new THREE.Vector2(0.19, 0.75),
-    new THREE.Vector2(0.16, 1.35),
-    new THREE.Vector2(0.12, 1.95),
-    new THREE.Vector2(0.06, 2.35),
+    new THREE.Vector2(0.42, 0.0),
+    new THREE.Vector2(0.32, 0.15),
+    new THREE.Vector2(0.24, 0.45),
+    new THREE.Vector2(0.19, 0.85),
+    new THREE.Vector2(0.16, 1.45),
+    new THREE.Vector2(0.12, 2.05),
+    new THREE.Vector2(0.06, 2.45),
   ];
-  const trunkGeom = bakeVertexAO(new THREE.LatheGeometry(trunkProfile, 12), {
+  const trunkGeom = bakeVertexAO(new THREE.LatheGeometry(trunkProfile, 14), {
     minY: 0,
-    maxY: 2.35,
-    bottomColor: '#7c6f64',
+    maxY: 2.45,
+    bottomColor: '#452a15',
     topColor: '#ffffff',
   });
   const trunkMesh = new THREE.Mesh(trunkGeom, barkMat);
@@ -155,32 +156,32 @@ export function buildOakTreeModel(variant: 'emerald' | 'blossom' | 'autumn' = 'e
   const branchSpecs: [number, number, number][][] = [
     [
       [0, 1.35, 0],
-      [-0.36, 1.72, 0.24],
-      [-0.78, 2.15, 0.45],
+      [-0.42, 1.75, 0.28],
+      [-0.92, 2.22, 0.52],
     ],
     [
-      [0, 1.42, 0],
-      [0.42, 1.82, 0.18],
-      [0.82, 2.22, 0.36],
+      [0, 1.45, 0],
+      [0.48, 1.85, 0.22],
+      [0.96, 2.32, 0.42],
     ],
     [
-      [0, 1.48, 0],
-      [0.14, 1.88, -0.42],
-      [0.28, 2.26, -0.78],
+      [0, 1.52, 0],
+      [0.18, 1.95, -0.48],
+      [0.36, 2.38, -0.88],
     ],
     [
-      [0, 1.55, 0],
-      [-0.32, 1.92, -0.34],
-      [-0.62, 2.32, -0.62],
+      [0, 1.62, 0],
+      [-0.38, 2.02, -0.42],
+      [-0.75, 2.45, -0.72],
     ],
   ];
 
   branchSpecs.forEach((pts, idx) => {
     const curve = new THREE.CatmullRomCurve3(pts.map(([x, y, z]) => new THREE.Vector3(x, y, z)));
-    const bGeom = bakeVertexAO(new THREE.TubeGeometry(curve, 8, 0.075 - idx * 0.006, 8, false), {
+    const bGeom = bakeVertexAO(new THREE.TubeGeometry(curve, 10, 0.088 - idx * 0.007, 8, false), {
       minY: 1.3,
-      maxY: 2.4,
-      bottomColor: '#8c7a6b',
+      maxY: 2.5,
+      bottomColor: '#5c3a21',
       topColor: '#ffffff',
     });
     const bMesh = new THREE.Mesh(bGeom, barkMat);
@@ -188,19 +189,20 @@ export function buildOakTreeModel(variant: 'emerald' | 'blossom' | 'autumn' = 'e
     group.add(bMesh);
   });
 
-  // 7 Overlapping Sculpted Foliage Cloud Clusters
+  // 8 Multi-layered Overlapping Sculpted Foliage Cloud Clusters with Organic Ripple
   const clusters: { pos: [number, number, number]; r: number; secondary?: boolean }[] = [
-    { pos: [0, 2.85, 0], r: 0.92 },
-    { pos: [-0.74, 2.35, 0.42], r: 0.68, secondary: true },
-    { pos: [0.78, 2.42, 0.34], r: 0.66 },
-    { pos: [0.26, 2.45, -0.72], r: 0.65, secondary: true },
-    { pos: [-0.58, 2.48, -0.56], r: 0.64 },
-    { pos: [-0.32, 3.18, -0.18], r: 0.62, secondary: true },
-    { pos: [0.38, 3.12, 0.24], r: 0.58, secondary: true },
+    { pos: [0, 2.95, 0], r: 1.05 },
+    { pos: [-0.85, 2.42, 0.48], r: 0.78, secondary: true },
+    { pos: [0.88, 2.52, 0.38], r: 0.76 },
+    { pos: [0.32, 2.55, -0.82], r: 0.75, secondary: true },
+    { pos: [-0.68, 2.58, -0.65], r: 0.72 },
+    { pos: [-0.38, 3.32, -0.22], r: 0.72, secondary: true },
+    { pos: [0.44, 3.25, 0.28], r: 0.68, secondary: true },
+    { pos: [0, 3.58, 0], r: 0.58 },
   ];
 
   clusters.forEach((c, idx) => {
-    const cGeom = createOrganicFoliageClusterGeometry(c.r, idx * 1.7 + 0.5, 0.84);
+    const cGeom = createOrganicFoliageClusterGeometry(c.r, idx * 1.8 + 0.6, 0.82);
     const cMesh = new THREE.Mesh(
       cGeom,
       c.secondary ? foliageSecondaryMat : foliagePrimaryMat
@@ -1602,8 +1604,138 @@ export function buildEnergyBoothExteriorShell(): THREE.Group {
 }
 
 /**
- * Builds the bespoke architectural exterior shell for any of the 6 booth themes.
+ * Builds an Architectural Italian Renaissance Tiered Stone Fountain (`buildCentralPlazaFountainModel`)
+ * for the Central Plaza centerpiece with scalloped basins, fluted pedestals, and sparkling water pool.
  */
+export function buildCentralPlazaFountainModel(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'CentralPlazaFountain';
+
+  const stoneMat = new THREE.MeshStandardMaterial({
+    color: '#e2d8cb',
+    roughness: 0.62,
+    metalness: 0.08,
+    vertexColors: true,
+  });
+
+  const waterMat = new THREE.MeshStandardMaterial({
+    color: '#38bdf8',
+    emissive: '#0284c7',
+    emissiveIntensity: 0.35,
+    roughness: 0.12,
+    metalness: 0.45,
+    transparent: true,
+    opacity: 0.88,
+  });
+
+  const bronzeAccentMat = new THREE.MeshStandardMaterial({
+    color: '#d97706',
+    roughness: 0.32,
+    metalness: 0.82,
+  });
+
+  // 1. Lower Octagonal / Circular Stone Plinth & Basin Pool (r = 2.18m, h = 0.42m)
+  const lowerBasinProfile = [
+    new THREE.Vector2(2.18, 0.0),
+    new THREE.Vector2(2.24, 0.12),
+    new THREE.Vector2(2.12, 0.18),
+    new THREE.Vector2(2.18, 0.42),
+    new THREE.Vector2(1.92, 0.42),
+    new THREE.Vector2(1.88, 0.28),
+    new THREE.Vector2(0.55, 0.28),
+  ];
+  const lowerGeom = bakeVertexAO(new THREE.LatheGeometry(lowerBasinProfile, 32), {
+    minY: 0,
+    maxY: 0.42,
+    bottomColor: '#948a78',
+    topColor: '#ffffff',
+  });
+  const lowerMesh = new THREE.Mesh(lowerGeom, stoneMat);
+  lowerMesh.castShadow = true;
+  lowerMesh.receiveShadow = true;
+  group.add(lowerMesh);
+
+  // Lower Water Disc
+  const waterLowerMesh = new THREE.Mesh(new THREE.CircleGeometry(2.02, 32), waterMat);
+  waterLowerMesh.position.y = 0.36;
+  waterLowerMesh.rotation.x = -Math.PI / 2;
+  waterLowerMesh.receiveShadow = true;
+  group.add(waterLowerMesh);
+
+  // 2. Central Fluted Pillar Pedestal (y = 0.28 to 1.15)
+  const pillarProfile = [
+    new THREE.Vector2(0.48, 0.28),
+    new THREE.Vector2(0.42, 0.42),
+    new THREE.Vector2(0.32, 0.65),
+    new THREE.Vector2(0.35, 0.95),
+    new THREE.Vector2(0.46, 1.15),
+  ];
+  const pillarGeom = bakeVertexAO(new THREE.LatheGeometry(pillarProfile, 24), {
+    minY: 0.28,
+    maxY: 1.15,
+    bottomColor: '#8a7e6d',
+    topColor: '#ffffff',
+  });
+  const pillarMesh = new THREE.Mesh(pillarGeom, stoneMat);
+  pillarMesh.castShadow = true;
+  pillarMesh.receiveShadow = true;
+  group.add(pillarMesh);
+
+  // 3. Middle Scalloped Basin (y = 1.15 to 1.48, r = 1.25m)
+  const midBasinProfile = [
+    new THREE.Vector2(0.46, 1.15),
+    new THREE.Vector2(0.72, 1.22),
+    new THREE.Vector2(1.25, 1.42),
+    new THREE.Vector2(1.22, 1.48),
+    new THREE.Vector2(1.12, 1.48),
+    new THREE.Vector2(0.28, 1.34),
+  ];
+  const midGeom = bakeVertexAO(new THREE.LatheGeometry(midBasinProfile, 24), {
+    minY: 1.15,
+    maxY: 1.48,
+    bottomColor: '#9c907e',
+    topColor: '#ffffff',
+  });
+  const midMesh = new THREE.Mesh(midGeom, stoneMat);
+  midMesh.castShadow = true;
+  midMesh.receiveShadow = true;
+  group.add(midMesh);
+
+  // Middle Water Disc
+  const waterMidMesh = new THREE.Mesh(new THREE.CircleGeometry(1.16, 24), waterMat);
+  waterMidMesh.position.y = 1.42;
+  waterMidMesh.rotation.x = -Math.PI / 2;
+  group.add(waterMidMesh);
+
+  // 4. Upper Ornamental Pedestal & Top Spire Finial (y = 1.34 to 2.45)
+  const upperSpireProfile = [
+    new THREE.Vector2(0.28, 1.34),
+    new THREE.Vector2(0.22, 1.58),
+    new THREE.Vector2(0.18, 1.82),
+    new THREE.Vector2(0.26, 1.95),
+    new THREE.Vector2(0.08, 2.15),
+    new THREE.Vector2(0.14, 2.28),
+    new THREE.Vector2(0.02, 2.45),
+  ];
+  const upperGeom = bakeVertexAO(new THREE.LatheGeometry(upperSpireProfile, 18), {
+    minY: 1.34,
+    maxY: 2.45,
+    bottomColor: '#a89c8a',
+    topColor: '#ffffff',
+  });
+  const upperMesh = new THREE.Mesh(upperGeom, stoneMat);
+  upperMesh.castShadow = true;
+  group.add(upperMesh);
+
+  // Bronze Decorative Sphere on top of Spire
+  const bronzeOrb = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), bronzeAccentMat);
+  bronzeOrb.position.y = 2.48;
+  bronzeOrb.castShadow = true;
+  group.add(bronzeOrb);
+
+  return group;
+}
+
 export function buildBoothExteriorShell(theme: ArchitecturalBoothTheme): THREE.Group {
   switch (theme) {
     case 'tech':

@@ -1,0 +1,108 @@
+{
+  "metrics": [
+    {
+      "name": "explore",
+      "fps": 115.20960402749543,
+      "p95FrameMs": 9.600000000000364,
+      "calls": 472,
+      "triangles": 79189,
+      "memory": {
+        "geometries": 292,
+        "textures": 25
+      },
+      "camera": [
+        0.002118201274495416,
+        2.26,
+        8.999999568579153
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "overview",
+      "fps": 73.6295012993441,
+      "p95FrameMs": 17.299999999999272,
+      "calls": 1007,
+      "triangles": 153401,
+      "memory": {
+        "geometries": 384,
+        "textures": 41
+      },
+      "camera": [
+        16,
+        26.200000000005335,
+        22.80000000002624
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "tree",
+      "fps": 112.44448644051789,
+      "p95FrameMs": 16.700000000000728,
+      "calls": 83,
+      "triangles": 12304,
+      "memory": {
+        "geometries": 384,
+        "textures": 41
+      },
+      "camera": [
+        16,
+        26.2,
+        22.8
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "fountain",
+      "fps": 74.38894792773658,
+      "p95FrameMs": 24.200000000000728,
+      "calls": 355,
+      "triangles": 56899,
+      "memory": {
+        "geometries": 384,
+        "textures": 41
+      },
+      "camera": [
+        16,
+        26.2,
+        22.8
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "building",
+      "fps": 119.02380476095229,
+      "p95FrameMs": 9.099999999998545,
+      "calls": 29,
+      "triangles": 6252,
+      "memory": {
+        "geometries": 384,
+        "textures": 41
+      },
+      "camera": [
+        16,
+        26.2,
+        22.8
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "mobile",
+      "fps": 120.04438615958895,
+      "p95FrameMs": 8.599999999998545,
+      "calls": 261,
+      "triangles": 48141,
+      "memory": {
+        "geometries": 384,
+        "textures": 41
+      },
+      "camera": [
+        0.002118201274495416,
+        2.26,
+        8.999999568579153
+      ],
+      "renderer": "WebKit WebGL"
+    }
+  ],
+  "errors": [],
+  "requests": []
+}

@@ -13,9 +13,11 @@ import {
   createPlazaTileBumpTexture,
   createPlazaTileTexture,
   createSidewalkPaverTexture,
+  createSidewalkPaverDataTexture,
   createSkyDomeTexture,
 } from './sceneTextures';
 import { cloneCachedAsset, type GlbAssetId } from './assetLoader';
+import { ExteriorAssets, type ExteriorAssetId, type ExteriorPlacement } from './ExteriorAssets';
 
 export interface EnvironmentProps {
   onGroundClick: (point: THREE.Vector3) => void;
@@ -251,8 +253,6 @@ const FLOWER_CLUSTERS_GOLD: [number, number, number][] = [
 // Shared module-level Geometries & Materials to minimize WebGL memory & state switches
 const TREE_BASE_GEOM = new THREE.CylinderGeometry(0.85, 0.95, 0.44, 16);
 
-const FLOWER_BUSH_GEOM = new THREE.DodecahedronGeometry(0.24, 1);
-const FLOWER_BLOSSOM_GEOM = new THREE.IcosahedronGeometry(0.15, 1);
 
 const PARASOL_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.06, 2.35, 10);
 const PARASOL_CANOPY_GEOM = new THREE.ConeGeometry(1.55, 0.58, 12);
@@ -305,20 +305,8 @@ const BIN_TOP_MAT = new THREE.MeshStandardMaterial({
   metalness: 0.2,
 });
 
-const TREE_MID_MAT = new THREE.MeshStandardMaterial({
-  color: '#10b981',
-  roughness: 0.6,
-});
 const SLATE_POT_MAT = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.65 });
 
-const FLOWER_PINK_MAT = new THREE.MeshStandardMaterial({
-  color: '#f43f5e',
-  roughness: 0.45,
-});
-const FLOWER_GOLD_MAT = new THREE.MeshStandardMaterial({
-  color: '#fbbf24',
-  roughness: 0.4,
-});
 
 const PARASOL_CREAM_MAT = new THREE.MeshStandardMaterial({
   color: '#fffbeb',
@@ -353,14 +341,7 @@ const LAMP_POOL_MAT = new THREE.MeshBasicMaterial({
 });
 
 // Stylized 3D City Horizon & Distant Hills Instanced Geometries & Materials
-const CITY_TOWER_GEOM = new THREE.BoxGeometry(1, 1, 1);
-const CITY_CROWN_GEOM = new THREE.ConeGeometry(0.72, 0.42, 4);
 const HORIZON_HILL_GEOM = new THREE.IcosahedronGeometry(1, 2);
-const CITY_CROWN_MAT = new THREE.MeshStandardMaterial({
-  color: '#475569',
-  roughness: 0.48,
-  metalness: 0.25,
-});
 const HORIZON_HILL_MAT = new THREE.MeshStandardMaterial({
   color: '#86efac',
   roughness: 0.82,
@@ -424,30 +405,28 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const width = WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX;
     const depth = WORLD_BOUNDS.maxZ - WORLD_BOUNDS.minZ;
 
-    const sculptureRef = useRef<THREE.Group>(null);
-    const outerRingRef = useRef<THREE.Mesh>(null);
     const markerGroupRef = useRef<THREE.Group>(null);
 
+    const fountainPlacements = useMemo<ExteriorPlacement[]>(() => [{ position: [0, 0.02, 0] }], []);
+    const cityPlacements = useMemo(() => (['city-a', 'city-b'] as const).map((id, variant) => ({
+      id,
+      placements: STYLIZED_CITY_BUILDINGS.filter((_, i) => i % 2 === variant).map(b => ({
+        position: [b.x, -0.65, b.z] as [number, number, number],
+        scale: [b.sx, b.sy, b.sz] as [number, number, number],
+      })),
+    })), []);
+
     const sidewalkPaverTexture = useMemo(() => createSidewalkPaverTexture(14, 14), []);
+    const sidewalkHeight = useMemo(() => createSidewalkPaverDataTexture('height'), []);
+    const sidewalkRoughness = useMemo(() => createSidewalkPaverDataTexture('roughness'), []);
     const plazaTileTexture = useMemo(() => createPlazaTileTexture(), []);
     const plazaTileBumpTexture = useMemo(() => createPlazaTileBumpTexture(), []);
     const plazaMedallionTexture = useMemo(() => createPlazaMedallionTexture(), []);
     const asphaltRoadTexture = useMemo(() => createAsphaltRoadTexture(4), []);
     const asphaltBumpTexture = useMemo(() => createAsphaltBumpTexture(4), []);
     const crosswalkTexture = useMemo(() => createCrosswalkTexture(), []);
-    const cityFacadeTexture = useMemo(() => createCityBuildingFacadeTexture(), []);
     const skyDomeTexture = useMemo(() => createSkyDomeTexture(), []);
 
-    const cityTowerTexturedMat = useMemo(
-      () =>
-        new THREE.MeshStandardMaterial({
-          map: cityFacadeTexture,
-          color: '#f8fafc',
-          roughness: 0.52,
-          metalness: 0.18,
-        }),
-      [cityFacadeTexture]
-    );
 
     const islandSignTextures = useMemo(
       () =>
@@ -461,24 +440,17 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       []
     );
 
-    const treeClones = useMemo(
-      () => ALL_TREES.map((t) => ({ ...t, object: cloneCachedAsset(t.assetId) })),
-      []
-    );
-    const benchClones = useMemo(
-      () => ALL_BENCHES.map((b) => ({ ...b, object: cloneCachedAsset('env-park-bench') })),
-      []
-    );
-    const lampClones = useMemo(
-      () =>
-        PERIMETER_LAMPS.map(([lx, lz]) => ({
-          x: lx,
-          z: lz,
-          ry: Math.atan2(-lx, -lz),
-          object: cloneCachedAsset('env-street-lamp'),
-        })),
-      []
-    );
+    const treeBatches = useMemo(() => (['env-tree-oak', 'env-tree-blossom', 'env-tree-pine'] as ExteriorAssetId[]).map(id => ({
+      id,
+      placements: ALL_TREES.filter(t => t.assetId === id).map(t => ({
+        position: [t.x, Math.abs(t.x) > 24 ? -0.75 : 0.44, t.z] as [number, number, number],
+        rotation: t.ry,
+        scale: t.scale,
+      })),
+    })), []);
+    const benchPlacements = useMemo<ExteriorPlacement[]>(() => ALL_BENCHES.map(b => ({ position: [b.x, .02, b.z], rotation: b.rotationY })), []);
+    const lampPlacements = useMemo<ExteriorPlacement[]>(() => PERIMETER_LAMPS.map(([x, z]) => ({ position: [x, .02, z], rotation: Math.atan2(-x, -z) })), []);
+    const flowerPlacements = useMemo<ExteriorPlacement[]>(() => [...FLOWER_CLUSTERS_PINK, ...FLOWER_CLUSTERS_GOLD].map(([x, , z], i) => ({ position: [x, Math.abs(z) < 6 ? .36 : .35, z], rotation: i * 1.37 })), []);
     const urnClones = useMemo(
       () =>
         PLANTER_URN_POSITIONS.map(([ux, uz]) => ({
@@ -522,15 +494,15 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     useEffect(() => {
       return () => {
         sidewalkPaverTexture.dispose();
+        sidewalkHeight.dispose();
+        sidewalkRoughness.dispose();
         plazaTileTexture.dispose();
         plazaTileBumpTexture.dispose();
         plazaMedallionTexture.dispose();
         asphaltRoadTexture.dispose();
         asphaltBumpTexture.dispose();
         crosswalkTexture.dispose();
-        cityFacadeTexture.dispose();
         skyDomeTexture.dispose();
-        cityTowerTexturedMat.dispose();
         islandSignTextures.forEach((tex) => tex.dispose());
         plazaBannerTexture.dispose();
         entranceBannerTexture.dispose();
@@ -538,31 +510,23 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       };
     }, [
       sidewalkPaverTexture,
+      sidewalkHeight,
+      sidewalkRoughness,
       plazaTileTexture,
       plazaTileBumpTexture,
       plazaMedallionTexture,
       asphaltRoadTexture,
       asphaltBumpTexture,
       crosswalkTexture,
-      cityFacadeTexture,
       skyDomeTexture,
-      cityTowerTexturedMat,
       islandSignTextures,
       plazaBannerTexture,
       entranceBannerTexture,
       directoryKioskTexture,
     ]);
 
-    useFrame(({ clock }, delta) => {
+    useFrame(({ clock }) => {
       const t = clock.getElapsedTime();
-      if (sculptureRef.current) {
-        sculptureRef.current.rotation.y += delta * 0.55;
-        sculptureRef.current.position.y = 1.65 + Math.sin(t * 2.0) * 0.08;
-      }
-      if (outerRingRef.current) {
-        outerRingRef.current.rotation.z = t * 0.4;
-        outerRingRef.current.rotation.x = Math.PI / 2 + Math.sin(t * 1.3) * 0.22;
-      }
       if (markerGroupRef.current) {
         const pulse = 1 + Math.sin(t * 6) * 0.14;
         markerGroupRef.current.scale.set(pulse, 1, pulse);
@@ -595,32 +559,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           ))}
         </Instances>
 
-        {/* Instanced Stylized 3D City Background Buildings with Architectural Facade Texture & Stepped Setbacks */}
-        <Instances geometry={CITY_TOWER_GEOM} material={cityTowerTexturedMat}>
-          {STYLIZED_CITY_BUILDINGS.map((b, i) => (
-            <React.Fragment key={`ctower-grp-${i}`}>
-              <Instance
-                position={[b.x, b.sy / 2 - 0.65, b.z]}
-                scale={[b.sx, b.sy, b.sz]}
-              />
-              {b.setbackY && b.setbackSx && b.setbackSz && (
-                <Instance
-                  position={[b.x, b.setbackY - 0.65 + (b.sy - b.setbackY) * 0.5, b.z]}
-                  scale={[b.setbackSx, b.sy - b.setbackY + 1.8, b.setbackSz]}
-                />
-              )}
-            </React.Fragment>
-          ))}
-        </Instances>
-        <Instances geometry={CITY_CROWN_GEOM} material={CITY_CROWN_MAT}>
-          {STYLIZED_CITY_BUILDINGS.map((b, i) => (
-            <Instance
-              key={`ccrown-${i}`}
-              position={[b.x, b.sy + (b.setbackY ? 1.25 : 0) - 0.55, b.z]}
-              scale={[b.setbackSx || b.sx, 1.2, b.setbackSz || b.sz]}
-            />
-          ))}
-        </Instances>
+        {cityPlacements.map(b => <ExteriorAssets key={b.id} id={b.id} placements={b.placements} shadows={false} />)}
 
         {/* ================================================================
             1. MULTI-TIERED ARCHITECTURAL FOUNDATION PODIUM & TILED COURTYARD
@@ -653,12 +592,12 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           <planeGeometry args={[width, depth]} />
           <meshStandardMaterial
             map={sidewalkPaverTexture}
-            bumpMap={plazaTileBumpTexture}
-            bumpScale={0.032}
-            roughnessMap={plazaTileBumpTexture}
+            bumpMap={sidewalkHeight}
+            bumpScale={0.018}
+            roughnessMap={sidewalkRoughness}
             color="#ffffff"
-            roughness={0.62}
-            metalness={0.04}
+            roughness={1}
+            metalness={0}
           />
         </mesh>
 
@@ -792,54 +731,10 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
             <meshBasicMaterial color="#f59e0b" transparent opacity={0.92} />
           </mesh>
 
-          <mesh position={[0, 0.18, 0]} castShadow receiveShadow>
-            <cylinderGeometry args={[2.1, 2.3, 0.36, 24]} />
-            <meshStandardMaterial color="#334155" roughness={0.48} />
-          </mesh>
-          <mesh position={[0, 0.39, 0]} receiveShadow>
-            <cylinderGeometry args={[1.88, 1.98, 0.12, 24]} />
-            <meshStandardMaterial color="#f8fafc" roughness={0.35} />
-          </mesh>
-          <mesh position={[0, 0.46, 0]}>
-            <cylinderGeometry args={[1.72, 1.72, 0.05, 24]} />
-            <meshStandardMaterial
-              color="#38bdf8"
-              emissive="#0284c7"
-              emissiveIntensity={0.42}
-              roughness={0.14}
-              metalness={0.45}
-            />
-          </mesh>
+          {/* Sculpted Renaissance Tiered Stone Fountain Monument */}
+          <ExteriorAssets id="fountain" placements={fountainPlacements} />
 
-          <mesh position={[0, 0.82, 0]} castShadow>
-            <cylinderGeometry args={[0.38, 0.62, 0.72, 8]} />
-            <meshStandardMaterial color="#0f172a" roughness={0.35} metalness={0.4} />
-          </mesh>
-
-          <group ref={sculptureRef} position={[0, 1.65, 0]}>
-            <mesh castShadow>
-              <octahedronGeometry args={[0.72, 0]} />
-              <meshStandardMaterial
-                color="#0ea5e9"
-                emissive="#0284c7"
-                emissiveIntensity={0.3}
-                metalness={0.65}
-                roughness={0.18}
-                flatShading
-              />
-            </mesh>
-            <mesh rotation={[0, Math.PI / 4, 0]}>
-              <octahedronGeometry args={[0.88, 0]} />
-              <meshStandardMaterial color="#f8fafc" wireframe />
-            </mesh>
-          </group>
-
-          <mesh ref={outerRingRef} position={[0, 1.65, 0]}>
-            <torusGeometry args={[1.05, 0.04, 10, 32]} />
-            <meshStandardMaterial color="#fbbf24" metalness={0.75} roughness={0.2} />
-          </mesh>
-
-          <Billboard position={[0, 3.05, 0]}>
+          <Billboard position={[0, 3.42, 0]}>
             <mesh>
               <planeGeometry args={[4.2, 0.88]} />
               <meshBasicMaterial map={plazaBannerTexture} transparent depthWrite={false} />
@@ -997,16 +892,8 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
             6. ASSET-DRIVEN TREES (`env-tree-*.glb`), BENCHES (`env-park-bench.glb`),
                STREET LAMPS (`env-street-lamp.glb`) & PLANTER URNS (`env-planter-urn.glb`)
            ================================================================ */}
-        {/* 16 Multi-Species Sculpted 3D Trees (Oak, Blossom & Layered Pine/Cypress) */}
-        {treeClones.map((t, i) => (
-          <primitive
-            key={`glb-tree-${i}`}
-            object={t.object}
-            position={[t.x, 0.22, t.z]}
-            rotation={[0, t.ry, 0]}
-            scale={[t.scale, t.scale, t.scale]}
-          />
-        ))}
+        {/* Imported leafy tree variants and birch; legacy asset IDs retain placement compatibility */}
+        {treeBatches.map(b => <ExteriorAssets key={b.id} id={b.id} placements={b.placements} />)}
 
         {/* 6 Sculpted Stone Planter Urns along Grand Avenue & Entrance */}
         {urnClones.map((u, i) => (
@@ -1017,22 +904,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           />
         ))}
 
-        {/* Instanced Colorful Flower Bushes & Blossoms in Planters (3 draw calls total) */}
-        <Instances geometry={FLOWER_BUSH_GEOM} material={TREE_MID_MAT}>
-          {[...FLOWER_CLUSTERS_PINK, ...FLOWER_CLUSTERS_GOLD].map(([fx, fy, fz], i) => (
-            <Instance key={`fbush-${i}`} position={[fx, fy, fz]} />
-          ))}
-        </Instances>
-        <Instances geometry={FLOWER_BLOSSOM_GEOM} material={FLOWER_PINK_MAT}>
-          {FLOWER_CLUSTERS_PINK.map(([fx, fy, fz], i) => (
-            <Instance key={`fpink-${i}`} position={[fx, fy + 0.18, fz]} />
-          ))}
-        </Instances>
-        <Instances geometry={FLOWER_BLOSSOM_GEOM} material={FLOWER_GOLD_MAT}>
-          {FLOWER_CLUSTERS_GOLD.map(([fx, fy, fz], i) => (
-            <Instance key={`fgold-${i}`} position={[fx, fy + 0.18, fz]} />
-          ))}
-        </Instances>
+        <ExteriorAssets id="flowers" placements={flowerPlacements} shadows={false} />
 
         {/* 4 Instanced Perimeter Rest Lounge Pavilions (Tables & Parasol Umbrellas) */}
         <Instances geometry={LOUNGE_TABLE_BASE_GEOM} material={BENCH_IRON_MAT}>
@@ -1079,25 +951,11 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           ))}
         </Instances>
 
-        {/* 8 Ergonomic Contoured Slat Park Benches (`env-park-bench.glb`) */}
-        {benchClones.map((b, i) => (
-          <primitive
-            key={`glb-bench-${i}`}
-            object={b.object}
-            position={[b.x, 0.02, b.z]}
-            rotation={[0, b.rotationY, 0]}
-          />
-        ))}
+        {/* Imported wood and iron park benches */}
+        <ExteriorAssets id="env-park-bench" placements={benchPlacements} />
 
-        {/* 8 Architectural Swan-Neck Boulevard Street Lamps (`env-street-lamp.glb`) + Warm Light Pools */}
-        {lampClones.map((l, i) => (
-          <primitive
-            key={`glb-lamp-${i}`}
-            object={l.object}
-            position={[l.x, 0.02, l.z]}
-            rotation={[0, l.ry, 0]}
-          />
-        ))}
+        {/* Imported textured street lamps + warm light pools */}
+        <ExteriorAssets id="env-street-lamp" placements={lampPlacements} />
         <Instances geometry={LAMP_POOL_GEOM} material={LAMP_POOL_MAT}>
           {PERIMETER_LAMPS.map(([lx, lz], i) => (
             <Instance

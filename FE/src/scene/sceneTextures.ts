@@ -1364,6 +1364,35 @@ export function createSidewalkPaverTexture(repeatX = 3, repeatY = 12): THREE.Can
   return texture;
 }
 
+/** Linear data maps aligned with the running-bond sidewalk's 4 x 8 pavers. */
+export function createSidewalkPaverDataTexture(channel: 'height' | 'roughness', repeatX = 14, repeatY = 14): THREE.CanvasTexture {
+  const canvas = createCanvasElement(512, 512);
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = channel === 'height' ? '#555555' : '#f5f5f5';
+    ctx.fillRect(0, 0, 512, 512);
+    for (let row = 0; row < 8; row++) {
+      for (let col = -1; col <= 4; col++) {
+        const x = col * 128 + (row % 2) * 64;
+        const y = row * 64;
+        const shade = channel === 'height' ? 180 : 190 + ((row * 7 + col * 11 + 55) % 28);
+        ctx.fillStyle = `rgb(${shade},${shade},${shade})`;
+        ctx.fillRect(x + 2.5, y + 2.5, 123, 59);
+        if (channel === 'height') {
+          ctx.fillStyle = '#c6c6c6';
+          ctx.fillRect(x + 4.5, y + 4.5, 119, 55);
+        }
+      }
+    }
+  }
+  const texture = registerTrackedTexture(canvas);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeatX, repeatY);
+  texture.anisotropy = 8;
+  return texture;
+}
+
 /**
  * Creates a decorative compass-rose & radial cobble mosaic floor medallion texture
  * for the Central Pedestrian Plaza.
