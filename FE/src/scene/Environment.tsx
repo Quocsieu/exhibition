@@ -183,18 +183,30 @@ const STYLIZED_CITY_BUILDINGS: {
   setbackSx?: number;
   setbackSz?: number;
 }[] = [
-  { x: -32, z: -31, sx: 7.2, sy: 11.2, sz: 6.2, setbackY: 8.2, setbackSx: 5.4, setbackSz: 4.8 },
-  { x: -23, z: -33, sx: 6.4, sy: 14.5, sz: 5.8, setbackY: 10.5, setbackSx: 4.8, setbackSz: 4.2 },
-  { x: -13, z: -34, sx: 7.5, sy: 10.2, sz: 6.0, setbackY: 7.5, setbackSx: 5.6, setbackSz: 4.6 },
-  { x: 0, z: -35, sx: 8.2, sy: 16.2, sz: 6.5, setbackY: 12.0, setbackSx: 6.2, setbackSz: 4.8 },
-  { x: 13, z: -34, sx: 7.2, sy: 11.5, sz: 6.0, setbackY: 8.5, setbackSx: 5.2, setbackSz: 4.5 },
-  { x: 23, z: -33, sx: 6.4, sy: 13.8, sz: 5.8, setbackY: 9.8, setbackSx: 4.6, setbackSz: 4.2 },
-  { x: 32, z: -31, sx: 7.2, sy: 10.5, sz: 6.2, setbackY: 7.8, setbackSx: 5.4, setbackSz: 4.8 },
-  { x: -34, z: -18, sx: 6.2, sy: 12.5, sz: 6.8, setbackY: 9.2, setbackSx: 4.8, setbackSz: 5.2 },
-  { x: -35, z: -6, sx: 6.4, sy: 9.8, sz: 6.5, setbackY: 7.2, setbackSx: 4.8, setbackSz: 4.8 },
-  { x: -34, z: 7, sx: 6.2, sy: 11.2, sz: 6.5, setbackY: 8.4, setbackSx: 4.6, setbackSz: 5.0 },
-  { x: 34, z: -18, sx: 6.2, sy: 11.5, sz: 6.8, setbackY: 8.5, setbackSx: 4.8, setbackSz: 5.2 },
-  { x: 35, z: -6, sx: 6.4, sy: 9.4, sz: 6.5, setbackY: 7.0, setbackSx: 4.8, setbackSz: 4.8 },
+  // North Boulevard Skyline
+  { x: -32, z: -31, sx: 7.2, sy: 12.2, sz: 6.2, setbackY: 8.2, setbackSx: 5.4, setbackSz: 4.8 },
+  { x: -23, z: -33, sx: 6.4, sy: 15.5, sz: 5.8, setbackY: 10.5, setbackSx: 4.8, setbackSz: 4.2 },
+  { x: -13, z: -34, sx: 7.5, sy: 11.2, sz: 6.0, setbackY: 7.5, setbackSx: 5.6, setbackSz: 4.6 },
+  { x: 0, z: -35, sx: 8.2, sy: 17.2, sz: 6.5, setbackY: 12.0, setbackSx: 6.2, setbackSz: 4.8 },
+  { x: 13, z: -34, sx: 7.2, sy: 12.5, sz: 6.0, setbackY: 8.5, setbackSx: 5.2, setbackSz: 4.5 },
+  { x: 23, z: -33, sx: 6.4, sy: 14.8, sz: 5.8, setbackY: 9.8, setbackSx: 4.6, setbackSz: 4.2 },
+  { x: 32, z: -31, sx: 7.2, sy: 11.5, sz: 6.2, setbackY: 7.8, setbackSx: 5.4, setbackSz: 4.8 },
+
+  // West Avenue Skyline
+  { x: -34, z: -18, sx: 6.2, sy: 13.5, sz: 6.8, setbackY: 9.2, setbackSx: 4.8, setbackSz: 5.2 },
+  { x: -35, z: -6, sx: 6.4, sy: 10.8, sz: 6.5, setbackY: 7.2, setbackSx: 4.8, setbackSz: 4.8 },
+  { x: -34, z: 7, sx: 6.2, sy: 12.2, sz: 6.5, setbackY: 8.4, setbackSx: 4.6, setbackSz: 5.0 },
+  { x: -33, z: 20, sx: 6.4, sy: 11.0, sz: 6.2, setbackY: 7.6, setbackSx: 4.8, setbackSz: 4.8 },
+
+  // East Avenue Skyline
+  { x: 34, z: -18, sx: 6.2, sy: 12.5, sz: 6.8, setbackY: 8.5, setbackSx: 4.8, setbackSz: 5.2 },
+  { x: 35, z: -6, sx: 6.4, sy: 10.4, sz: 6.5, setbackY: 7.0, setbackSx: 4.8, setbackSz: 4.8 },
+  { x: 34, z: 7, sx: 6.2, sy: 13.0, sz: 6.5, setbackY: 8.8, setbackSx: 4.6, setbackSz: 5.0 },
+  { x: 33, z: 20, sx: 6.4, sy: 11.2, sz: 6.2, setbackY: 7.8, setbackSx: 4.8, setbackSz: 4.8 },
+
+  // South Entrance Flanking Buildings (Framing Grand Entrance Gate)
+  { x: -22, z: 28, sx: 7.0, sy: 13.2, sz: 6.4, setbackY: 9.0, setbackSx: 5.2, setbackSz: 4.8 },
+  { x: 22, z: 28, sx: 7.0, sy: 13.2, sz: 6.4, setbackY: 9.0, setbackSx: 5.2, setbackSz: 4.8 },
 ];
 
 // Distant Low-Poly Parkland Hills around the outer horizon
@@ -678,14 +690,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
             <mesh position={[conn.w / 2 + 0.11, 0.024, 0]} receiveShadow material={CURB_STONE_MAT}>
               <boxGeometry args={[0.22, 0.048, conn.d]} />
             </mesh>
-            <mesh position={[-conn.w / 2, 0.026, 0]}>
-              <boxGeometry args={[0.1, 0.052, conn.d]} />
-              <meshBasicMaterial color={conn.accent} />
-            </mesh>
-            <mesh position={[conn.w / 2, 0.026, 0]}>
-              <boxGeometry args={[0.1, 0.052, conn.d]} />
-              <meshBasicMaterial color={conn.accent} />
-            </mesh>
+            {/* Clean paved walkway without fluorescent edge lines */}
           </group>
         ))}
 
@@ -722,13 +727,10 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
               metalness={0.08}
             />
           </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.027, 0]}>
-            <ringGeometry args={[7.15, 7.48, 64]} />
-            <meshBasicMaterial color="#0ea5e9" transparent opacity={0.88} />
-          </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.029, 0]}>
-            <ringGeometry args={[5.35, 5.55, 64]} />
-            <meshBasicMaterial color="#f59e0b" transparent opacity={0.92} />
+          {/* Natural refined travertine paving ring */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.025, 0]} receiveShadow>
+            <ringGeometry args={[6.8, 7.1, 64]} />
+            <meshStandardMaterial color="#d6cfc7" roughness={0.68} metalness={0.05} />
           </mesh>
 
           {/* Sculpted Renaissance Tiered Stone Fountain Monument */}

@@ -1398,85 +1398,95 @@ export function createSidewalkPaverDataTexture(channel: 'height' | 'roughness', 
  * for the Central Pedestrian Plaza.
  */
 export function createPlazaMedallionTexture(): THREE.CanvasTexture {
-  const canvas = createCanvasElement(512, 512);
+  const canvas = createCanvasElement(1024, 1024);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
-    const cx = 256;
-    const cy = 256;
-    ctx.clearRect(0, 0, 512, 512);
+    const cx = 512;
+    const cy = 512;
+    ctx.clearRect(0, 0, 1024, 1024);
 
-    // Outer granite curb border ring
+    // Outer warm granite curb border
     ctx.beginPath();
-    ctx.arc(cx, cy, 250, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 500, 0, Math.PI * 2);
     ctx.fillStyle = '#d6d3d1';
     ctx.fill();
-
-    // Main warm travertine & sandstone plaza disc
-    ctx.beginPath();
-    ctx.arc(cx, cy, 238, 0, Math.PI * 2);
-    ctx.fillStyle = '#efeae1';
-    ctx.fill();
-    ctx.lineWidth = 5;
+    ctx.lineWidth = 8;
     ctx.strokeStyle = '#a8a29e';
     ctx.stroke();
 
-    // Concentric decorative stone paver rings
-    const ringRadii = [214, 186, 152, 118, 84];
-    const ringFills = ['#e5dec9', '#f3efe6', '#e2d9c5', '#ede8dc', '#dfd5be'];
+    // Main warm travertine & aged sandstone plaza floor
+    ctx.beginPath();
+    ctx.arc(cx, cy, 484, 0, Math.PI * 2);
+    ctx.fillStyle = '#f5f0e8';
+    ctx.fill();
+
+    // Concentric elegant natural stone paving rings with subtle tonal shifts
+    const ringRadii = [450, 400, 340, 275, 205, 140];
+    const ringFills = ['#ede5d8', '#f8f4ec', '#e9dfd0', '#f4ede2', '#e4d9c7', '#ede5d8'];
     ringRadii.forEach((r, idx) => {
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fillStyle = ringFills[idx];
       ctx.fill();
-      ctx.lineWidth = 2.5;
-      ctx.strokeStyle = '#b8b0a2';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(168, 162, 158, 0.45)';
       ctx.stroke();
     });
 
-    // Radial 16-segment cobble joint lines
-    ctx.strokeStyle = 'rgba(148, 138, 124, 0.55)';
+    // Radial cobblestone paving joint lines (32 subtle segments)
+    ctx.strokeStyle = 'rgba(168, 162, 158, 0.35)';
     ctx.lineWidth = 2.5;
-    for (let i = 0; i < 16; i++) {
-      const angle = (i * Math.PI) / 8;
+    for (let i = 0; i < 32; i++) {
+      const angle = (i * Math.PI) / 16;
       ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(angle) * 58, cy + Math.sin(angle) * 58);
-      ctx.lineTo(cx + Math.cos(angle) * 236, cy + Math.sin(angle) * 236);
+      ctx.moveTo(cx + Math.cos(angle) * 110, cy + Math.sin(angle) * 110);
+      ctx.lineTo(cx + Math.cos(angle) * 480, cy + Math.sin(angle) * 480);
       ctx.stroke();
     }
 
-    // 8-Point Architectural Compass Rose Star in the Central Plaza
-    for (let i = 0; i < 8; i++) {
-      const angle = (i * Math.PI) / 4;
-      const outerR = i % 2 === 0 ? 178 : 142;
-      const halfSpread = 0.16;
+    // Classical warm geometric stone rosette inlay (Aged Terra-Cotta & Warm Slate)
+    // Refined, subtle and natural — no neon or bright blue/orange radar lines
+    for (let i = 0; i < 16; i++) {
+      const angle = (i * Math.PI) / 8;
+      const isMajor = i % 2 === 0;
+      const outerR = isMajor ? 320 : 250;
+      const halfSpread = 0.09;
 
       ctx.beginPath();
-      ctx.moveTo(cx, cy);
+      ctx.moveTo(cx + Math.cos(angle) * 125, cy + Math.sin(angle) * 125);
       ctx.lineTo(
-        cx + Math.cos(angle - halfSpread) * 72,
-        cy + Math.sin(angle - halfSpread) * 72
+        cx + Math.cos(angle - halfSpread) * (outerR * 0.65),
+        cy + Math.sin(angle - halfSpread) * (outerR * 0.65)
       );
       ctx.lineTo(cx + Math.cos(angle) * outerR, cy + Math.sin(angle) * outerR);
       ctx.lineTo(
-        cx + Math.cos(angle + halfSpread) * 72,
-        cy + Math.sin(angle + halfSpread) * 72
+        cx + Math.cos(angle + halfSpread) * (outerR * 0.65),
+        cy + Math.sin(angle + halfSpread) * (outerR * 0.65)
       );
       ctx.closePath();
-      ctx.fillStyle = i % 2 === 0 ? '#d97706' : '#0284c7';
+      ctx.fillStyle = isMajor ? '#c29b7f' : '#b0a495';
       ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#f8fafc';
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#e7ded4';
       ctx.stroke();
     }
 
-    // Inner stone medallion ring around monument plinth
+    // Inner carved stone ring bordering the fountain base
     ctx.beginPath();
-    ctx.arc(cx, cy, 68, 0, Math.PI * 2);
-    ctx.fillStyle = '#f8fafc';
+    ctx.arc(cx, cy, 120, 0, Math.PI * 2);
+    ctx.fillStyle = '#e7ded4';
     ctx.fill();
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = '#d97706';
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#8c7e70';
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, 95, 0, Math.PI * 2);
+    ctx.fillStyle = '#dfd3c3';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#baa896';
     ctx.stroke();
   }
 
