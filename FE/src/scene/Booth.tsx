@@ -16,6 +16,7 @@ import {
   createProductDisplayCardTexture,
 } from './sceneTextures';
 import { cloneCachedAsset, getBoothGlbAssetId } from './assetLoader';
+import { RooflessBoothShell } from './RooflessBoothShell';
 
 export interface BoothProps {
   booth: BoothType;
@@ -98,17 +99,8 @@ const SLOT_CARD_PLANE_GEOM = new THREE.PlaneGeometry(1.1, 1.33);
 
 const SIGN_HOOD_VISOR_GEOM = new THREE.BoxGeometry(1, 0.06, 0.44);
 const SIGN_BRACKET_GEOM = new THREE.BoxGeometry(0.12, 0.42, 0.22);
-const DOWNLIGHT_PUCK_GEOM = new THREE.CylinderGeometry(0.09, 0.09, 0.02, 12);
-const DOWNLIGHT_GLOW_GEOM = new THREE.CircleGeometry(0.075, 12);
-const RAFTER_TIE_GEOM = new THREE.BoxGeometry(0.14, 0.14, 0.88);
-const LANTERN_HOOK_GEOM = new THREE.CylinderGeometry(0.012, 0.012, 0.22, 6);
 const TRUSS_GUSSET_GEOM = new THREE.BoxGeometry(0.28, 0.04, 0.28);
-const SOLAR_FRAME_TRIM_GEOM = new THREE.BoxGeometry(1.42, 0.03, 1.29);
 
-const PERGOLA_RAFTER_GEOM = new THREE.BoxGeometry(0.16, 0.22, 4.6);
-const AWNING_SLAT_GEOM = new THREE.BoxGeometry(0.94, 0.08, 0.68);
-const LANTERN_BULB_GEOM = new THREE.SphereGeometry(0.12, 10, 10);
-const CEIL_LIGHT_GEOM = new THREE.BoxGeometry(1.45, 0.06, 0.18);
 
 const TOTEM_BODY_GEOM = new THREE.BoxGeometry(0.56, 1.92, 0.16);
 const TOTEM_BASE_GEOM = new THREE.BoxGeometry(0.68, 0.08, 0.36);
@@ -117,9 +109,6 @@ const TOTEM_SCREEN_GEOM = new THREE.PlaneGeometry(0.46, 1.18);
 const BEACON_RING_GEOM = new THREE.RingGeometry(0.34, 0.48, 24);
 const BEACON_CORE_GEOM = new THREE.CircleGeometry(0.26, 20);
 
-const HALO_RING_LARGE_GEOM = new THREE.TorusGeometry(0.74, 0.048, 10, 28);
-const HALO_RING_SMALL_GEOM = new THREE.TorusGeometry(0.46, 0.038, 10, 24);
-const SOLAR_PANEL_GEOM = new THREE.BoxGeometry(1.38, 0.07, 1.25);
 const PLANT_BUSH_GEOM = new THREE.DodecahedronGeometry(0.28, 0);
 const PLANT_POT_GEOM = new THREE.CylinderGeometry(0.26, 0.2, 0.38, 10);
 
@@ -160,11 +149,6 @@ const ESPRESSO_WOOD_MAT = new THREE.MeshStandardMaterial({
   color: '#451a03',
   roughness: 0.58,
 });
-const SOLAR_CELL_MAT = new THREE.MeshStandardMaterial({
-  color: '#0284c7',
-  metalness: 0.68,
-  roughness: 0.16,
-});
 const EMERALD_PLANT_MAT = new THREE.MeshStandardMaterial({
   color: '#10b981',
   roughness: 0.5,
@@ -198,12 +182,9 @@ const BRASS_ACCENT_MAT = new THREE.MeshStandardMaterial({
   metalness: 0.78,
   roughness: 0.25,
 });
-const WARM_DOWNLIGHT_MAT = new THREE.MeshBasicMaterial({ color: '#fef08a' });
-const CYAN_DOWNLIGHT_MAT = new THREE.MeshBasicMaterial({ color: '#7dd3fc' });
 const GOLD_BASIC_MAT = new THREE.MeshBasicMaterial({ color: '#fbbf24' });
 const CYAN_GLOW_MAT = new THREE.MeshBasicMaterial({ color: '#38bdf8' });
 const EMERALD_GLOW_MAT = new THREE.MeshBasicMaterial({ color: '#34d399' });
-const WARM_BULB_MAT = new THREE.MeshBasicMaterial({ color: '#fde68a' });
 const WHITE_LIGHT_MAT = new THREE.MeshBasicMaterial({ color: '#f8fafc' });
 
 interface SlotGlbModelProps {
@@ -630,9 +611,9 @@ export const Booth: React.FC<BoothProps> = React.memo(
         }}
       >
         {/* ================================================================
-            1. BESPOKE 3D ARCHITECTURAL BUILDING SHELL (`booth-*.glb` asset)
+            1. ROOFLESS BLENDER FRAME + ORIGINAL EXHIBITION FLOOR
            ================================================================ */}
-        <primitive object={exteriorShell} />
+        <RooflessBoothShell theme={theme} fallback={exteriorShell} />
 
         {/* Active Selection Glow Trim & Interactive Entrance Beacon */}
         <mesh position={[0, 0.03, 0]}>
@@ -912,15 +893,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
                 <planeGeometry args={[vw + 0.36, 0.68]} />
                 <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
-              <mesh position={[-vw * 0.22, -0.14, -0.5]} geometry={CEIL_LIGHT_GEOM} material={CYAN_GLOW_MAT} />
-              <mesh position={[vw * 0.22, -0.14, -0.5]} geometry={CEIL_LIGHT_GEOM} material={WHITE_LIGHT_MAT} />
-              {/* Showroom Entrance Ceiling Downlight Pucks */}
-              {[-vw * 0.28, 0, vw * 0.28].map((dx, idx) => (
-                <group key={`tech-puck-${idx}`} position={[dx, -0.16, -0.6]}>
-                  <mesh geometry={DOWNLIGHT_PUCK_GEOM} material={DARK_NAVY_MAT} />
-                  <mesh position={[0, -0.012, 0]} rotation={[Math.PI / 2, 0, 0]} geometry={DOWNLIGHT_GLOW_GEOM} material={CYAN_DOWNLIGHT_MAT} />
-                </group>
-              ))}
             </group>
 
             <group position={[vw / 2 + 0.28, 0.18, vd / 2 - 0.22]}>
@@ -951,31 +923,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
                 <planeGeometry args={[vw + 0.36, 0.68]} />
                 <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
-              {[-2.4, -1.6, -0.8, 0, 0.8, 1.6, 2.4].map((rx, idx) => (
-                <mesh
-                  key={`rafter-${idx}`}
-                  position={[rx, -0.18, -0.62]}
-                  geometry={PERGOLA_RAFTER_GEOM}
-                  material={WARM_OAK_MAT}
-                />
-              ))}
-              {/* Cross-Rafter Structural Timber Ties */}
-              {[-1.2, 0, 1.2].map((tx, idx) => (
-                <mesh
-                  key={`rafter-tie-${idx}`}
-                  position={[tx, -0.14, -0.62]}
-                  rotation={[0, Math.PI / 2, 0]}
-                  geometry={RAFTER_TIE_GEOM}
-                  material={WARM_OAK_MAT}
-                />
-              ))}
-              {/* Showroom Entrance Ceiling Warm Downlight Pucks */}
-              {[-vw * 0.28, 0, vw * 0.28].map((dx, idx) => (
-                <group key={`living-puck-${idx}`} position={[dx, -0.16, -0.6]}>
-                  <mesh geometry={DOWNLIGHT_PUCK_GEOM} material={WARM_OAK_MAT} />
-                  <mesh position={[0, -0.012, 0]} rotation={[Math.PI / 2, 0, 0]} geometry={DOWNLIGHT_GLOW_GEOM} material={WARM_DOWNLIGHT_MAT} />
-                </group>
-              ))}
             </group>
 
             {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
@@ -1004,29 +951,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
                 <planeGeometry args={[vw + 0.36, 0.68]} />
                 <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
-              {[-2.4, -1.44, -0.48, 0.48, 1.44, 2.4].map((ax, idx) => (
-                <mesh
-                  key={`cafe-awning-${idx}`}
-                  position={[ax, -1.08, vd / 2 - 0.42]}
-                  rotation={[0.26, 0, 0]}
-                  geometry={AWNING_SLAT_GEOM}
-                  material={idx % 2 === 0 ? COPPER_CRAFT_MAT : CREAM_WALL_MAT}
-                />
-              ))}
-              {[-2.1, -1.05, 0, 1.05, 2.1].map((lx, idx) => (
-                <group key={`cafe-lantern-${idx}`}>
-                  <mesh
-                    position={[lx, -1.14, vd / 2 - 0.48]}
-                    geometry={LANTERN_HOOK_GEOM}
-                    material={COPPER_CRAFT_MAT}
-                  />
-                  <mesh
-                    position={[lx, -1.24, vd / 2 - 0.48]}
-                    geometry={LANTERN_BULB_GEOM}
-                    material={WARM_BULB_MAT}
-                  />
-                </group>
-              ))}
             </group>
 
             {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
@@ -1058,13 +982,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
                 <planeGeometry args={[vw + 0.36, 0.68]} />
                 <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
-              {/* Showroom Entrance Technical Downlights */}
-              {[-vw * 0.28, 0, vw * 0.28].map((dx, idx) => (
-                <group key={`rob-puck-${idx}`} position={[dx, -0.16, -0.6]}>
-                  <mesh geometry={DOWNLIGHT_PUCK_GEOM} material={DARK_NAVY_MAT} />
-                  <mesh position={[0, -0.012, 0]} rotation={[Math.PI / 2, 0, 0]} geometry={DOWNLIGHT_GLOW_GEOM} material={CYAN_DOWNLIGHT_MAT} />
-                </group>
-              ))}
             </group>
 
             {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
@@ -1098,23 +1015,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
                 <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
 
-              <group position={[0, -0.68, -0.5]}>
-                <mesh rotation={[Math.PI / 2, 0.12, 0]} geometry={HALO_RING_LARGE_GEOM} material={WHITE_LIGHT_MAT} />
-                <mesh
-                  rotation={[Math.PI / 2, -0.18, 0]}
-                  position={[0, -0.24, 0]}
-                  geometry={HALO_RING_SMALL_GEOM}
-                  material={MAGENTA_ART_MAT}
-                />
-                {[-0.68, 0.68].map((cx, idx) => (
-                  <mesh
-                    key={`halo-cable-${idx}`}
-                    position={[cx, 0.32, 0]}
-                    geometry={LANTERN_HOOK_GEOM}
-                    material={CHROME_PILLAR_MAT}
-                  />
-                ))}
-              </group>
             </group>
           </group>
         )}
@@ -1138,22 +1038,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
                 <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
 
-              {[-2.1, -0.7, 0.7, 2.1].map((sx, idx) => (
-                <group key={`solar-group-${idx}`}>
-                  <mesh
-                    position={[sx, 0.38, -0.65]}
-                    rotation={[0.38, 0, 0]}
-                    geometry={SOLAR_PANEL_GEOM}
-                    material={SOLAR_CELL_MAT}
-                  />
-                  <mesh
-                    position={[sx, 0.39, -0.65]}
-                    rotation={[0.38, 0, 0]}
-                    geometry={SOLAR_FRAME_TRIM_GEOM}
-                    material={WHITE_GLOSS_MAT}
-                  />
-                </group>
-              ))}
             </group>
 
             {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (

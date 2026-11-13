@@ -1,0 +1,292 @@
+{
+  "checks": [
+    {
+      "name": "First normal visit defaults to Explore",
+      "status": "PASS",
+      "evidence": [
+        -1.1978817987255046,
+        2.26,
+        8.999999568579153
+      ]
+    },
+    {
+      "name": "Reload defaults to Explore",
+      "status": "PASS",
+      "evidence": [
+        -1.1978817987255046,
+        2.26,
+        8.999999568579153
+      ]
+    },
+    {
+      "name": "Overview toggle",
+      "status": "PASS",
+      "evidence": [
+        15.999999686177707,
+        26.20000007264405,
+        22.80000035740872
+      ]
+    },
+    {
+      "name": "Return to Explore",
+      "status": "PASS",
+      "evidence": [
+        -1.1978817987255046,
+        2.26,
+        8.999999568579153
+      ]
+    },
+    {
+      "name": "Explore wheel zoom",
+      "status": "PASS",
+      "evidence": {
+        "before": [
+          -1.1978817987255046,
+          2.26,
+          8.999999568579153
+        ],
+        "after": [
+          -1.198026880868286,
+          2.1052056248695843,
+          8.643835549155861
+        ]
+      }
+    },
+    {
+      "name": "Booth 1 exit",
+      "status": "PASS"
+    },
+    {
+      "name": "Booth 2 exit",
+      "status": "PASS"
+    },
+    {
+      "name": "Booth 3 exit",
+      "status": "PASS"
+    },
+    {
+      "name": "Booth 4 exit",
+      "status": "PASS"
+    },
+    {
+      "name": "Booth 5 exit",
+      "status": "PASS"
+    },
+    {
+      "name": "Booth 6 exit",
+      "status": "PASS"
+    }
+  ],
+  "errors": [],
+  "httpErrors": [],
+  "glbs": [
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/tech.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/living.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/coffee.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/robotics.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/design.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/energy.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_01.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_02.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_04.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_03.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/recycling_bin_01.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/7b_tCaBRLCI.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/R7qMWzb7nk.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-variant.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/planter_fluted_01.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/NBUxHir6FJ.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/RO32ltX6zJ.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/kn0sMwbspb.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_01-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_02-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_04-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_03-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-variant-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/R7qMWzb7nk-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/tech.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/living.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/coffee.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/robotics.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/design.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/booths/roofless-v1/energy.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_01.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_02.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_03.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_04.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/7b_tCaBRLCI.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/recycling_bin_01.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/R7qMWzb7nk.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-variant.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/planter_fluted_01.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/NBUxHir6FJ.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/kn0sMwbspb.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/RO32ltX6zJ.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_01-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_02-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_03-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_04-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-variant-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/R7qMWzb7nk-lod.glb",
+      "status": 200
+    }
+  ]
+}

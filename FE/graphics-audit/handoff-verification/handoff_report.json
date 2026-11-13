@@ -1,0 +1,67 @@
+{
+  "timestamp": "2026-11-13T09:40:27.824Z",
+  "status": "PASS",
+  "errors": [],
+  "performance": {
+    "explore": {
+      "fps": 108.09836951620538,
+      "calls": 417,
+      "triangles": 148687,
+      "textures": 52,
+      "geometries": 420,
+      "webglError": 0
+    },
+    "overview": {
+      "fps": 59.624366491089475,
+      "calls": 847,
+      "triangles": 317654,
+      "textures": 70,
+      "geometries": 524,
+      "webglError": 0
+    }
+  },
+  "booths": [
+    {
+      "index": 1,
+      "name": "Aether Tech Lab",
+      "focus": "PASS",
+      "productModal": "PASS",
+      "screenshot": "03_booth_1_Aether_Tech_Lab.png"
+    },
+    {
+      "index": 2,
+      "name": "Nordic Living Studio",
+      "focus": "PASS",
+      "productModal": "PASS",
+      "screenshot": "03_booth_2_Nordic_Living_Studio.png"
+    },
+    {
+      "index": 3,
+      "name": "EcoVita Roastery & Craft",
+      "focus": "PASS",
+      "productModal": "PASS",
+      "screenshot": "03_booth_3_EcoVita_Roastery___Craft.png"
+    },
+    {
+      "index": 4,
+      "name": "Kinetix Robotics & AI",
+      "focus": "PASS",
+      "productModal": "PASS",
+      "screenshot": "03_booth_4_Kinetix_Robotics___AI.png"
+    },
+    {
+      "index": 5,
+      "name": "Lumina Design Collective",
+      "focus": "PASS",
+      "productModal": "PASS",
+      "screenshot": "03_booth_5_Lumina_Design_Collective.png"
+    },
+    {
+      "index": 6,
+      "name": "Solaris Clean Energy",
+      "focus": "PASS",
+      "productModal": "PASS",
+      "screenshot": "03_booth_6_Solaris_Clean_Energy.png"
+    }
+  ]
+}

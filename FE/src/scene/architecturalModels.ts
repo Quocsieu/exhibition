@@ -1738,7 +1738,8 @@ export function buildCentralPlazaFountainModel(): THREE.Group {
 }
 
 export function buildBoothExteriorShell(theme: ArchitecturalBoothTheme): THREE.Group {
-  const group = buildOpenExhibitionShell(theme);
+  const group = new THREE.Group();
+  group.add(buildOpenExhibitionShell(theme));
   const colors: Record<ArchitecturalBoothTheme, [string, string, string]> = {
     tech: ['#0f172a', '#0ea5e9', '#dbeafe'], living: ['#d6d3d1', '#10b981', '#fef3c7'],
     coffee: ['#451a03', '#f59e0b', '#fef3c7'], robotics: ['#1e1b4b', '#8b5cf6', '#ede9fe'],
