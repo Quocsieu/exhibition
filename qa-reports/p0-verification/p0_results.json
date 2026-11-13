@@ -1,0 +1,50 @@
+{
+  "phase": "P0",
+  "timestamp": "2026-11-13T03:15:40.605Z",
+  "totalBooths": 6,
+  "boothResults": [
+    {
+      "index": 1,
+      "name": "Aether Tech Lab",
+      "focus": "PASS",
+      "productClick": "PASS",
+      "screenshot": "p0_booth_1_Aether_Tech_Lab.png"
+    },
+    {
+      "index": 2,
+      "name": "Nordic Living Studio",
+      "focus": "PASS",
+      "productClick": "PARTIAL",
+      "screenshot": "p0_booth_2_Nordic_Living_Studio.png"
+    },
+    {
+      "index": 3,
+      "name": "EcoVita Roastery & Craft",
+      "focus": "PASS",
+      "productClick": "PASS",
+      "screenshot": "p0_booth_3_EcoVita_Roastery___Craft.png"
+    },
+    {
+      "index": 4,
+      "name": "Kinetix Robotics & AI",
+      "focus": "PASS",
+      "productClick": "PASS",
+      "screenshot": "p0_booth_4_Kinetix_Robotics___AI.png"
+    },
+    {
+      "index": 5,
+      "name": "Kiến trúc nghệ thuật",
+      "focus": "PASS",
+      "productClick": "PASS",
+      "screenshot": "p0_booth_5_Ki_n_tr_c_ngh__thu_t.png"
+    },
+    {
+      "index": 6,
+      "name": "Solaris Clean Energy",
+      "focus": "PASS",
+      "productClick": "PASS",
+      "screenshot": "p0_booth_6_Solaris_Clean_Energy.png"
+    }
+  ],
+  "errors": []
+}

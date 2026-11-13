@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { useFrame } from '@react-three/fiber';
 import { cloneCachedAsset, type GlbAssetId } from './assetLoader';
 import { buildCentralPlazaFountainModel } from './architecturalModels';
+import { createFountainStoneHeight, FOUNTAIN_STONE_COLORS, setStoneUVs } from './exteriorStone';
 
 // Imported artwork only. Bounds are visual envelopes, never navigation inputs.
 const specs = {
@@ -13,13 +14,15 @@ const specs = {
   'env-park-bench': { file: 'kn0sMwbspb', bounds: [1.35, .9, .62] },
   'env-street-lamp': { file: 'RO32ltX6zJ', bounds: [.9, 3.8, .9] },
   fountain: { file: '7b_tCaBRLCI', bounds: [3.3, 2.65, 3.3] },
-  flowers: { file: 'NBUxHir6FJ', bounds: [.5, .12, .5] },
+  flowers: { file: 'NBUxHir6FJ', bounds: [.55, .3, .55] },
+  'env-planter-urn': { file: 'planter_fluted_01', bounds: [.94, 1.3, .94] },
+  'recycling-bin': { file: 'recycling_bin_01', bounds: [.44, .7, .44] },
   'city-a': { file: 'ppwtREejXg', bounds: [1, 1, 1] },
   'city-b': { file: 'yKo7F36Qk2', bounds: [1, 1, 1] },
-  'city-1': { file: 'city_building_01', bounds: [1, 1, 1] },
-  'city-2': { file: 'city_building_02', bounds: [1, 1, 1] },
-  'city-3': { file: 'city_building_03', bounds: [1, 1, 1] },
-  'city-4': { file: 'city_building_04', bounds: [1, 1, 1] },
+  'city-1': { file: 'city_detail_v2_01', bounds: [1, 1, 1] },
+  'city-2': { file: 'city_detail_v2_02', bounds: [1, 1, 1] },
+  'city-3': { file: 'city_detail_v2_03', bounds: [1, 1, 1] },
+  'city-4': { file: 'city_detail_v2_04', bounds: [1, 1, 1] },
 } satisfies Record<string, { file: string; bounds: number[] }>;
 export type ExteriorAssetId = keyof typeof specs;
 export interface ExteriorPlacement { position: [number, number, number]; rotation?: number; scale?: number | [number, number, number] }
@@ -67,15 +70,29 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
   const normalization = new THREE.Matrix4().makeScale(scale.x, scale.y, scale.z)
     .multiply(new THREE.Matrix4().makeTranslation(-center.x, -box.min.y, -center.z));
   const parts: Part[] = [];
+  const stoneHeight = id === 'fountain' ? createFountainStoneHeight() : undefined;
   scene.traverse(obj => {
     if (!(obj instanceof THREE.Mesh)) return;
     const geometry = obj.geometry.clone().applyMatrix4(normalization.clone().multiply(obj.matrixWorld));
     geometry.computeBoundingSphere();
     geometry.computeBoundingBox();
     const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+    if (stoneHeight && materials.some(m => FOUNTAIN_STONE_COLORS[m.name])) setStoneUVs(geometry);
     materials.forEach(m => {
       if (!(m instanceof THREE.MeshStandardMaterial)) return;
-      if (id === 'fountain' && m.transparent) { m.depthWrite = false; m.roughness = .2; }
+      if (id === 'fountain' && m.transparent) {
+        m.depthWrite = false;
+        m.roughness = 0.08;
+        m.metalness = 0.12;
+        m.color.set('#38bdf8');
+      }
+      if (stoneHeight && FOUNTAIN_STONE_COLORS[m.name]) {
+        m.color.set(FOUNTAIN_STONE_COLORS[m.name]);
+        m.metalness = 0.02;
+        m.roughness = 0.78;
+        m.bumpMap = stoneHeight;
+        m.bumpScale = 0.022;
+      }
       if (id.startsWith('city-') && /window/i.test(m.name)) { m.roughness = .32; m.metalness = .15; }
       if (id === 'env-street-lamp') m.emissiveIntensity = .35;
       for (const value of Object.values(m)) if (value instanceof THREE.Texture) value.anisotropy = 4;
@@ -172,8 +189,8 @@ function Fallback({ id, placements }: { id: ExteriorAssetId; placements: Exterio
     if (id === 'fountain') return buildCentralPlazaFountainModel();
     if (id.startsWith('env-')) return cloneCachedAsset(id as GlbAssetId);
     const group = new THREE.Group();
-    const geometry = id === 'flowers' ? new THREE.SphereGeometry(.16, 8, 6) : new THREE.BoxGeometry(1, 1, 1);
-    geometry.translate(0, id === 'flowers' ? .1 : .5, 0);
+    const geometry = id === 'flowers' ? new THREE.SphereGeometry(.16, 8, 6) : id === 'recycling-bin' ? new THREE.CylinderGeometry(.2, .17, .64, 12) : new THREE.BoxGeometry(1, 1, 1);
+    geometry.translate(0, id === 'flowers' ? .1 : id === 'recycling-bin' ? .32 : .5, 0);
     group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: id === 'flowers' ? '#7f9962' : '#a6aaa8', roughness: .9 })));
     return group;
   }), [id, placements]);

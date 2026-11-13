@@ -73,6 +73,8 @@ const EXPO_COUNTER_BODY_GEOM = new THREE.BoxGeometry(3.32, 0.26, 0.84);
 const EXPO_COUNTER_TOP_GEOM = new THREE.BoxGeometry(3.44, 0.05, 0.92);
 const EXPO_COUNTER_FRONT_PANEL_GEOM = new THREE.BoxGeometry(3.12, 0.18, 0.04);
 const EXPO_COUNTER_LED_STRIP_GEOM = new THREE.BoxGeometry(3.4, 0.035, 0.9);
+const COUNTER_PLINTH_BASE_GEOM = new THREE.BoxGeometry(3.18, 0.08, 0.74);
+const COUNTER_TOP_TRIM_GEOM = new THREE.BoxGeometry(3.48, 0.018, 0.96);
 
 // KHU C — Symmetric 2-Tier Secondary Showroom Racks (Flanking at x = ±2.44m)
 const STEPPED_RACK_PILLAR_GEOM = new THREE.BoxGeometry(1.18, 1.38, 0.64);
@@ -80,15 +82,28 @@ const STEPPED_RACK_LOWER_BASE_GEOM = new THREE.BoxGeometry(1.24, 0.14, 0.68);
 const STEPPED_SHELF_BOARD_GEOM = new THREE.BoxGeometry(1.3, 0.055, 0.74);
 const STEPPED_SHELF_TRIM_GEOM = new THREE.BoxGeometry(1.32, 0.025, 0.76);
 const STEPPED_RACK_BACKBOARD_GEOM = new THREE.BoxGeometry(1.28, 1.18, 0.05);
+const SHELF_STRUT_ROD_GEOM = new THREE.CylinderGeometry(0.018, 0.018, 1.22, 8);
+const SHELF_CORNER_BRACKET_GEOM = new THREE.BoxGeometry(0.08, 0.12, 0.08);
 
 // Portrait Showroom Product Display Panel Geometries (1 : 1.21 aspect ratio matching 1024 × 1240 texture)
-const SLOT_EMPTY_MAT_GEOM = new THREE.BoxGeometry(1.04, 0.008, 0.54);
+const SLOT_EMPTY_BEVEL_GEOM = new THREE.BoxGeometry(1.08, 0.014, 0.58);
+const SLOT_EMPTY_INLAY_GEOM = new THREE.BoxGeometry(1.02, 0.016, 0.52);
+const SLOT_EMPTY_CORNER_GEOM = new THREE.BoxGeometry(0.06, 0.018, 0.06);
 const SLOT_STAND_BASE_GEOM = new THREE.BoxGeometry(1.08, 0.036, 0.36);
 const SLOT_STAND_LED_TRIM_GEOM = new THREE.BoxGeometry(1.11, 0.012, 0.38);
 const SLOT_STAND_STRUT_GEOM = new THREE.BoxGeometry(0.26, 0.48, 0.05);
 const SLOT_CARD_FRAME_GEOM = new THREE.BoxGeometry(1.14, 1.38, 0.046);
 const SLOT_CARD_BEZEL_GEOM = new THREE.BoxGeometry(1.18, 1.42, 0.03);
 const SLOT_CARD_PLANE_GEOM = new THREE.PlaneGeometry(1.1, 1.33);
+
+const SIGN_HOOD_VISOR_GEOM = new THREE.BoxGeometry(1, 0.06, 0.44);
+const SIGN_BRACKET_GEOM = new THREE.BoxGeometry(0.12, 0.42, 0.22);
+const DOWNLIGHT_PUCK_GEOM = new THREE.CylinderGeometry(0.09, 0.09, 0.02, 12);
+const DOWNLIGHT_GLOW_GEOM = new THREE.CircleGeometry(0.075, 12);
+const RAFTER_TIE_GEOM = new THREE.BoxGeometry(0.14, 0.14, 0.88);
+const LANTERN_HOOK_GEOM = new THREE.CylinderGeometry(0.012, 0.012, 0.22, 6);
+const TRUSS_GUSSET_GEOM = new THREE.BoxGeometry(0.28, 0.04, 0.28);
+const SOLAR_FRAME_TRIM_GEOM = new THREE.BoxGeometry(1.42, 0.03, 1.29);
 
 const PERGOLA_RAFTER_GEOM = new THREE.BoxGeometry(0.16, 0.22, 4.6);
 const AWNING_SLAT_GEOM = new THREE.BoxGeometry(0.94, 0.08, 0.68);
@@ -163,11 +178,28 @@ const VIOLET_ART_MAT = new THREE.MeshStandardMaterial({
   color: '#7c3aed',
   roughness: 0.4,
 });
-const EMPTY_SLOT_MAT = new THREE.MeshStandardMaterial({
-  color: '#475569',
-  roughness: 0.65,
-  metalness: 0.1,
+const OAK_SLAT_MAT = new THREE.MeshStandardMaterial({
+  color: '#c27803',
+  roughness: 0.62,
+  metalness: 0.08,
 });
+const ANODIZED_TITANIUM_MAT = new THREE.MeshStandardMaterial({
+  color: '#1e293b',
+  roughness: 0.28,
+  metalness: 0.75,
+});
+const GALLERY_FELT_MAT = new THREE.MeshStandardMaterial({
+  color: '#475569',
+  roughness: 0.85,
+  metalness: 0.02,
+});
+const BRASS_ACCENT_MAT = new THREE.MeshStandardMaterial({
+  color: '#d97706',
+  metalness: 0.78,
+  roughness: 0.25,
+});
+const WARM_DOWNLIGHT_MAT = new THREE.MeshBasicMaterial({ color: '#fef08a' });
+const CYAN_DOWNLIGHT_MAT = new THREE.MeshBasicMaterial({ color: '#7dd3fc' });
 const GOLD_BASIC_MAT = new THREE.MeshBasicMaterial({ color: '#fbbf24' });
 const CYAN_GLOW_MAT = new THREE.MeshBasicMaterial({ color: '#38bdf8' });
 const EMERALD_GLOW_MAT = new THREE.MeshBasicMaterial({ color: '#34d399' });
@@ -345,8 +377,26 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
         }
       >
         {!product ? (
-          /* Empty Slot: Clean natural recessed shelf pad — zero fake product */
-          <mesh position={[0, 0.004, 0]} geometry={SLOT_EMPTY_MAT_GEOM} material={EMPTY_SLOT_MAT} />
+          /* Empty Slot: Clean, refined architectural exhibition presentation plinth pad */
+          <group position={[0, 0, 0]}>
+            <mesh position={[0, 0.007, 0]} geometry={SLOT_EMPTY_BEVEL_GEOM} material={brandMat} />
+            <mesh
+              position={[0, 0.01, 0]}
+              geometry={SLOT_EMPTY_INLAY_GEOM}
+              material={GALLERY_FELT_MAT}
+            />
+            {/* Elegant brass corner alignment brackets */}
+            {[-0.48, 0.48].map((cx) =>
+              [-0.23, 0.23].map((cz) => (
+                <mesh
+                  key={`corner-${cx}-${cz}`}
+                  position={[cx, 0.012, cz]}
+                  geometry={SLOT_EMPTY_CORNER_GEOM}
+                  material={BRASS_ACCENT_MAT}
+                />
+              ))
+            )}
+          </group>
         ) : (
           /* Occupied Slot: Flush 3D Display Stand sitting directly on the shelf/podium at y = 0 */
           <group scale={displayScale}>
@@ -542,6 +592,15 @@ export const Booth: React.FC<BoothProps> = React.memo(
     const shelfTopMat =
       theme === 'living' || theme === 'coffee' ? CREAM_WALL_MAT : WHITE_GLOSS_MAT;
 
+    const rackBackboardMat =
+      theme === 'living' || theme === 'coffee'
+        ? OAK_SLAT_MAT
+        : theme === 'design'
+          ? VIOLET_ART_MAT
+          : theme === 'energy'
+            ? WHITE_GLOSS_MAT
+            : ANODIZED_TITANIUM_MAT;
+
     useFrame(({ clock }) => {
       if (!visible) return;
       const t = clock.getElapsedTime();
@@ -634,6 +693,12 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {/* KHU B — Main Product Display Podium (Centered at x = 0, z = 0.92; low-profile top surface at y = 0.56) */}
         <group position={[0, 0, 0.92]}>
+          {/* Recessed Plinth Kickplate at y = 0.04 */}
+          <mesh
+            position={[0, 0.04, 0]}
+            geometry={COUNTER_PLINTH_BASE_GEOM}
+            material={SLATE_DARK_MAT}
+          />
           <mesh
             position={[0, 0.41, 0]}
             castShadow
@@ -647,6 +712,12 @@ export const Booth: React.FC<BoothProps> = React.memo(
             receiveShadow
             geometry={EXPO_COUNTER_TOP_GEOM}
             material={shelfBodyMat}
+          />
+          {/* Metallic Top Edge Perimeter Trim */}
+          <mesh
+            position={[0, 0.555, 0]}
+            geometry={COUNTER_TOP_TRIM_GEOM}
+            material={BRASS_ACCENT_MAT}
           />
           <mesh
             position={[0, 0.505, 0]}
@@ -686,8 +757,17 @@ export const Booth: React.FC<BoothProps> = React.memo(
             <mesh
               position={[0, 2.3, -0.35]}
               geometry={STEPPED_RACK_BACKBOARD_GEOM}
-              material={DARK_NAVY_MAT}
+              material={rackBackboardMat}
             />
+            {/* Structural Stand-Off Struts */}
+            {[-0.52, 0.52].map((sx, idx) => (
+              <mesh
+                key={`lstrut-${idx}`}
+                position={[sx, 0.62, 0.18]}
+                geometry={SHELF_STRUT_ROD_GEOM}
+                material={CHROME_PILLAR_MAT}
+              />
+            ))}
           </group>
 
           {/* Lower Tier Structure (Centered at [-2.44, y, 1.12], top surface at y = 0.42) */}
@@ -711,6 +791,15 @@ export const Booth: React.FC<BoothProps> = React.memo(
               geometry={STEPPED_SHELF_TRIM_GEOM}
               material={brandBasicMat}
             />
+            {/* Chrome Corner Reinforcement Brackets */}
+            {[-0.58, 0.58].map((bx, idx) => (
+              <mesh
+                key={`lbracket-${idx}`}
+                position={[bx, 0.38, 0.32]}
+                geometry={SHELF_CORNER_BRACKET_GEOM}
+                material={CHROME_PILLAR_MAT}
+              />
+            ))}
           </group>
         </group>
 
@@ -740,8 +829,17 @@ export const Booth: React.FC<BoothProps> = React.memo(
             <mesh
               position={[0, 2.3, -0.35]}
               geometry={STEPPED_RACK_BACKBOARD_GEOM}
-              material={DARK_NAVY_MAT}
+              material={rackBackboardMat}
             />
+            {/* Structural Stand-Off Struts */}
+            {[-0.52, 0.52].map((sx, idx) => (
+              <mesh
+                key={`rstrut-${idx}`}
+                position={[sx, 0.62, 0.18]}
+                geometry={SHELF_STRUT_ROD_GEOM}
+                material={CHROME_PILLAR_MAT}
+              />
+            ))}
           </group>
 
           {/* Lower Tier Structure (Centered at [2.44, y, 1.12], top surface at y = 0.42) */}
@@ -765,6 +863,15 @@ export const Booth: React.FC<BoothProps> = React.memo(
               geometry={STEPPED_SHELF_TRIM_GEOM}
               material={brandBasicMat}
             />
+            {/* Chrome Corner Reinforcement Brackets */}
+            {[-0.58, 0.58].map((bx, idx) => (
+              <mesh
+                key={`rbracket-${idx}`}
+                position={[bx, 0.38, 0.32]}
+                geometry={SHELF_CORNER_BRACKET_GEOM}
+                material={CHROME_PILLAR_MAT}
+              />
+            ))}
           </group>
         </group>
 
@@ -793,6 +900,11 @@ export const Booth: React.FC<BoothProps> = React.memo(
               <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={DARK_NAVY_MAT}>
                 <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
+              {/* Top Architectural Visor Cornice & Side Brackets */}
+              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={brandStandardMat} />
+              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                <mesh key={`tech-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={DARK_NAVY_MAT} />
+              ))}
               <mesh position={[0, -0.26, vd / 2 + 0.44]} material={CYAN_GLOW_MAT}>
                 <boxGeometry args={[vw + 0.6, 0.06, 0.38]} />
               </mesh>
@@ -802,9 +914,17 @@ export const Booth: React.FC<BoothProps> = React.memo(
               </mesh>
               <mesh position={[-vw * 0.22, -0.14, -0.5]} geometry={CEIL_LIGHT_GEOM} material={CYAN_GLOW_MAT} />
               <mesh position={[vw * 0.22, -0.14, -0.5]} geometry={CEIL_LIGHT_GEOM} material={WHITE_LIGHT_MAT} />
+              {/* Showroom Entrance Ceiling Downlight Pucks */}
+              {[-vw * 0.28, 0, vw * 0.28].map((dx, idx) => (
+                <group key={`tech-puck-${idx}`} position={[dx, -0.16, -0.6]}>
+                  <mesh geometry={DOWNLIGHT_PUCK_GEOM} material={DARK_NAVY_MAT} />
+                  <mesh position={[0, -0.012, 0]} rotation={[Math.PI / 2, 0, 0]} geometry={DOWNLIGHT_GLOW_GEOM} material={CYAN_DOWNLIGHT_MAT} />
+                </group>
+              ))}
             </group>
 
             <group position={[vw / 2 + 0.28, 0.18, vd / 2 - 0.22]}>
+              <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={DARK_NAVY_MAT} />
               <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={TRUSS_PILLAR_GEOM} material={CHROME_PILLAR_MAT} />
               <mesh position={[0, WALL_HEIGHT * 0.65, 0]} geometry={TRUSS_RING_GEOM} material={CYAN_GLOW_MAT} />
             </group>
@@ -822,6 +942,11 @@ export const Booth: React.FC<BoothProps> = React.memo(
               <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={WARM_OAK_MAT}>
                 <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
+              {/* Top Architectural Timber Cornice & Side Brackets */}
+              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={WARM_OAK_MAT} />
+              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                <mesh key={`living-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={WARM_OAK_MAT} />
+              ))}
               <mesh position={[0, -0.65, vd / 2 + 0.6]}>
                 <planeGeometry args={[vw + 0.36, 0.68]} />
                 <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
@@ -834,10 +959,28 @@ export const Booth: React.FC<BoothProps> = React.memo(
                   material={WARM_OAK_MAT}
                 />
               ))}
+              {/* Cross-Rafter Structural Timber Ties */}
+              {[-1.2, 0, 1.2].map((tx, idx) => (
+                <mesh
+                  key={`rafter-tie-${idx}`}
+                  position={[tx, -0.14, -0.62]}
+                  rotation={[0, Math.PI / 2, 0]}
+                  geometry={RAFTER_TIE_GEOM}
+                  material={WARM_OAK_MAT}
+                />
+              ))}
+              {/* Showroom Entrance Ceiling Warm Downlight Pucks */}
+              {[-vw * 0.28, 0, vw * 0.28].map((dx, idx) => (
+                <group key={`living-puck-${idx}`} position={[dx, -0.16, -0.6]}>
+                  <mesh geometry={DOWNLIGHT_PUCK_GEOM} material={WARM_OAK_MAT} />
+                  <mesh position={[0, -0.012, 0]} rotation={[Math.PI / 2, 0, 0]} geometry={DOWNLIGHT_GLOW_GEOM} material={WARM_DOWNLIGHT_MAT} />
+                </group>
+              ))}
             </group>
 
             {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
               <group key={`oak-pil-${idx}`} position={[px, 0.18, vd / 2 - 0.18]}>
+                <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={WARM_OAK_MAT} />
                 <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={WARM_OAK_MAT} />
                 <mesh position={[idx === 0 ? -0.38 : 0.38, 0.19, 0.25]} geometry={PLANT_POT_GEOM} material={CREAM_WALL_MAT} />
                 <mesh position={[idx === 0 ? -0.38 : 0.38, 0.52, 0.25]} geometry={PLANT_BUSH_GEOM} material={EMERALD_PLANT_MAT} />
@@ -852,6 +995,11 @@ export const Booth: React.FC<BoothProps> = React.memo(
               <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={ESPRESSO_WOOD_MAT}>
                 <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
+              {/* Top Architectural Copper Cornice & Side Brackets */}
+              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={COPPER_CRAFT_MAT} />
+              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                <mesh key={`coffee-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={ESPRESSO_WOOD_MAT} />
+              ))}
               <mesh position={[0, -0.65, vd / 2 + 0.6]}>
                 <planeGeometry args={[vw + 0.36, 0.68]} />
                 <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
@@ -866,17 +1014,24 @@ export const Booth: React.FC<BoothProps> = React.memo(
                 />
               ))}
               {[-2.1, -1.05, 0, 1.05, 2.1].map((lx, idx) => (
-                <mesh
-                  key={`cafe-bulb-${idx}`}
-                  position={[lx, -1.2, vd / 2 - 0.48]}
-                  geometry={LANTERN_BULB_GEOM}
-                  material={WARM_BULB_MAT}
-                />
+                <group key={`cafe-lantern-${idx}`}>
+                  <mesh
+                    position={[lx, -1.14, vd / 2 - 0.48]}
+                    geometry={LANTERN_HOOK_GEOM}
+                    material={COPPER_CRAFT_MAT}
+                  />
+                  <mesh
+                    position={[lx, -1.24, vd / 2 - 0.48]}
+                    geometry={LANTERN_BULB_GEOM}
+                    material={WARM_BULB_MAT}
+                  />
+                </group>
               ))}
             </group>
 
             {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
               <group key={`cafe-col-${idx}`} position={[px, 0.18, vd / 2 - 0.18]}>
+                <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={ESPRESSO_WOOD_MAT} />
                 <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={ESPRESSO_WOOD_MAT} />
                 <mesh position={[idx === 0 ? -0.38 : 0.38, 0.19, 0.28]} geometry={PLANT_POT_GEOM} material={COPPER_CRAFT_MAT} />
                 <mesh position={[idx === 0 ? -0.38 : 0.38, 0.52, 0.28]} geometry={PLANT_BUSH_GEOM} material={EMERALD_PLANT_MAT} />
@@ -891,6 +1046,11 @@ export const Booth: React.FC<BoothProps> = React.memo(
               <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={SLATE_DARK_MAT}>
                 <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
+              {/* Top Architectural Dark Slate Cornice & Brackets */}
+              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={SLATE_DARK_MAT} />
+              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                <mesh key={`rob-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={DARK_NAVY_MAT} />
+              ))}
               <mesh position={[0, -0.26, vd / 2 + 0.44]} material={GOLD_BASIC_MAT}>
                 <boxGeometry args={[vw + 0.6, 0.06, 0.38]} />
               </mesh>
@@ -898,6 +1058,13 @@ export const Booth: React.FC<BoothProps> = React.memo(
                 <planeGeometry args={[vw + 0.36, 0.68]} />
                 <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
+              {/* Showroom Entrance Technical Downlights */}
+              {[-vw * 0.28, 0, vw * 0.28].map((dx, idx) => (
+                <group key={`rob-puck-${idx}`} position={[dx, -0.16, -0.6]}>
+                  <mesh geometry={DOWNLIGHT_PUCK_GEOM} material={DARK_NAVY_MAT} />
+                  <mesh position={[0, -0.012, 0]} rotation={[Math.PI / 2, 0, 0]} geometry={DOWNLIGHT_GLOW_GEOM} material={CYAN_DOWNLIGHT_MAT} />
+                </group>
+              ))}
             </group>
 
             {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
@@ -906,6 +1073,7 @@ export const Booth: React.FC<BoothProps> = React.memo(
                 <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={TRUSS_PILLAR_GEOM} material={CHROME_PILLAR_MAT} />
                 <mesh position={[0, WALL_HEIGHT * 0.4, 0]} geometry={TRUSS_RING_GEOM} material={GOLD_BASIC_MAT} />
                 <mesh position={[0, WALL_HEIGHT * 0.78, 0]} geometry={TRUSS_RING_GEOM} material={CYAN_GLOW_MAT} />
+                <mesh position={[0, WALL_HEIGHT * 0.95, 0]} geometry={TRUSS_GUSSET_GEOM} material={SLATE_DARK_MAT} />
               </group>
             ))}
           </group>
@@ -917,6 +1085,11 @@ export const Booth: React.FC<BoothProps> = React.memo(
               <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={VIOLET_ART_MAT}>
                 <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
+              {/* Top Architectural Magenta Cornice & Brackets */}
+              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={MAGENTA_ART_MAT} />
+              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                <mesh key={`design-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={VIOLET_ART_MAT} />
+              ))}
               <mesh position={[0, -0.26, vd / 2 + 0.44]} material={MAGENTA_ART_MAT}>
                 <boxGeometry args={[vw + 0.6, 0.07, 0.38]} />
               </mesh>
@@ -933,6 +1106,14 @@ export const Booth: React.FC<BoothProps> = React.memo(
                   geometry={HALO_RING_SMALL_GEOM}
                   material={MAGENTA_ART_MAT}
                 />
+                {[-0.68, 0.68].map((cx, idx) => (
+                  <mesh
+                    key={`halo-cable-${idx}`}
+                    position={[cx, 0.32, 0]}
+                    geometry={LANTERN_HOOK_GEOM}
+                    material={CHROME_PILLAR_MAT}
+                  />
+                ))}
               </group>
             </group>
           </group>
@@ -944,6 +1125,11 @@ export const Booth: React.FC<BoothProps> = React.memo(
               <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={DARK_NAVY_MAT}>
                 <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
               </mesh>
+              {/* Top Architectural Emerald Cornice & Brackets */}
+              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={EMERALD_GLOW_MAT} />
+              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                <mesh key={`energy-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={DARK_NAVY_MAT} />
+              ))}
               <mesh position={[0, -0.26, vd / 2 + 0.44]} material={EMERALD_GLOW_MAT}>
                 <boxGeometry args={[vw + 0.6, 0.07, 0.38]} />
               </mesh>
@@ -953,18 +1139,26 @@ export const Booth: React.FC<BoothProps> = React.memo(
               </mesh>
 
               {[-2.1, -0.7, 0.7, 2.1].map((sx, idx) => (
-                <mesh
-                  key={`solar-pv-${idx}`}
-                  position={[sx, 0.38, -0.65]}
-                  rotation={[0.38, 0, 0]}
-                  geometry={SOLAR_PANEL_GEOM}
-                  material={SOLAR_CELL_MAT}
-                />
+                <group key={`solar-group-${idx}`}>
+                  <mesh
+                    position={[sx, 0.38, -0.65]}
+                    rotation={[0.38, 0, 0]}
+                    geometry={SOLAR_PANEL_GEOM}
+                    material={SOLAR_CELL_MAT}
+                  />
+                  <mesh
+                    position={[sx, 0.39, -0.65]}
+                    rotation={[0.38, 0, 0]}
+                    geometry={SOLAR_FRAME_TRIM_GEOM}
+                    material={WHITE_GLOSS_MAT}
+                  />
+                </group>
               ))}
             </group>
 
             {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
               <group key={`eco-col-${idx}`} position={[px, 0.18, vd / 2 - 0.2]}>
+                <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={WHITE_GLOSS_MAT} />
                 <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={WHITE_GLOSS_MAT} />
                 {[0.65, 1.35, 2.05].map((py, bIdx) => (
                   <mesh

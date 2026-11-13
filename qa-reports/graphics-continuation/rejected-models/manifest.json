@@ -1,0 +1,122 @@
+﻿[
+    {
+        "file":  "city_detail_01-lod.glb",
+        "sha256":  "2F89F23B99350D1CE10DFD2D8CD9F8168A3047066BF7E6E45B786B3E379E3D8C",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_detail_01.glb",
+        "sha256":  "16DCFA802E6D9459366E12E1C951DBC7C72D09D30A4D2C220B51BDEE0FB69AA4",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_detail_02-lod.glb",
+        "sha256":  "A8867138D1ABE2FD846C8629938805A12927A1FD1B41821F33E71AF2071E8AA2",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_detail_02.glb",
+        "sha256":  "AAE8503E058C85DF3D3ABD802D711AB5656613A706D04FC2F6B00B7164AEB63F",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_detail_03-lod.glb",
+        "sha256":  "6836C218796213519E37C9FEE5D5ED5DE442F56C6952B2DE78228CED7DDAE617",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_detail_03.glb",
+        "sha256":  "34C2AB42D26B220547A200D1350AEC8A4A6798246F5BCB89723A42F6F427DCD9",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_detail_04-lod.glb",
+        "sha256":  "C1D8B1BB95F6830017C3467860A363BCB625676DC0C182D51E4B31A1C93B5124",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_detail_04.glb",
+        "sha256":  "83B8CAC7FDAAAA181FC337F86784A6BD8FD87A0C3D1C466DC9BE1F64D334A7E6",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_final_01-lod.glb",
+        "sha256":  "E6873220CA76188398B24F48EFD3F791E4C2736D6DF62A576E845377837916F0",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_final_01.glb",
+        "sha256":  "E6873220CA76188398B24F48EFD3F791E4C2736D6DF62A576E845377837916F0",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_final_02-lod.glb",
+        "sha256":  "2A7D63EFDC313CA0A6E6B1A09051207F7C5D7D7E72F4FB62807CC6D745FF4DF0",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_final_02.glb",
+        "sha256":  "2A7D63EFDC313CA0A6E6B1A09051207F7C5D7D7E72F4FB62807CC6D745FF4DF0",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_final_03-lod.glb",
+        "sha256":  "CFC19C256AC7E8A2B8E3F977FCE5AD1B91A10AC19CFD22B9F98E6FA3899A3B86",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_final_03.glb",
+        "sha256":  "CFC19C256AC7E8A2B8E3F977FCE5AD1B91A10AC19CFD22B9F98E6FA3899A3B86",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_final_04-lod.glb",
+        "sha256":  "C40ADC91AC4480BA24C7196F657B68DEB9ECC872198DE1BC07F7ACCB804632CF",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_final_04.glb",
+        "sha256":  "C40ADC91AC4480BA24C7196F657B68DEB9ECC872198DE1BC07F7ACCB804632CF",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_runtime_01-lod.glb",
+        "sha256":  "D8DFC98AF07B41E822B08FE2124814DDE65B8860DF70E1F413B1ACA37AFED042",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_runtime_01.glb",
+        "sha256":  "CECBADBC753649D34FA761B504E81A0F100687D580F8DDB2B4C7140244D6DA74",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_runtime_02-lod.glb",
+        "sha256":  "AD2C56A5DEBF90D22B7962DD315F6787FACD97B19AF08D5435A30F69D37D0F15",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_runtime_02.glb",
+        "sha256":  "5A14012F30430ED4F2F23BB389F00A96B633DFA585E02E982C699EF0E257AABB",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_runtime_03-lod.glb",
+        "sha256":  "DEC9F8E53EC7D5D5081AEB81EC3C513FF0123CD8C6C6C4E6C82764CF398A7190",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_runtime_03.glb",
+        "sha256":  "1EBF699C0A9D905BA00F687A534386C06CEB0715837103A94C9479363418142B",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_runtime_04-lod.glb",
+        "sha256":  "225C12A154F5D583C979E99C12DB48018367C841F35FE1B002778943C070B0DD",
+        "status":  "Retained outside served assets; not integrated"
+    },
+    {
+        "file":  "city_runtime_04.glb",
+        "sha256":  "6A7F272FC9B061C50308CD4AF1065D5A10ECB34BBECC0C396A6D92E16C3D21B5",
+        "status":  "Retained outside served assets; not integrated"
+    }
+]

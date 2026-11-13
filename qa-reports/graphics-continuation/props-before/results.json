@@ -1,0 +1,634 @@
+{
+  "phase": "props-before",
+  "timestamp": "2026-11-13T02:18:08.018Z",
+  "metrics": [
+    {
+      "name": "flowers",
+      "fps": 36.1914527852339,
+      "calls": 120,
+      "triangles": 65214,
+      "memory": {
+        "geometries": 336,
+        "textures": 56
+      },
+      "camera": [
+        -3,
+        2.7,
+        3.3
+      ],
+      "webglError": 0,
+      "batches": [
+        {
+          "name": "exterior-glb:city-1",
+          "min": [
+            -38.40000009536743,
+            -0.6499999761581421,
+            -37
+          ],
+          "max": [
+            38.40000009536743,
+            13.549999833106995,
+            31.25
+          ],
+          "parts": 20,
+          "visibleInstances": 0
+        },
+        {
+          "name": "exterior-glb:city-2",
+          "min": [
+            -37.40000009536743,
+            -0.6499999761581421,
+            -36.09999990463257
+          ],
+          "max": [
+            37.40000009536743,
+            15.850000023841858,
+            10.25
+          ],
+          "parts": 16,
+          "visibleInstances": 6
+        },
+        {
+          "name": "exterior-glb:city-3",
+          "min": [
+            -36.25,
+            -0.6499999761581421,
+            -37
+          ],
+          "max": [
+            36.25,
+            12.150000214576721,
+            23.40000009536743
+          ],
+          "parts": 14,
+          "visibleInstances": 2
+        },
+        {
+          "name": "exterior-glb:city-4",
+          "min": [
+            -37.5,
+            -0.6499999761581421,
+            -38.25
+          ],
+          "max": [
+            37.5,
+            17.55000078678131,
+            31.25
+          ],
+          "parts": 12,
+          "visibleInstances": 5
+        },
+        {
+          "name": "exterior-glb:fountain",
+          "min": [
+            -1.5835570096969604,
+            0.019999999552965164,
+            -1.649999976158142
+          ],
+          "max": [
+            1.5835570096969604,
+            1.5691569037735462,
+            1.649999976158142
+          ],
+          "parts": 8,
+          "visibleInstances": 8
+        },
+        {
+          "name": "exterior-glb:env-tree-oak",
+          "min": [
+            -29.00329946999095,
+            -0.7499998831941459,
+            -21.92981874490953
+          ],
+          "max": [
+            29.181656357004698,
+            5.29860395619761,
+            10.888470870629092
+          ],
+          "parts": 4,
+          "visibleInstances": 4
+        },
+        {
+          "name": "exterior-glb:env-tree-blossom",
+          "min": [
+            -28.866325794981407,
+            -0.7499999087624047,
+            -4.508240969894878
+          ],
+          "max": [
+            29.304197336874047,
+            7.27200004148483,
+            21.87857130400909
+          ],
+          "parts": 4,
+          "visibleInstances": 6
+        },
+        {
+          "name": "exterior-glb:env-tree-pine",
+          "min": [
+            -29.00807524153972,
+            -0.7499998986474676,
+            -22.103494341789073
+          ],
+          "max": [
+            28.377256584521216,
+            6.575999499797831,
+            22.049606004526417
+          ],
+          "parts": 4,
+          "visibleInstances": 0
+        },
+        {
+          "name": "exterior-glb:flowers",
+          "min": [
+            -6.669761677533743,
+            0.3499999997055099,
+            -5.417915539478694
+          ],
+          "max": [
+            6.656619950269784,
+            0.48000000417232513,
+            21.16541527619698
+          ],
+          "parts": 1,
+          "visibleInstances": 3
+        },
+        {
+          "name": "exterior-glb:env-park-bench",
+          "min": [
+            -6.526221990585327,
+            0.019999999552965164,
+            -4.690000116825104
+          ],
+          "max": [
+            6.526221990585327,
+            0.7375573702156544,
+            4.690000116825104
+          ],
+          "parts": 2,
+          "visibleInstances": 6
+        },
+        {
+          "name": "exterior-glb:env-street-lamp",
+          "min": [
+            -18.89412045085512,
+            0.019999999552965164,
+            -17.730779731857194
+          ],
+          "max": [
+            18.89412045085512,
+            3.8199999518692493,
+            17.730779731857194
+          ],
+          "parts": 1,
+          "visibleInstances": 2
+        }
+      ]
+    },
+    {
+      "name": "urn",
+      "fps": 35.22263641433563,
+      "calls": 207,
+      "triangles": 68179,
+      "memory": {
+        "geometries": 367,
+        "textures": 60
+      },
+      "camera": [
+        8,
+        2.5,
+        22
+      ],
+      "webglError": 0,
+      "batches": [
+        {
+          "name": "exterior-glb:city-1",
+          "min": [
+            -38.40000009536743,
+            -0.6499999761581421,
+            -37
+          ],
+          "max": [
+            38.40000009536743,
+            13.549999833106995,
+            31.25
+          ],
+          "parts": 20,
+          "visibleInstances": 2
+        },
+        {
+          "name": "exterior-glb:city-2",
+          "min": [
+            -37.40000009536743,
+            -0.6499999761581421,
+            -36.09999990463257
+          ],
+          "max": [
+            37.40000009536743,
+            15.850000023841858,
+            10.25
+          ],
+          "parts": 16,
+          "visibleInstances": 6
+        },
+        {
+          "name": "exterior-glb:city-3",
+          "min": [
+            -36.25,
+            -0.6499999761581421,
+            -37
+          ],
+          "max": [
+            36.25,
+            12.150000214576721,
+            23.40000009536743
+          ],
+          "parts": 14,
+          "visibleInstances": 2
+        },
+        {
+          "name": "exterior-glb:city-4",
+          "min": [
+            -37.5,
+            -0.6499999761581421,
+            -38.25
+          ],
+          "max": [
+            37.5,
+            17.55000078678131,
+            31.25
+          ],
+          "parts": 12,
+          "visibleInstances": 6
+        },
+        {
+          "name": "exterior-glb:fountain",
+          "min": [
+            -1.5835570096969604,
+            0.019999999552965164,
+            -1.649999976158142
+          ],
+          "max": [
+            1.5835570096969604,
+            1.5691569037735462,
+            1.649999976158142
+          ],
+          "parts": 8,
+          "visibleInstances": 8
+        },
+        {
+          "name": "exterior-glb:env-tree-oak",
+          "min": [
+            -29.00329946999095,
+            -0.7499998831941459,
+            -21.92981874490953
+          ],
+          "max": [
+            29.181656357004698,
+            5.29860395619761,
+            10.888470870629092
+          ],
+          "parts": 4,
+          "visibleInstances": 4
+        },
+        {
+          "name": "exterior-glb:env-tree-blossom",
+          "min": [
+            -28.866325794981407,
+            -0.7499999087624047,
+            -4.508240969894878
+          ],
+          "max": [
+            29.304197336874047,
+            7.27200004148483,
+            21.87857130400909
+          ],
+          "parts": 4,
+          "visibleInstances": 4
+        },
+        {
+          "name": "exterior-glb:env-tree-pine",
+          "min": [
+            -29.00807524153972,
+            -0.7499998986474676,
+            -22.103494341789073
+          ],
+          "max": [
+            28.377256584521216,
+            6.575999499797831,
+            22.049606004526417
+          ],
+          "parts": 4,
+          "visibleInstances": 2
+        },
+        {
+          "name": "exterior-glb:flowers",
+          "min": [
+            -6.669761677533743,
+            0.3499999997055099,
+            -5.417915539478694
+          ],
+          "max": [
+            6.656619950269784,
+            0.48000000417232513,
+            21.16541527619698
+          ],
+          "parts": 1,
+          "visibleInstances": 2
+        },
+        {
+          "name": "exterior-glb:env-park-bench",
+          "min": [
+            -6.526221990585327,
+            0.019999999552965164,
+            -4.690000116825104
+          ],
+          "max": [
+            6.526221990585327,
+            0.7375573702156544,
+            4.690000116825104
+          ],
+          "parts": 2,
+          "visibleInstances": 16
+        },
+        {
+          "name": "exterior-glb:env-street-lamp",
+          "min": [
+            -18.89412045085512,
+            0.019999999552965164,
+            -17.730779731857194
+          ],
+          "max": [
+            18.89412045085512,
+            3.8199999518692493,
+            17.730779731857194
+          ],
+          "parts": 1,
+          "visibleInstances": 6
+        }
+      ]
+    },
+    {
+      "name": "bin",
+      "fps": 35.3919660237126,
+      "calls": 217,
+      "triangles": 97043,
+      "memory": {
+        "geometries": 367,
+        "textures": 60
+      },
+      "camera": [
+        7.2,
+        1.5,
+        19
+      ],
+      "webglError": 0,
+      "batches": [
+        {
+          "name": "exterior-glb:city-1",
+          "min": [
+            -38.40000009536743,
+            -0.6499999761581421,
+            -37
+          ],
+          "max": [
+            38.40000009536743,
+            13.549999833106995,
+            31.25
+          ],
+          "parts": 20,
+          "visibleInstances": 9
+        },
+        {
+          "name": "exterior-glb:city-2",
+          "min": [
+            -37.40000009536743,
+            -0.6499999761581421,
+            -36.09999990463257
+          ],
+          "max": [
+            37.40000009536743,
+            15.850000023841858,
+            10.25
+          ],
+          "parts": 16,
+          "visibleInstances": 11
+        },
+        {
+          "name": "exterior-glb:city-3",
+          "min": [
+            -36.25,
+            -0.6499999761581421,
+            -37
+          ],
+          "max": [
+            36.25,
+            12.150000214576721,
+            23.40000009536743
+          ],
+          "parts": 14,
+          "visibleInstances": 4
+        },
+        {
+          "name": "exterior-glb:city-4",
+          "min": [
+            -37.5,
+            -0.6499999761581421,
+            -38.25
+          ],
+          "max": [
+            37.5,
+            17.55000078678131,
+            31.25
+          ],
+          "parts": 12,
+          "visibleInstances": 10
+        },
+        {
+          "name": "exterior-glb:fountain",
+          "min": [
+            -1.5835570096969604,
+            0.019999999552965164,
+            -1.649999976158142
+          ],
+          "max": [
+            1.5835570096969604,
+            1.5691569037735462,
+            1.649999976158142
+          ],
+          "parts": 8,
+          "visibleInstances": 8
+        },
+        {
+          "name": "exterior-glb:env-tree-oak",
+          "min": [
+            -29.00329946999095,
+            -0.7499998831941459,
+            -21.92981874490953
+          ],
+          "max": [
+            29.181656357004698,
+            5.29860395619761,
+            10.888470870629092
+          ],
+          "parts": 4,
+          "visibleInstances": 4
+        },
+        {
+          "name": "exterior-glb:env-tree-blossom",
+          "min": [
+            -28.866325794981407,
+            -0.7499999087624047,
+            -4.508240969894878
+          ],
+          "max": [
+            29.304197336874047,
+            7.27200004148483,
+            21.87857130400909
+          ],
+          "parts": 4,
+          "visibleInstances": 6
+        },
+        {
+          "name": "exterior-glb:env-tree-pine",
+          "min": [
+            -29.00807524153972,
+            -0.7499998986474676,
+            -22.103494341789073
+          ],
+          "max": [
+            28.377256584521216,
+            6.575999499797831,
+            22.049606004526417
+          ],
+          "parts": 4,
+          "visibleInstances": 4
+        },
+        {
+          "name": "exterior-glb:flowers",
+          "min": [
+            -6.669761677533743,
+            0.3499999997055099,
+            -5.417915539478694
+          ],
+          "max": [
+            6.656619950269784,
+            0.48000000417232513,
+            21.16541527619698
+          ],
+          "parts": 1,
+          "visibleInstances": 0
+        },
+        {
+          "name": "exterior-glb:env-park-bench",
+          "min": [
+            -6.526221990585327,
+            0.019999999552965164,
+            -4.690000116825104
+          ],
+          "max": [
+            6.526221990585327,
+            0.7375573702156544,
+            4.690000116825104
+          ],
+          "parts": 2,
+          "visibleInstances": 14
+        },
+        {
+          "name": "exterior-glb:env-street-lamp",
+          "min": [
+            -18.89412045085512,
+            0.019999999552965164,
+            -17.730779731857194
+          ],
+          "max": [
+            18.89412045085512,
+            3.8199999518692493,
+            17.730779731857194
+          ],
+          "parts": 1,
+          "visibleInstances": 5
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "console": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "glbs": [
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_02.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_01.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_03.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_04.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/7b_tCaBRLCI.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/R7qMWzb7nk.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-variant.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/kn0sMwbspb.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/NBUxHir6FJ.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/RO32ltX6zJ.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_02-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_01-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_03-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_detail_v2_04-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/R7qMWzb7nk-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-variant-lod.glb",
+      "status": 200
+    }
+  ],
+  "failedRequests": []
+}

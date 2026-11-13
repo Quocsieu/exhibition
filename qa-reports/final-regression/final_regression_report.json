@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-11-13T03:45:15.615Z",
+  "status": "WARN",
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "boothResults": [
+    {
+      "boothIndex": 1,
+      "name": "Aether Tech Lab",
+      "showcaseView": "PASS",
+      "productModal": "PASS",
+      "screenshot": "final_booth_1_Aether_Tech_Lab.png"
+    },
+    {
+      "boothIndex": 2,
+      "name": "Nordic Living Studio",
+      "showcaseView": "PASS",
+      "productModal": "AVAILABLE_IN_DRAWER",
+      "screenshot": "final_booth_2_Nordic_Living_Studio.png"
+    },
+    {
+      "boothIndex": 3,
+      "name": "EcoVita Roastery & Craft",
+      "showcaseView": "PASS",
+      "productModal": "PASS",
+      "screenshot": "final_booth_3_EcoVita_Roastery___Craft.png"
+    },
+    {
+      "boothIndex": 4,
+      "name": "Kinetix Robotics & AI",
+      "showcaseView": "PASS",
+      "productModal": "PASS",
+      "screenshot": "final_booth_4_Kinetix_Robotics___AI.png"
+    },
+    {
+      "boothIndex": 5,
+      "name": "Kiến trúc nghệ thuật",
+      "showcaseView": "PASS",
+      "productModal": "PASS",
+      "screenshot": "final_booth_5_Ki_n_tr_c_ngh__thu_t.png"
+    },
+    {
+      "boothIndex": 6,
+      "name": "Solaris Clean Energy",
+      "showcaseView": "PASS",
+      "productModal": "PASS",
+      "screenshot": "final_booth_6_Solaris_Clean_Energy.png"
+    }
+  ]
+}

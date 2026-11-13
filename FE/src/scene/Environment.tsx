@@ -19,7 +19,7 @@ import {
   createSkyDomeTexture,
   createStormDrainGrateTexture,
 } from './sceneTextures';
-import { cloneCachedAsset, type GlbAssetId } from './assetLoader';
+import { type GlbAssetId } from './assetLoader';
 import { ExteriorAssets, type ExteriorAssetId, type ExteriorPlacement } from './ExteriorAssets';
 
 export interface EnvironmentProps {
@@ -86,16 +86,16 @@ export const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
 // and side gaps between booths — ZERO trees placed in front of the 6 booths so all facades,
 // entrance doors, signboards, and radial walkways remain 100% unobstructed.
 export const PERIMETER_TREES: [number, number, number][] = [
-  [-20.5, -18.5, 1.18],
-  [20.5, -18.5, 1.15],
-  [-20.5, 18.5, 1.12],
-  [20.5, 18.5, 1.16],
-  [-21.4, 0.0, 1.22],
-  [21.4, 0.0, 1.22],
-  [-7.5, -20.2, 1.05],
-  [7.5, -20.2, 1.05],
-  [-9.2, 20.2, 1.08],
-  [9.2, 20.2, 1.08],
+  [-13.5, -16.2, 1.18],
+  [13.5, -16.2, 1.15],
+  [-13.5, 16.2, 1.12],
+  [13.5, 16.2, 1.16],
+  [-16.8, -7.2, 1.22],
+  [16.8, -7.2, 1.22],
+  [-7.2, -16.0, 1.05],
+  [7.2, -16.0, 1.05],
+  [-7.2, 16.0, 1.08],
+  [7.2, 16.0, 1.08],
 ];
 
 export const ALL_TREES: {
@@ -128,12 +128,20 @@ export const ALL_TREES: {
 ];
 
 export const PLANTER_URN_POSITIONS: [number, number][] = [
-  [-5.8, 19.6],
-  [5.8, 19.6],
-  [-5.8, -19.2],
-  [5.8, -19.2],
-  [-18.8, -3.2],
-  [18.8, -3.2],
+  [-5.8, 18.2],
+  [5.8, 18.2],
+  [-5.8, -17.5],
+  [5.8, -17.5],
+  [-17.2, -3.4],
+  [17.2, -3.4],
+];
+
+// 4 Cozy Perimeter Rest Lounge Zones (located in protected pedestrian promenade pockets, safely clear of all roadways & sightlines)
+const REST_LOUNGE_ZONES: { x: number; z: number; color: string }[] = [
+  { x: -15.8, z: -14.2, color: '#0ea5e9' },
+  { x: 15.8, z: -14.2, color: '#f59e0b' },
+  { x: -15.8, z: 14.2, color: '#6366f1' },
+  { x: 15.8, z: 14.2, color: '#10b981' },
 ];
 
 const ALL_BENCHES: { x: number; z: number; rotationY: number }[] = [
@@ -146,6 +154,11 @@ const ALL_BENCHES: { x: number; z: number; rotationY: number }[] = [
     z: island.z + island.benchOffsetZ,
     rotationY: island.benchOffsetZ > 0 ? 0 : Math.PI,
   })),
+  // Companion park benches flanking each of the 4 parasol rest lounge tables
+  ...REST_LOUNGE_ZONES.flatMap((zone) => [
+    { x: zone.x - 1.25, z: zone.z, rotationY: Math.PI / 2 },
+    { x: zone.x + 1.25, z: zone.z, rotationY: -Math.PI / 2 },
+  ]),
 ];
 
 export const PERIMETER_LAMPS: [number, number][] = [
@@ -153,10 +166,10 @@ export const PERIMETER_LAMPS: [number, number][] = [
   [5.6, 17.2],
   [-5.6, -17.2],
   [5.6, -17.2],
-  [-18.4, -3.6],
-  [18.4, -3.6],
-  [-18.4, 3.6],
-  [18.4, 3.6],
+  [-17.4, -3.6],
+  [17.4, -3.6],
+  [-17.4, 3.6],
+  [17.4, 3.6],
 ];
 
 const BOOTH_CONNECTOR_PATHS: {
@@ -220,14 +233,6 @@ const HORIZON_HILLS: { x: number; z: number; sx: number; sy: number; sz: number 
   { x: -44, z: 14, sx: 12, sy: 4.2, sz: 15 },
 ];
 
-// 4 Cozy Perimeter Rest Lounge Zones (located in outer garden corners, clear of all walkways)
-const REST_LOUNGE_ZONES: { x: number; z: number; color: string }[] = [
-  { x: -18.8, z: -15.5, color: '#0ea5e9' },
-  { x: 18.8, z: -15.5, color: '#f59e0b' },
-  { x: -18.8, z: 14.8, color: '#6366f1' },
-  { x: 18.8, z: 14.8, color: '#10b981' },
-];
-
 // 8 Perimeter Festival Flag Totems along outer balustrade
 const FESTIVAL_TOTEMS: { x: number; z: number; ry: number }[] = [
   { x: -22.6, z: -12.5, ry: Math.PI / 2 },
@@ -266,7 +271,6 @@ const FLOWER_CLUSTERS_GOLD: [number, number, number][] = [
 // Shared module-level Geometries & Materials to minimize WebGL memory & state switches
 const TREE_BASE_GEOM = new THREE.CylinderGeometry(0.85, 0.95, 0.44, 16);
 
-
 const PARASOL_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.06, 2.35, 10);
 const PARASOL_CANOPY_GEOM = new THREE.ConeGeometry(1.55, 0.58, 12);
 const LOUNGE_TABLE_TOP_GEOM = new THREE.CylinderGeometry(0.68, 0.68, 0.07, 16);
@@ -278,8 +282,6 @@ const FLAG_BANNER_GEOM = new THREE.BoxGeometry(0.04, 1.45, 0.58);
 // Instanced Exhibition Street Furniture: Illuminated Bollards, Recycling Bins & Wayfinding Posts
 const BOLLARD_BODY_GEOM = new THREE.CylinderGeometry(0.11, 0.13, 0.78, 12);
 const BOLLARD_GLOW_GEOM = new THREE.CylinderGeometry(0.115, 0.115, 0.14, 12);
-const BIN_BODY_GEOM = new THREE.CylinderGeometry(0.2, 0.17, 0.64, 12);
-const BIN_TOP_GEOM = new THREE.CylinderGeometry(0.22, 0.21, 0.08, 12);
 const SIGNPOST_POLE_GEOM = new THREE.CylinderGeometry(0.055, 0.07, 2.05, 10);
 
 export const PLAZA_BOLLARD_POSITIONS: [number, number][] = [
@@ -300,23 +302,13 @@ export const EXHIBITION_BIN_POSITIONS: [number, number][] = [
   [5.6, -17.6],
   [-5.6, 17.6],
   [5.6, 17.6],
-  [-17.6, -15.5],
-  [17.6, -15.5],
-  [-17.6, 14.8],
-  [17.6, 14.8],
+  [-14.2, -14.2],
+  [14.2, -14.2],
+  [-14.2, 14.2],
+  [14.2, 14.2],
 ];
 
 const BOLLARD_GLOW_MAT = new THREE.MeshBasicMaterial({ color: '#38bdf8' });
-const BIN_BODY_MAT = new THREE.MeshStandardMaterial({
-  color: '#334155',
-  roughness: 0.42,
-  metalness: 0.35,
-});
-const BIN_TOP_MAT = new THREE.MeshStandardMaterial({
-  color: '#10b981',
-  roughness: 0.35,
-  metalness: 0.2,
-});
 
 const SLATE_POT_MAT = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.65 });
 
@@ -434,6 +426,15 @@ const STORM_DRAIN_GRATES: { x: number; z: number; ry: number }[] = [
   { x: 14.0, z: 2.3, ry: Math.PI / 2 },
 ];
 
+// Speed bumps (gờ giảm tốc) before crosswalk intersections
+const SPEED_BUMPS: { x: number; z: number; w: number; ry: number }[] = [
+  { x: 0, z: 12.8, w: 4.8, ry: 0 },
+  { x: -12.8, z: 0, w: 4.6, ry: Math.PI / 2 },
+  { x: 12.8, z: 0, w: 4.6, ry: Math.PI / 2 },
+];
+const SPEED_BUMP_YELLOW_MAT = new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.45 });
+const SPEED_BUMP_DARK_MAT = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.65 });
+
 export const Environment: React.FC<EnvironmentProps> = React.memo(
   ({ onGroundClick, clickMarker }) => {
     const width = WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX;
@@ -503,15 +504,8 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const benchPlacements = useMemo<ExteriorPlacement[]>(() => ALL_BENCHES.map(b => ({ position: [b.x, .02, b.z], rotation: b.rotationY })), []);
     const lampPlacements = useMemo<ExteriorPlacement[]>(() => PERIMETER_LAMPS.map(([x, z]) => ({ position: [x, .02, z], rotation: Math.atan2(-x, -z) })), []);
     const flowerPlacements = useMemo<ExteriorPlacement[]>(() => [...FLOWER_CLUSTERS_PINK, ...FLOWER_CLUSTERS_GOLD].map(([x, , z], i) => ({ position: [x, Math.abs(z) < 6 ? .36 : .35, z], rotation: i * 1.37 })), []);
-    const urnClones = useMemo(
-      () =>
-        PLANTER_URN_POSITIONS.map(([ux, uz]) => ({
-          x: ux,
-          z: uz,
-          object: cloneCachedAsset('env-planter-urn'),
-        })),
-      []
-    );
+    const urnPlacements = useMemo<ExteriorPlacement[]>(() => PLANTER_URN_POSITIONS.map(([x, z]) => ({ position: [x, .02, z] })), []);
+    const binPlacements = useMemo<ExteriorPlacement[]>(() => EXHIBITION_BIN_POSITIONS.map(([x, z]) => ({ position: [x, 0, z] })), []);
 
     const plazaBannerTexture = useMemo(
       () =>
@@ -678,9 +672,8 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
                 map={asphaltRoadTexture}
                 bumpMap={asphaltBumpTexture}
                 bumpScale={0.022}
-                roughnessMap={asphaltBumpTexture}
-                roughness={0.78}
-                metalness={0.05}
+                roughness={0.92}
+                metalness={0}
               />
             </mesh>
             {/* 3D Raised Granite Curbs (Bó vỉa hè) separating Asphalt Road from Tiled Sidewalks */}
@@ -706,8 +699,8 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
               map={crosswalkTexture}
               bumpMap={asphaltBumpTexture}
               bumpScale={0.015}
-              roughness={0.62}
-              metalness={0.04}
+              roughness={0.85}
+              metalness={0}
             />
           </mesh>
         ))}
@@ -747,6 +740,26 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           </mesh>
         ))}
 
+        {/* Rubber & Asphalt Speed Bumps with Yellow/Dark Safety Chevrons */}
+        {SPEED_BUMPS.map((sb, idx) => {
+          const segCount = 8;
+          const segW = sb.w / segCount;
+          return (
+            <group key={`speed-bump-${idx}`} position={[sb.x, 0.024, sb.z]} rotation={[0, sb.ry, 0]}>
+              {Array.from({ length: segCount }).map((_, sIdx) => (
+                <mesh
+                  key={`sb-seg-${sIdx}`}
+                  position={[-sb.w / 2 + segW * (sIdx + 0.5), 0, 0]}
+                  receiveShadow
+                  material={sIdx % 2 === 0 ? SPEED_BUMP_YELLOW_MAT : SPEED_BUMP_DARK_MAT}
+                >
+                  <boxGeometry args={[segW - 0.02, 0.032, 0.42]} />
+                </mesh>
+              ))}
+            </group>
+          );
+        })}
+
         {/* 6 Tiled Pedestrian Sidewalk Promenades from Central Plaza Ring to All 6 Booth Entrances */}
         {BOOTH_CONNECTOR_PATHS.map((conn, idx) => (
           <group
@@ -760,10 +773,9 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
                 map={plazaTileTexture}
                 bumpMap={plazaTileBumpTexture}
                 bumpScale={0.03}
-                roughnessMap={plazaTileBumpTexture}
                 color="#ffffff"
-                roughness={0.52}
-                metalness={0.04}
+                roughness={0.78}
+                metalness={0}
               />
             </mesh>
             {/* Raised Granite Sidewalk Curbs along Booth Approach Walkways */}
@@ -814,6 +826,16 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.025, 0]} receiveShadow>
             <ringGeometry args={[6.8, 7.1, 64]} />
             <meshStandardMaterial color="#d6cfc7" roughness={0.68} metalness={0.05} />
+          </mesh>
+
+          {/* Neoclassical Bronze Fountain Basin Coping & Splash Apron */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.028, 0]} receiveShadow>
+            <ringGeometry args={[1.82, 1.96, 48]} />
+            <meshStandardMaterial color="#d97706" metalness={0.72} roughness={0.32} />
+          </mesh>
+          <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.038, 0]} receiveShadow>
+            <torusGeometry args={[1.89, 0.032, 10, 48]} />
+            <meshStandardMaterial color="#b45309" metalness={0.75} roughness={0.3} />
           </mesh>
 
           {/* Sculpted Renaissance Tiered Stone Fountain Monument */}
@@ -962,16 +984,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
             <Instance key={`bollard-glow-${i}`} position={[bx, 0.68, bz]} />
           ))}
         </Instances>
-        <Instances geometry={BIN_BODY_GEOM} material={BIN_BODY_MAT} castShadow receiveShadow>
-          {EXHIBITION_BIN_POSITIONS.map(([rx, rz], i) => (
-            <Instance key={`bin-body-${i}`} position={[rx, 0.32, rz]} />
-          ))}
-        </Instances>
-        <Instances geometry={BIN_TOP_GEOM} material={BIN_TOP_MAT}>
-          {EXHIBITION_BIN_POSITIONS.map(([rx, rz], i) => (
-            <Instance key={`bin-top-${i}`} position={[rx, 0.66, rz]} />
-          ))}
-        </Instances>
+        <ExteriorAssets id="recycling-bin" placements={binPlacements} />
 
         {/* ================================================================
             6. ASSET-DRIVEN TREES (`env-tree-*.glb`), BENCHES (`env-park-bench.glb`),
@@ -981,13 +994,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         {treeBatches.map(b => <ExteriorAssets key={b.id} id={b.id} placements={b.placements} />)}
 
         {/* 6 Sculpted Stone Planter Urns along Grand Avenue & Entrance */}
-        {urnClones.map((u, i) => (
-          <primitive
-            key={`glb-urn-${i}`}
-            object={u.object}
-            position={[u.x, 0.02, u.z]}
-          />
-        ))}
+        <ExteriorAssets id="env-planter-urn" placements={urnPlacements} />
 
         <ExteriorAssets id="flowers" placements={flowerPlacements} shadows={false} />
 

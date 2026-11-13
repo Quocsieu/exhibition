@@ -1,0 +1,181 @@
+{
+  "metrics": [
+    {
+      "name": "explore",
+      "fps": 31.120060671042637,
+      "p95FrameMs": 50.20000000000073,
+      "calls": 529,
+      "triangles": 86439,
+      "memory": {
+        "geometries": 600,
+        "textures": 52
+      },
+      "camera": [
+        0.002118201274495416,
+        2.26,
+        8.999999568579153
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "overview",
+      "fps": 35.88985734535693,
+      "p95FrameMs": 41.69999999999709,
+      "calls": 1033,
+      "triangles": 179499,
+      "memory": {
+        "geometries": 704,
+        "textures": 69
+      },
+      "camera": [
+        16,
+        26.2,
+        22.8
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "tree",
+      "fps": 48.589277693846675,
+      "p95FrameMs": 25.100000000002183,
+      "calls": 112,
+      "triangles": 28688,
+      "memory": {
+        "geometries": 704,
+        "textures": 69
+      },
+      "camera": [
+        24,
+        5,
+        15
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "fountain",
+      "fps": 33.21702721563154,
+      "p95FrameMs": 41.5,
+      "calls": 383,
+      "triangles": 85499,
+      "memory": {
+        "geometries": 704,
+        "textures": 69
+      },
+      "camera": [
+        5,
+        4,
+        6
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "building",
+      "fps": 53.90225121166815,
+      "p95FrameMs": 25.200000000004366,
+      "calls": 148,
+      "triangles": 7428,
+      "memory": {
+        "geometries": 704,
+        "textures": 69
+      },
+      "camera": [
+        -16,
+        9,
+        -18
+      ],
+      "renderer": "WebKit WebGL"
+    },
+    {
+      "name": "mobile",
+      "fps": 63.207096191639764,
+      "p95FrameMs": 25.099999999998545,
+      "calls": 253,
+      "triangles": 48441,
+      "memory": {
+        "geometries": 704,
+        "textures": 69
+      },
+      "camera": [
+        0.002118201274495416,
+        2.26,
+        8.999999568579153
+      ],
+      "renderer": "WebKit WebGL"
+    }
+  ],
+  "errors": [],
+  "requests": [
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_building_01.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_building_02.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_building_03.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_building_04.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/7b_tCaBRLCI.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/R7qMWzb7nk.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-variant.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/NBUxHir6FJ.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/kn0sMwbspb.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/RO32ltX6zJ.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_building_01-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_building_02-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_building_03-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/city_building_04-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/R7qMWzb7nk-lod.glb",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:5180/models/exterior/etFGNvsiFv-variant-lod.glb",
+      "status": 200
+    }
+  ]
+}

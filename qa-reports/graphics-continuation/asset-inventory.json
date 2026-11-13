@@ -1,0 +1,142 @@
+[
+  {
+    "file": "city_detail_v2_01.glb",
+    "bytes": 1232932,
+    "sha256": "16dcfa802e6d9459366e12e1c951dbc7c72d09d30a4d2c220b51bdee0fb69aa4",
+    "triangles": 19128,
+    "copyright": "Project-authored derivative of generate_city_buildings.py; refine_exterior_city.py; no external artwork."
+  },
+  {
+    "file": "city_detail_v2_02.glb",
+    "bytes": 730704,
+    "sha256": "aae8503e058c85df3d3abd802d711ab5656613a706d04fc2f6b00b7164aeb63f",
+    "triangles": 10548,
+    "copyright": "Project-authored derivative of generate_city_buildings.py; refine_exterior_city.py; no external artwork."
+  },
+  {
+    "file": "city_detail_v2_03.glb",
+    "bytes": 592196,
+    "sha256": "7f6a6e8543e7b7b6710c6962fb351ca7fc8d98d4133f409a52f749a41223eccb",
+    "triangles": 8544,
+    "copyright": "Project-authored derivative of generate_city_buildings.py; refine_exterior_city.py; no external artwork."
+  },
+  {
+    "file": "city_detail_v2_04.glb",
+    "bytes": 833716,
+    "sha256": "83b8cac7fdaaaa181fc337f86784a6bd8fd87a0c3d1c466dc9be1f64d334a7e6",
+    "triangles": 12120,
+    "copyright": "Project-authored derivative of generate_city_buildings.py; refine_exterior_city.py; no external artwork."
+  },
+  {
+    "file": "7b_tCaBRLCI.glb",
+    "bytes": 152436,
+    "sha256": "04f6dc56240bba250e4396601906fc5cfffe32cdb0d13e96f13b4b8936ed0558",
+    "triangles": 2644,
+    "copyright": "Santo Spirito Fountain by Don Carson; https://poly.pizza/m/7b_tCaBRLCI; CC-BY 3.0; modified: isolated variant, optimized textures/mesh, PBR, LOD; runtime normalized scale/origin."
+  },
+  {
+    "file": "recycling_bin_01.glb",
+    "bytes": 100680,
+    "sha256": "7cf29c5eabc8e57cb8f6f7c3054f20a1cf006a8d38b8ce95e5265ddb3ccb2779",
+    "triangles": 2096,
+    "copyright": "Original project artwork; create_exterior_props.py; authored in Blender, no external assets."
+  },
+  {
+    "file": "etFGNvsiFv.glb",
+    "bytes": 388708,
+    "sha256": "309b099329550aef5ba9415d8642cd7e425bf4c2b1871d66c64701d1b2923b0a",
+    "triangles": 7096,
+    "copyright": "Trees by Quaternius; https://poly.pizza/m/etFGNvsiFv; CC0 1.0; modified: isolated variant, optimized textures/mesh, PBR, LOD; runtime normalized scale/origin."
+  },
+  {
+    "file": "R7qMWzb7nk.glb",
+    "bytes": 439468,
+    "sha256": "6e3701533b2929a5959bd9820820f0a202741ffa7c782799355ab398e32b4e2a",
+    "triangles": 4598,
+    "copyright": "Birch Trees by Quaternius; https://poly.pizza/m/R7qMWzb7nk; CC0 1.0; modified: isolated variant, optimized textures/mesh, PBR, LOD; runtime normalized scale/origin."
+  },
+  {
+    "file": "etFGNvsiFv-variant.glb",
+    "bytes": 494684,
+    "sha256": "8c18cbc42198c635ce6a8f4bd82946e243f3979708af86a45ac8f218d6af5f4b",
+    "triangles": 8520,
+    "copyright": "Trees by Quaternius; https://poly.pizza/m/etFGNvsiFv; CC0 1.0; modified: isolated variant, optimized textures/mesh, PBR, LOD; runtime normalized scale/origin."
+  },
+  {
+    "file": "planter_fluted_01.glb",
+    "bytes": 198232,
+    "sha256": "13492f9c351883542aead184844eb1d000d86630e7ccc3d0c03724d68a649d96",
+    "triangles": 3704,
+    "copyright": "Original project artwork; create_exterior_props.py; authored in Blender, no external assets."
+  },
+  {
+    "file": "NBUxHir6FJ.glb",
+    "bytes": 37760,
+    "sha256": "dbec071b9d2b4d8cdc2d40ddb8c6600a44fbf8f01d0cd67822c41f2cb43755d4",
+    "triangles": 136,
+    "copyright": "Flowers by Quaternius; https://poly.pizza/m/NBUxHir6FJ; CC0 1.0; modified: isolated variant, optimized textures/mesh, PBR, LOD; runtime normalized scale/origin."
+  },
+  {
+    "file": "kn0sMwbspb.glb",
+    "bytes": 23864,
+    "sha256": "25e7a55f2b344b3d8b425ffe4016ad791ff9f8cc9c137219865638b9dfad8882",
+    "triangles": 498,
+    "copyright": "Park Bench by J-Toastie; https://poly.pizza/m/kn0sMwbspb; CC-BY 3.0; modified: isolated variant, optimized textures/mesh, PBR, LOD; runtime normalized scale/origin."
+  },
+  {
+    "file": "RO32ltX6zJ.glb",
+    "bytes": 37592,
+    "sha256": "e695b0ea7fb2074b19bcce808554b24b4f96a7299abd8e017ea85a7129352f26",
+    "triangles": 426,
+    "copyright": "Street Lamps by MiniPoly; https://poly.pizza/m/RO32ltX6zJ; CC0 1.0; modified: isolated variant, optimized textures/mesh, PBR, LOD; runtime normalized scale/origin."
+  },
+  {
+    "file": "city_detail_v2_01-lod.glb",
+    "bytes": 616236,
+    "sha256": "2f89f23b99350d1ce10dfd2d8cd9f8168a3047066bf7e6e45b786b3e379e3d8c",
+    "triangles": 9094,
+    "copyright": "Project-authored architecture; simplified distant LOD."
+  },
+  {
+    "file": "city_detail_v2_02-lod.glb",
+    "bytes": 415300,
+    "sha256": "a8867138d1abe2fd846c8629938805a12927a1fd1b41821f33e71af2071e8aa2",
+    "triangles": 5062,
+    "copyright": "Project-authored architecture; simplified distant LOD."
+  },
+  {
+    "file": "city_detail_v2_03-lod.glb",
+    "bytes": 339364,
+    "sha256": "ea2bf95d84db80471be9554384080d85e7d272d174acfac51b2e3a7444f85f80",
+    "triangles": 4100,
+    "copyright": "Project-authored architecture; simplified distant LOD."
+  },
+  {
+    "file": "city_detail_v2_04-lod.glb",
+    "bytes": 471548,
+    "sha256": "c1d8b1bb95f6830017c3467860a363bcb625676dc0c182d51e4b31a1c93b5124",
+    "triangles": 5816,
+    "copyright": "Project-authored architecture; simplified distant LOD."
+  },
+  {
+    "file": "etFGNvsiFv-lod.glb",
+    "bytes": 324144,
+    "sha256": "d8d9a24c512415d4b77d37200832e072013e28bab3040f06e3dd6d682a0ceb61",
+    "triangles": 4384,
+    "copyright": "Trees by Quaternius; https://poly.pizza/m/etFGNvsiFv; CC0 1.0; modified: isolated variant, optimized textures/mesh, PBR, LOD; runtime normalized scale/origin."
+  },
+  {
+    "file": "R7qMWzb7nk-lod.glb",
+    "bytes": 404288,
+    "sha256": "9fc3b953fc9fc18eb119650d56f46b5ff74c6da9e526301681c329a817c58420",
+    "triangles": 3119,
+    "copyright": "Birch Trees by Quaternius; https://poly.pizza/m/R7qMWzb7nk; CC0 1.0; modified: isolated variant, optimized textures/mesh, PBR, LOD; runtime normalized scale/origin."
+  },
+  {
+    "file": "etFGNvsiFv-variant-lod.glb",
+    "bytes": 432052,
+    "sha256": "fbb32c9438b7dc32b759fe6af8ee145cb3d4f6575377bb92f972ca9adacdbb2a",
+    "triangles": 5884,
+    "copyright": "Trees by Quaternius; https://poly.pizza/m/etFGNvsiFv; CC0 1.0; modified: isolated variant, optimized textures/mesh, PBR, LOD; runtime normalized scale/origin."
+  }
+]
