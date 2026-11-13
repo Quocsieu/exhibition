@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Aether Tech Lab",
+    "focus": "PASS",
+    "productClick": "PASS",
+    "projectedTargets": 2
+  },
+  {
+    "name": "Nordic Living Studio",
+    "focus": "PASS",
+    "productClick": "PASS",
+    "projectedTargets": 2
+  },
+  {
+    "name": "EcoVita Roastery & Craft",
+    "focus": "PASS",
+    "productClick": "PASS",
+    "projectedTargets": 2
+  },
+  {
+    "name": "Kinetix Robotics & AI",
+    "focus": "PASS",
+    "productClick": "PASS",
+    "projectedTargets": 2
+  },
+  {
+    "name": "Lumina Design Collective",
+    "focus": "PASS",
+    "productClick": "PASS",
+    "projectedTargets": 2
+  },
+  {
+    "name": "Solaris Clean Energy",
+    "focus": "PASS",
+    "productClick": "PASS",
+    "projectedTargets": 2
+  }
+]

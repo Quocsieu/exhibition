@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { buildOpenExhibitionShell } from './exhibitionBoothShells';
 
 /**
  * Bakes vertical + radial Ambient Occlusion (AO) into a BufferGeometry's `color` attribute
@@ -1737,18 +1738,12 @@ export function buildCentralPlazaFountainModel(): THREE.Group {
 }
 
 export function buildBoothExteriorShell(theme: ArchitecturalBoothTheme): THREE.Group {
-  switch (theme) {
-    case 'tech':
-      return buildTechBoothExteriorShell();
-    case 'living':
-      return buildLivingBoothExteriorShell();
-    case 'coffee':
-      return buildCoffeeBoothExteriorShell();
-    case 'robotics':
-      return buildRoboticsBoothExteriorShell();
-    case 'design':
-      return buildDesignBoothExteriorShell();
-    case 'energy':
-      return buildEnergyBoothExteriorShell();
-  }
+  const group = buildOpenExhibitionShell(theme);
+  const colors: Record<ArchitecturalBoothTheme, [string, string, string]> = {
+    tech: ['#0f172a', '#0ea5e9', '#dbeafe'], living: ['#d6d3d1', '#10b981', '#fef3c7'],
+    coffee: ['#451a03', '#f59e0b', '#fef3c7'], robotics: ['#1e1b4b', '#8b5cf6', '#ede9fe'],
+    design: ['#fce7f3', '#ec4899', '#fff1f2'], energy: ['#ecfdf5', '#14b8a6', '#f0fdfa'],
+  };
+  addArchitecturalFoundationPlinth(group, ...colors[theme]);
+  return group;
 }

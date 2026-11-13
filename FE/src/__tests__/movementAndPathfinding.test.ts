@@ -475,7 +475,10 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
 
     const stats = getCachedAssetStats();
     expect(stats.cachedAssetCount).toBe(12);
-    expect(stats.totalTriangles).toBeGreaterThan(40000);
+    // Open exhibition shells intentionally remove the old solid roofs/walls.
+    // Each shell still passes the detail and distinctness checks above.
+    expect(stats.totalTriangles).toBeGreaterThan(6 * 2500);
+    expect(stats.totalTriangles).toBeLessThan(100000);
 
     // Also verify bump texture tracking & deterministic disposal
     const bumpBaseline = getActiveCanvasTextureCount();
