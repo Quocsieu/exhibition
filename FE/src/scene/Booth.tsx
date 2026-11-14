@@ -695,10 +695,11 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {/* Rear Architectural Showroom Backdrop Wall (Calm spotlight background behind Hero Products) */}
         {isKinetixV2 ? (
-          /* For Kinetix V2, the solid outer casing & frame are in the GLB; we render the dynamic canvas plane right on its face */
-          <group position={[0, 1.82, -vd / 2 + 0.18]}>
-            <mesh position={[0, 0, -0.04]} geometry={BACKDROP_CANVAS_GEOM}>
-              <meshBasicMaterial map={backdropTexture} />
+          /* For Kinetix V2, the solid outer casing & frame are in the GLB at z = -1.95m.
+             The dynamic backdrop canvas plane is placed facing +Z (front) at z = -1.86m (well in front of the GLB frame) */
+          <group position={[0, 1.82, 0]}>
+            <mesh position={[0, 0, -1.86]} geometry={BACKDROP_CANVAS_GEOM}>
+              <meshBasicMaterial map={backdropTexture} toneMapped={false} />
             </mesh>
           </group>
         ) : (
@@ -1016,10 +1017,10 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {theme === 'robotics' && (
           isKinetixV2 ? (
-            /* For Kinetix V2, the heavy steel frame, brackets, visor hood and floodlights are all integrated in the GLB.
-               We only mount the dynamic canvas plane at the front face! */
-            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+            /* For Kinetix V2, the heavy steel frame, brackets, visor hood and floodlights are all integrated in the GLB at z = 3.48..3.57m.
+               The dynamic canvas plane is placed directly on the front face at z = 3.60m, y = 3.38m! */
+            <group position={[0, 0, 0]}>
+              <mesh position={[0, 3.38, 3.60]}>
                 <planeGeometry args={[vw + 0.36, 0.68]} />
                 <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
