@@ -441,6 +441,7 @@ export const Booth: React.FC<BoothProps> = React.memo(
     const vd = Math.max(d, 4.4);
     const active = hovered || isSelected;
     const theme = useMemo(() => resolveBoothTheme(booth), [booth]);
+    const isKinetixV2 = theme === 'robotics' || booth.id === 'booth-kinetix-robotics';
     const exteriorShell = useMemo(
       () => cloneCachedAsset(getBoothGlbAssetId(theme)),
       [theme]
@@ -646,8 +647,9 @@ export const Booth: React.FC<BoothProps> = React.memo(
         <ExteriorAssets id="booth-planter" placements={boothDecorPlacements} />
         {/* ================================================================
             1. ROOFLESS BLENDER FRAME + ORIGINAL EXHIBITION FLOOR
+               (For Kinetix V2, passes isV2={true} to load kinetix_booth_v2.glb)
            ================================================================ */}
-        <RooflessBoothShell theme={theme} fallback={exteriorShell} />
+        <RooflessBoothShell theme={theme} fallback={exteriorShell} isV2={isKinetixV2} />
 
         {/* Active Selection Glow Trim & Interactive Entrance Beacon */}
         <mesh position={[0, 0.03, 0]}>
@@ -659,20 +661,20 @@ export const Booth: React.FC<BoothProps> = React.memo(
           />
         </mesh>
 
-        {/* Inner Showroom Rug / Zone Mat */}
-        <mesh
-          position={[0, 0.325, 0.08]}
-          receiveShadow
-          material={
-            theme === 'living' || theme === 'coffee'
-              ? CREAM_WALL_MAT
-              : theme === 'robotics'
-                ? SLATE_MID_MAT
+        {/* Inner Showroom Rug / Zone Mat (Disabled for Kinetix V2 because V2 has its own composite deck) */}
+        {!isKinetixV2 && (
+          <mesh
+            position={[0, 0.325, 0.08]}
+            receiveShadow
+            material={
+              theme === 'living' || theme === 'coffee'
+                ? CREAM_WALL_MAT
                 : CARPET_MAT
-          }
-        >
-          <boxGeometry args={[vw - 0.56, 0.015, vd - 0.52]} />
-        </mesh>
+            }
+          >
+            <boxGeometry args={[vw - 0.56, 0.015, vd - 0.52]} />
+          </mesh>
+        )}
 
         {/* Interactive Approach Beacon on Front Entrance Terrace */}
         <group position={[-vw * 0.18, 0.08, vd / 2 + 1.02]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -692,203 +694,221 @@ export const Booth: React.FC<BoothProps> = React.memo(
            ================================================================ */}
 
         {/* Rear Architectural Showroom Backdrop Wall (Calm spotlight background behind Hero Products) */}
-        <group position={[0, 1.82, -vd / 2 + 0.18]}>
-          <mesh position={[0, 0, -0.02]} geometry={BACKDROP_GLOW_BORDER_GEOM} material={brandBasicMat} />
-          <mesh geometry={BACKDROP_FRAME_GEOM} material={DARK_NAVY_MAT} />
-          <mesh position={[0, 0, 0.065]} geometry={BACKDROP_CANVAS_GEOM}>
-            <meshBasicMaterial map={backdropTexture} />
-          </mesh>
-          {/* Overhead Exhibition Backdrop Light Bar */}
-          <mesh
-            position={[0, 1.28, 0.12]}
-            geometry={BACKDROP_LIGHT_BAR_GEOM}
-            material={WHITE_LIGHT_MAT}
-          />
-        </group>
-
-        {/* KHU B — Main Product Display Podium (Centered at x = 0, z = 0.92; low-profile top surface at y = 0.56) */}
-        <group position={[0, 0, 0.92]}>
-          {/* Recessed Plinth Kickplate at y = 0.04 */}
-          <mesh
-            position={[0, 0.04, 0]}
-            geometry={COUNTER_PLINTH_BASE_GEOM}
-            material={SLATE_DARK_MAT}
-          />
-          <mesh
-            position={[0, 0.41, 0]}
-            castShadow
-            receiveShadow
-            geometry={EXPO_COUNTER_BODY_GEOM}
-            material={shelfTopMat}
-          />
-          <mesh
-            position={[0, 0.535, 0]}
-            castShadow
-            receiveShadow
-            geometry={EXPO_COUNTER_TOP_GEOM}
-            material={shelfBodyMat}
-          />
-          {/* Metallic Top Edge Perimeter Trim */}
-          <mesh
-            position={[0, 0.555, 0]}
-            geometry={COUNTER_TOP_TRIM_GEOM}
-            material={BRASS_ACCENT_MAT}
-          />
-          <mesh
-            position={[0, 0.505, 0]}
-            geometry={EXPO_COUNTER_LED_STRIP_GEOM}
-            material={brandBasicMat}
-          />
-          <mesh
-            position={[0, 0.41, 0.43]}
-            geometry={EXPO_COUNTER_FRONT_PANEL_GEOM}
-            material={brandStandardMat}
-          />
-        </group>
-
-        {/* KHU C1 — Left Symmetric 2-Tier Secondary Product Shelf (slot_03 Upper, slot_04 Lower) */}
-        <group>
-          {/* Upper Tier Structure (Centered at [-2.44, y, 0.68], top surface at y = 1.72) */}
-          <group position={[-2.44, 0, 0.68]} rotation={[0, 0.2, 0]}>
+        {isKinetixV2 ? (
+          /* For Kinetix V2, the solid outer casing & frame are in the GLB; we render the dynamic canvas plane right on its face */
+          <group position={[0, 1.82, -vd / 2 + 0.18]}>
+            <mesh position={[0, 0, -0.04]} geometry={BACKDROP_CANVAS_GEOM}>
+              <meshBasicMaterial map={backdropTexture} />
+            </mesh>
+          </group>
+        ) : (
+          <group position={[0, 1.82, -vd / 2 + 0.18]}>
+            <mesh position={[0, 0, -0.02]} geometry={BACKDROP_GLOW_BORDER_GEOM} material={brandBasicMat} />
+            <mesh geometry={BACKDROP_FRAME_GEOM} material={DARK_NAVY_MAT} />
+            <mesh position={[0, 0, 0.065]} geometry={BACKDROP_CANVAS_GEOM}>
+              <meshBasicMaterial map={backdropTexture} />
+            </mesh>
+            {/* Overhead Exhibition Backdrop Light Bar */}
             <mesh
-              position={[0, 0.98, 0]}
-              castShadow
-              receiveShadow
-              geometry={STEPPED_RACK_PILLAR_GEOM}
-              material={shelfBodyMat}
+              position={[0, 1.28, 0.12]}
+              geometry={BACKDROP_LIGHT_BAR_GEOM}
+              material={WHITE_LIGHT_MAT}
+            />
+          </group>
+        )}
+
+        {/* KHU B — Main Product Display Podium (Centered at x = 0, z = 0.92; low-profile top surface at y = 0.56)
+            Disabled for Kinetix V2 because V2 has its own bespoke PBR carbon-fiber hero counter! */}
+        {!isKinetixV2 && (
+          <group position={[0, 0, 0.92]}>
+            {/* Recessed Plinth Kickplate at y = 0.04 */}
+            <mesh
+              position={[0, 0.04, 0]}
+              geometry={COUNTER_PLINTH_BASE_GEOM}
+              material={SLATE_DARK_MAT}
             />
             <mesh
-              position={[0, 1.69, 0]}
+              position={[0, 0.41, 0]}
               castShadow
               receiveShadow
-              geometry={STEPPED_SHELF_BOARD_GEOM}
+              geometry={EXPO_COUNTER_BODY_GEOM}
               material={shelfTopMat}
             />
             <mesh
-              position={[0, 1.66, 0]}
-              geometry={STEPPED_SHELF_TRIM_GEOM}
-              material={brandBasicMat}
-            />
-            <mesh
-              position={[0, 2.3, -0.35]}
-              geometry={STEPPED_RACK_BACKBOARD_GEOM}
-              material={rackBackboardMat}
-            />
-            {/* Structural Stand-Off Struts */}
-            {[-0.52, 0.52].map((sx, idx) => (
-              <mesh
-                key={`lstrut-${idx}`}
-                position={[sx, 0.62, 0.18]}
-                geometry={SHELF_STRUT_ROD_GEOM}
-                material={CHROME_PILLAR_MAT}
-              />
-            ))}
-          </group>
-
-          {/* Lower Tier Structure (Centered at [-2.44, y, 1.12], top surface at y = 0.42) */}
-          <group position={[-2.44, 0, 1.12]} rotation={[0, 0.2, 0]}>
-            <mesh
-              position={[0, 0.32, 0]}
+              position={[0, 0.535, 0]}
               castShadow
               receiveShadow
-              geometry={STEPPED_RACK_LOWER_BASE_GEOM}
+              geometry={EXPO_COUNTER_TOP_GEOM}
               material={shelfBodyMat}
             />
+            {/* Metallic Top Edge Perimeter Trim */}
             <mesh
-              position={[0, 0.39, 0]}
-              castShadow
-              receiveShadow
-              geometry={STEPPED_SHELF_BOARD_GEOM}
-              material={shelfTopMat}
+              position={[0, 0.555, 0]}
+              geometry={COUNTER_TOP_TRIM_GEOM}
+              material={BRASS_ACCENT_MAT}
             />
             <mesh
-              position={[0, 0.365, 0]}
-              geometry={STEPPED_SHELF_TRIM_GEOM}
+              position={[0, 0.505, 0]}
+              geometry={EXPO_COUNTER_LED_STRIP_GEOM}
               material={brandBasicMat}
             />
-            {/* Chrome Corner Reinforcement Brackets */}
-            {[-0.58, 0.58].map((bx, idx) => (
-              <mesh
-                key={`lbracket-${idx}`}
-                position={[bx, 0.38, 0.32]}
-                geometry={SHELF_CORNER_BRACKET_GEOM}
-                material={CHROME_PILLAR_MAT}
-              />
-            ))}
+            <mesh
+              position={[0, 0.41, 0.43]}
+              geometry={EXPO_COUNTER_FRONT_PANEL_GEOM}
+              material={brandStandardMat}
+            />
           </group>
-        </group>
+        )}
 
-        {/* KHU C2 — Right Symmetric 2-Tier Secondary Product Shelf (slot_05 Upper, slot_06 Lower) */}
-        <group>
-          {/* Upper Tier Structure (Centered at [2.44, y, 0.68], top surface at y = 1.72) */}
-          <group position={[2.44, 0, 0.68]} rotation={[0, -0.2, 0]}>
-            <mesh
-              position={[0, 0.98, 0]}
-              castShadow
-              receiveShadow
-              geometry={STEPPED_RACK_PILLAR_GEOM}
-              material={shelfBodyMat}
-            />
-            <mesh
-              position={[0, 1.69, 0]}
-              castShadow
-              receiveShadow
-              geometry={STEPPED_SHELF_BOARD_GEOM}
-              material={shelfTopMat}
-            />
-            <mesh
-              position={[0, 1.66, 0]}
-              geometry={STEPPED_SHELF_TRIM_GEOM}
-              material={brandBasicMat}
-            />
-            <mesh
-              position={[0, 2.3, -0.35]}
-              geometry={STEPPED_RACK_BACKBOARD_GEOM}
-              material={rackBackboardMat}
-            />
-            {/* Structural Stand-Off Struts */}
-            {[-0.52, 0.52].map((sx, idx) => (
-              <mesh
-                key={`rstrut-${idx}`}
-                position={[sx, 0.62, 0.18]}
-                geometry={SHELF_STRUT_ROD_GEOM}
-                material={CHROME_PILLAR_MAT}
-              />
-            ))}
-          </group>
+        {/* KHU C1 & C2 — Symmetric 2-Tier Secondary Shelves
+            Disabled for Kinetix V2 because V2 has its own bespoke PBR mechanical display shelves! */}
+        {!isKinetixV2 && (
+          <>
+            {/* KHU C1 — Left Symmetric 2-Tier Secondary Product Shelf (slot_03 Upper, slot_04 Lower) */}
+            <group>
+              {/* Upper Tier Structure (Centered at [-2.44, y, 0.68], top surface at y = 1.72) */}
+              <group position={[-2.44, 0, 0.68]} rotation={[0, 0.2, 0]}>
+                <mesh
+                  position={[0, 0.98, 0]}
+                  castShadow
+                  receiveShadow
+                  geometry={STEPPED_RACK_PILLAR_GEOM}
+                  material={shelfBodyMat}
+                />
+                <mesh
+                  position={[0, 1.69, 0]}
+                  castShadow
+                  receiveShadow
+                  geometry={STEPPED_SHELF_BOARD_GEOM}
+                  material={shelfTopMat}
+                />
+                <mesh
+                  position={[0, 1.66, 0]}
+                  geometry={STEPPED_SHELF_TRIM_GEOM}
+                  material={brandBasicMat}
+                />
+                <mesh
+                  position={[0, 2.3, -0.35]}
+                  geometry={STEPPED_RACK_BACKBOARD_GEOM}
+                  material={rackBackboardMat}
+                />
+                {/* Structural Stand-Off Struts */}
+                {[-0.52, 0.52].map((sx, idx) => (
+                  <mesh
+                    key={`lstrut-${idx}`}
+                    position={[sx, 0.62, 0.18]}
+                    geometry={SHELF_STRUT_ROD_GEOM}
+                    material={CHROME_PILLAR_MAT}
+                  />
+                ))}
+              </group>
 
-          {/* Lower Tier Structure (Centered at [2.44, y, 1.12], top surface at y = 0.42) */}
-          <group position={[2.44, 0, 1.12]} rotation={[0, -0.2, 0]}>
-            <mesh
-              position={[0, 0.32, 0]}
-              castShadow
-              receiveShadow
-              geometry={STEPPED_RACK_LOWER_BASE_GEOM}
-              material={shelfBodyMat}
-            />
-            <mesh
-              position={[0, 0.39, 0]}
-              castShadow
-              receiveShadow
-              geometry={STEPPED_SHELF_BOARD_GEOM}
-              material={shelfTopMat}
-            />
-            <mesh
-              position={[0, 0.365, 0]}
-              geometry={STEPPED_SHELF_TRIM_GEOM}
-              material={brandBasicMat}
-            />
-            {/* Chrome Corner Reinforcement Brackets */}
-            {[-0.58, 0.58].map((bx, idx) => (
-              <mesh
-                key={`rbracket-${idx}`}
-                position={[bx, 0.38, 0.32]}
-                geometry={SHELF_CORNER_BRACKET_GEOM}
-                material={CHROME_PILLAR_MAT}
-              />
-            ))}
-          </group>
-        </group>
+              {/* Lower Tier Structure (Centered at [-2.44, y, 1.12], top surface at y = 0.42) */}
+              <group position={[-2.44, 0, 1.12]} rotation={[0, 0.2, 0]}>
+                <mesh
+                  position={[0, 0.32, 0]}
+                  castShadow
+                  receiveShadow
+                  geometry={STEPPED_RACK_LOWER_BASE_GEOM}
+                  material={shelfBodyMat}
+                />
+                <mesh
+                  position={[0, 0.39, 0]}
+                  castShadow
+                  receiveShadow
+                  geometry={STEPPED_SHELF_BOARD_GEOM}
+                  material={shelfTopMat}
+                />
+                <mesh
+                  position={[0, 0.365, 0]}
+                  geometry={STEPPED_SHELF_TRIM_GEOM}
+                  material={brandBasicMat}
+                />
+                {/* Chrome Corner Reinforcement Brackets */}
+                {[-0.58, 0.58].map((bx, idx) => (
+                  <mesh
+                    key={`lbracket-${idx}`}
+                    position={[bx, 0.38, 0.32]}
+                    geometry={SHELF_CORNER_BRACKET_GEOM}
+                    material={CHROME_PILLAR_MAT}
+                  />
+                ))}
+              </group>
+            </group>
+
+            {/* KHU C2 — Right Symmetric 2-Tier Secondary Product Shelf (slot_05 Upper, slot_06 Lower) */}
+            <group>
+              {/* Upper Tier Structure (Centered at [2.44, y, 0.68], top surface at y = 1.72) */}
+              <group position={[2.44, 0, 0.68]} rotation={[0, -0.2, 0]}>
+                <mesh
+                  position={[0, 0.98, 0]}
+                  castShadow
+                  receiveShadow
+                  geometry={STEPPED_RACK_PILLAR_GEOM}
+                  material={shelfBodyMat}
+                />
+                <mesh
+                  position={[0, 1.69, 0]}
+                  castShadow
+                  receiveShadow
+                  geometry={STEPPED_SHELF_BOARD_GEOM}
+                  material={shelfTopMat}
+                />
+                <mesh
+                  position={[0, 1.66, 0]}
+                  geometry={STEPPED_SHELF_TRIM_GEOM}
+                  material={brandBasicMat}
+                />
+                <mesh
+                  position={[0, 2.3, -0.35]}
+                  geometry={STEPPED_RACK_BACKBOARD_GEOM}
+                  material={rackBackboardMat}
+                />
+                {/* Structural Stand-Off Struts */}
+                {[-0.52, 0.52].map((sx, idx) => (
+                  <mesh
+                    key={`rstrut-${idx}`}
+                    position={[sx, 0.62, 0.18]}
+                    geometry={SHELF_STRUT_ROD_GEOM}
+                    material={CHROME_PILLAR_MAT}
+                  />
+                ))}
+              </group>
+
+              {/* Lower Tier Structure (Centered at [2.44, y, 1.12], top surface at y = 0.42) */}
+              <group position={[2.44, 0, 1.12]} rotation={[0, -0.2, 0]}>
+                <mesh
+                  position={[0, 0.32, 0]}
+                  castShadow
+                  receiveShadow
+                  geometry={STEPPED_RACK_LOWER_BASE_GEOM}
+                  material={shelfBodyMat}
+                />
+                <mesh
+                  position={[0, 0.39, 0]}
+                  castShadow
+                  receiveShadow
+                  geometry={STEPPED_SHELF_BOARD_GEOM}
+                  material={shelfTopMat}
+                />
+                <mesh
+                  position={[0, 0.365, 0]}
+                  geometry={STEPPED_SHELF_TRIM_GEOM}
+                  material={brandBasicMat}
+                />
+                {/* Chrome Corner Reinforcement Brackets */}
+                {[-0.58, 0.58].map((bx, idx) => (
+                  <mesh
+                    key={`rbracket-${idx}`}
+                    position={[bx, 0.38, 0.32]}
+                    geometry={SHELF_CORNER_BRACKET_GEOM}
+                    material={CHROME_PILLAR_MAT}
+                  />
+                ))}
+              </group>
+            </group>
+          </>
+        )}
 
         {/* ================================================================
             3. DETERMINISTIC 3D SLOT PRODUCT RENDERING (`slot_01` .. `slot_06`)
@@ -995,35 +1015,46 @@ export const Booth: React.FC<BoothProps> = React.memo(
         )}
 
         {theme === 'robotics' && (
-          <group>
+          isKinetixV2 ? (
+            /* For Kinetix V2, the heavy steel frame, brackets, visor hood and floodlights are all integrated in the GLB.
+               We only mount the dynamic canvas plane at the front face! */
             <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={SLATE_DARK_MAT}>
-                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
-              </mesh>
-              {/* Top Architectural Dark Slate Cornice & Brackets */}
-              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={SLATE_DARK_MAT} />
-              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
-                <mesh key={`rob-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={DARK_NAVY_MAT} />
-              ))}
-              <mesh position={[0, -0.26, vd / 2 + 0.44]} material={GOLD_BASIC_MAT}>
-                <boxGeometry args={[vw + 0.6, 0.06, 0.38]} />
-              </mesh>
               <mesh position={[0, -0.65, vd / 2 + 0.6]}>
                 <planeGeometry args={[vw + 0.36, 0.68]} />
                 <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
               </mesh>
             </group>
-
-            {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
-              <group key={`rob-truss-${idx}`} position={[px, 0.18, vd / 2 - 0.2]}>
-                <mesh position={[0, 0.09, 0]} geometry={TRUSS_BASE_GEOM} material={DARK_NAVY_MAT} />
-                <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={TRUSS_PILLAR_GEOM} material={CHROME_PILLAR_MAT} />
-                <mesh position={[0, WALL_HEIGHT * 0.4, 0]} geometry={TRUSS_RING_GEOM} material={GOLD_BASIC_MAT} />
-                <mesh position={[0, WALL_HEIGHT * 0.78, 0]} geometry={TRUSS_RING_GEOM} material={CYAN_GLOW_MAT} />
-                <mesh position={[0, WALL_HEIGHT * 0.95, 0]} geometry={TRUSS_GUSSET_GEOM} material={SLATE_DARK_MAT} />
+          ) : (
+            <group>
+              <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
+                <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={SLATE_DARK_MAT}>
+                  <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
+                </mesh>
+                {/* Top Architectural Dark Slate Cornice & Brackets */}
+                <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={SLATE_DARK_MAT} />
+                {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                  <mesh key={`rob-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={DARK_NAVY_MAT} />
+                ))}
+                <mesh position={[0, -0.26, vd / 2 + 0.44]} material={GOLD_BASIC_MAT}>
+                  <boxGeometry args={[vw + 0.6, 0.06, 0.38]} />
+                </mesh>
+                <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                  <planeGeometry args={[vw + 0.36, 0.68]} />
+                  <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+                </mesh>
               </group>
-            ))}
-          </group>
+
+              {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
+                <group key={`rob-truss-${idx}`} position={[px, 0.18, vd / 2 - 0.2]}>
+                  <mesh position={[0, 0.09, 0]} geometry={TRUSS_BASE_GEOM} material={DARK_NAVY_MAT} />
+                  <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={TRUSS_PILLAR_GEOM} material={CHROME_PILLAR_MAT} />
+                  <mesh position={[0, WALL_HEIGHT * 0.4, 0]} geometry={TRUSS_RING_GEOM} material={GOLD_BASIC_MAT} />
+                  <mesh position={[0, WALL_HEIGHT * 0.78, 0]} geometry={TRUSS_RING_GEOM} material={CYAN_GLOW_MAT} />
+                  <mesh position={[0, WALL_HEIGHT * 0.95, 0]} geometry={TRUSS_GUSSET_GEOM} material={SLATE_DARK_MAT} />
+                </group>
+              ))}
+            </group>
+          )
         )}
 
         {theme === 'design' && (
