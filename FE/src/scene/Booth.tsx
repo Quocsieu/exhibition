@@ -441,7 +441,7 @@ export const Booth: React.FC<BoothProps> = React.memo(
     const vd = Math.max(d, 4.4);
     const active = hovered || isSelected;
     const theme = useMemo(() => resolveBoothTheme(booth), [booth]);
-    const isKinetixV2 = theme === 'robotics' || booth.id === 'booth-kinetix-robotics';
+    const isBoothV2 = true;
     const exteriorShell = useMemo(
       () => cloneCachedAsset(getBoothGlbAssetId(theme)),
       [theme]
@@ -647,9 +647,9 @@ export const Booth: React.FC<BoothProps> = React.memo(
         <ExteriorAssets id="booth-planter" placements={boothDecorPlacements} />
         {/* ================================================================
             1. ROOFLESS BLENDER FRAME + ORIGINAL EXHIBITION FLOOR
-               (For Kinetix V2, passes isV2={true} to load kinetix_booth_v2.glb)
+               (For V2 booths, passes isV2={true} to load bespoke V2 GLBs)
            ================================================================ */}
-        <RooflessBoothShell theme={theme} fallback={exteriorShell} isV2={isKinetixV2} />
+        <RooflessBoothShell theme={theme} fallback={exteriorShell} isV2={isBoothV2} />
 
         {/* Active Selection Glow Trim & Interactive Entrance Beacon */}
         <mesh position={[0, 0.03, 0]}>
@@ -661,8 +661,8 @@ export const Booth: React.FC<BoothProps> = React.memo(
           />
         </mesh>
 
-        {/* Inner Showroom Rug / Zone Mat (Disabled for Kinetix V2 because V2 has its own composite deck) */}
-        {!isKinetixV2 && (
+        {/* Inner Showroom Rug / Zone Mat (Disabled for V2 because V2 has its own composite deck) */}
+        {!isBoothV2 && (
           <mesh
             position={[0, 0.325, 0.08]}
             receiveShadow
@@ -694,8 +694,8 @@ export const Booth: React.FC<BoothProps> = React.memo(
            ================================================================ */}
 
         {/* Rear Architectural Showroom Backdrop Wall (Calm spotlight background behind Hero Products) */}
-        {isKinetixV2 ? (
-          /* For Kinetix V2, the solid outer casing & frame are in the GLB at z = -1.95m.
+        {isBoothV2 ? (
+          /* For V2 booths, the solid outer casing & frame are in the GLB at z = -1.95m.
              The dynamic backdrop canvas plane is placed facing +Z (front) at z = -1.86m (well in front of the GLB frame) */
           <group position={[0, 1.82, 0]}>
             <mesh position={[0, 0, -1.86]} geometry={BACKDROP_CANVAS_GEOM}>
@@ -719,8 +719,8 @@ export const Booth: React.FC<BoothProps> = React.memo(
         )}
 
         {/* KHU B — Main Product Display Podium (Centered at x = 0, z = 0.92; low-profile top surface at y = 0.56)
-            Disabled for Kinetix V2 because V2 has its own bespoke PBR carbon-fiber hero counter! */}
-        {!isKinetixV2 && (
+            Disabled for V2 because V2 has its own bespoke PBR hero counter! */}
+        {!isBoothV2 && (
           <group position={[0, 0, 0.92]}>
             {/* Recessed Plinth Kickplate at y = 0.04 */}
             <mesh
@@ -762,8 +762,8 @@ export const Booth: React.FC<BoothProps> = React.memo(
         )}
 
         {/* KHU C1 & C2 — Symmetric 2-Tier Secondary Shelves
-            Disabled for Kinetix V2 because V2 has its own bespoke PBR mechanical display shelves! */}
-        {!isKinetixV2 && (
+            Disabled for V2 because V2 has its own bespoke PBR display shelves! */}
+        {!isBoothV2 && (
           <>
             {/* KHU C1 — Left Symmetric 2-Tier Secondary Product Shelf (slot_03 Upper, slot_04 Lower) */}
             <group>
@@ -927,196 +927,194 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {/* ================================================================
             4. KHU A — SINGLE UNIFIED BRAND HEADER & OUTWARD-FRAMED PILLARS BY THEME
-               (Single Brand Header at world y = 3.38m, front plane z = 3.52m, height = 0.68m;
-                Front pillars shifted outward to x = ±3.28m so the 6.2m product stage is 100% unobstructed)
+               (For V2 booths, heavy framing, brackets, visor hood and theme structures are in the GLB.
+                The dynamic canvas plane is placed directly on the front face at z = 3.60m, y = 3.38m)
            ================================================================ */}
-        {theme === 'tech' && (
-          <group>
-            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={DARK_NAVY_MAT}>
-                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
-              </mesh>
-              {/* Top Architectural Visor Cornice & Side Brackets */}
-              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={brandStandardMat} />
-              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
-                <mesh key={`tech-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={DARK_NAVY_MAT} />
-              ))}
-              <mesh position={[0, -0.26, vd / 2 + 0.44]} material={CYAN_GLOW_MAT}>
-                <boxGeometry args={[vw + 0.6, 0.06, 0.38]} />
-              </mesh>
-              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
-                <planeGeometry args={[vw + 0.36, 0.68]} />
-                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
-              </mesh>
-            </group>
-
-            <group position={[vw / 2 + 0.28, 0.18, vd / 2 - 0.22]}>
-              <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={DARK_NAVY_MAT} />
-              <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={TRUSS_PILLAR_GEOM} material={CHROME_PILLAR_MAT} />
-              <mesh position={[0, WALL_HEIGHT * 0.65, 0]} geometry={TRUSS_RING_GEOM} material={CYAN_GLOW_MAT} />
-            </group>
-            <group position={[-vw / 2 - 0.48, 0.18, vd / 2 - 0.2]}>
-              <mesh position={[0, 0.04, 0]} geometry={TOTEM_BASE_GEOM} material={DARK_NAVY_MAT} />
-              <mesh position={[0, 0.98, 0]} geometry={TOTEM_BODY_GEOM} material={DARK_NAVY_MAT} />
-              <mesh position={[0, 1.06, 0.085]} geometry={TOTEM_SCREEN_GEOM} material={CYAN_GLOW_MAT} />
-            </group>
+        {isBoothV2 ? (
+          <group position={[0, 0, 0]}>
+            <mesh position={[0, 3.38, 3.60]}>
+              <planeGeometry args={[vw + 0.36, 0.68]} />
+              <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+            </mesh>
           </group>
-        )}
-
-        {theme === 'living' && (
-          <group>
-            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={WARM_OAK_MAT}>
-                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
-              </mesh>
-              {/* Top Architectural Timber Cornice & Side Brackets */}
-              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={WARM_OAK_MAT} />
-              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
-                <mesh key={`living-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={WARM_OAK_MAT} />
-              ))}
-              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
-                <planeGeometry args={[vw + 0.36, 0.68]} />
-                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
-              </mesh>
-            </group>
-
-            {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
-              <group key={`oak-pil-${idx}`} position={[px, 0.18, vd / 2 - 0.18]}>
-                <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={WARM_OAK_MAT} />
-                <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={WARM_OAK_MAT} />
-              </group>
-            ))}
-          </group>
-        )}
-
-        {theme === 'coffee' && (
-          <group>
-            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={ESPRESSO_WOOD_MAT}>
-                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
-              </mesh>
-              {/* Top Architectural Copper Cornice & Side Brackets */}
-              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={COPPER_CRAFT_MAT} />
-              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
-                <mesh key={`coffee-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={ESPRESSO_WOOD_MAT} />
-              ))}
-              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
-                <planeGeometry args={[vw + 0.36, 0.68]} />
-                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
-              </mesh>
-            </group>
-
-            {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
-              <group key={`cafe-col-${idx}`} position={[px, 0.18, vd / 2 - 0.18]}>
-                <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={ESPRESSO_WOOD_MAT} />
-                <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={ESPRESSO_WOOD_MAT} />
-              </group>
-            ))}
-          </group>
-        )}
-
-        {theme === 'robotics' && (
-          isKinetixV2 ? (
-            /* For Kinetix V2, the heavy steel frame, brackets, visor hood and floodlights are all integrated in the GLB at z = 3.48..3.57m.
-               The dynamic canvas plane is placed directly on the front face at z = 3.60m, y = 3.38m! */
-            <group position={[0, 0, 0]}>
-              <mesh position={[0, 3.38, 3.60]}>
-                <planeGeometry args={[vw + 0.36, 0.68]} />
-                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
-              </mesh>
-            </group>
-          ) : (
-            <group>
-              <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-                <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={SLATE_DARK_MAT}>
-                  <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
-                </mesh>
-                {/* Top Architectural Dark Slate Cornice & Brackets */}
-                <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={SLATE_DARK_MAT} />
-                {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
-                  <mesh key={`rob-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={DARK_NAVY_MAT} />
-                ))}
-                <mesh position={[0, -0.26, vd / 2 + 0.44]} material={GOLD_BASIC_MAT}>
-                  <boxGeometry args={[vw + 0.6, 0.06, 0.38]} />
-                </mesh>
-                <mesh position={[0, -0.65, vd / 2 + 0.6]}>
-                  <planeGeometry args={[vw + 0.36, 0.68]} />
-                  <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
-                </mesh>
-              </group>
-
-              {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
-                <group key={`rob-truss-${idx}`} position={[px, 0.18, vd / 2 - 0.2]}>
-                  <mesh position={[0, 0.09, 0]} geometry={TRUSS_BASE_GEOM} material={DARK_NAVY_MAT} />
-                  <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={TRUSS_PILLAR_GEOM} material={CHROME_PILLAR_MAT} />
-                  <mesh position={[0, WALL_HEIGHT * 0.4, 0]} geometry={TRUSS_RING_GEOM} material={GOLD_BASIC_MAT} />
-                  <mesh position={[0, WALL_HEIGHT * 0.78, 0]} geometry={TRUSS_RING_GEOM} material={CYAN_GLOW_MAT} />
-                  <mesh position={[0, WALL_HEIGHT * 0.95, 0]} geometry={TRUSS_GUSSET_GEOM} material={SLATE_DARK_MAT} />
+        ) : (
+          <>
+            {theme === 'tech' && (
+              <group>
+                <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
+                  <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={DARK_NAVY_MAT}>
+                    <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
+                  </mesh>
+                  {/* Top Architectural Visor Cornice & Side Brackets */}
+                  <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={brandStandardMat} />
+                  {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                    <mesh key={`tech-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={DARK_NAVY_MAT} />
+                  ))}
+                  <mesh position={[0, -0.26, vd / 2 + 0.44]} material={CYAN_GLOW_MAT}>
+                    <boxGeometry args={[vw + 0.6, 0.06, 0.38]} />
+                  </mesh>
+                  <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                    <planeGeometry args={[vw + 0.36, 0.68]} />
+                    <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+                  </mesh>
                 </group>
-              ))}
-            </group>
-          )
-        )}
 
-        {theme === 'design' && (
-          <group>
-            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={VIOLET_ART_MAT}>
-                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
-              </mesh>
-              {/* Top Architectural Magenta Cornice & Brackets */}
-              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={MAGENTA_ART_MAT} />
-              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
-                <mesh key={`design-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={VIOLET_ART_MAT} />
-              ))}
-              <mesh position={[0, -0.26, vd / 2 + 0.44]} material={MAGENTA_ART_MAT}>
-                <boxGeometry args={[vw + 0.6, 0.07, 0.38]} />
-              </mesh>
-              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
-                <planeGeometry args={[vw + 0.36, 0.68]} />
-                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
-              </mesh>
+                <group position={[vw / 2 + 0.28, 0.18, vd / 2 - 0.22]}>
+                  <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={DARK_NAVY_MAT} />
+                  <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={TRUSS_PILLAR_GEOM} material={CHROME_PILLAR_MAT} />
+                  <mesh position={[0, WALL_HEIGHT * 0.65, 0]} geometry={TRUSS_RING_GEOM} material={CYAN_GLOW_MAT} />
+                </group>
+                <group position={[-vw / 2 - 0.48, 0.18, vd / 2 - 0.2]}>
+                  <mesh position={[0, 0.04, 0]} geometry={TOTEM_BASE_GEOM} material={DARK_NAVY_MAT} />
+                  <mesh position={[0, 0.98, 0]} geometry={TOTEM_BODY_GEOM} material={DARK_NAVY_MAT} />
+                  <mesh position={[0, 1.06, 0.085]} geometry={TOTEM_SCREEN_GEOM} material={CYAN_GLOW_MAT} />
+                </group>
+              </group>
+            )}
 
-            </group>
-          </group>
-        )}
+            {theme === 'living' && (
+              <group>
+                <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
+                  <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={WARM_OAK_MAT}>
+                    <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
+                  </mesh>
+                  {/* Top Architectural Timber Cornice & Side Brackets */}
+                  <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={WARM_OAK_MAT} />
+                  {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                    <mesh key={`living-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={WARM_OAK_MAT} />
+                  ))}
+                  <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                    <planeGeometry args={[vw + 0.36, 0.68]} />
+                    <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+                  </mesh>
+                </group>
 
-        {theme === 'energy' && (
-          <group>
-            <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
-              <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={DARK_NAVY_MAT}>
-                <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
-              </mesh>
-              {/* Top Architectural Emerald Cornice & Brackets */}
-              <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={EMERALD_GLOW_MAT} />
-              {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
-                <mesh key={`energy-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={DARK_NAVY_MAT} />
-              ))}
-              <mesh position={[0, -0.26, vd / 2 + 0.44]} material={EMERALD_GLOW_MAT}>
-                <boxGeometry args={[vw + 0.6, 0.07, 0.38]} />
-              </mesh>
-              <mesh position={[0, -0.65, vd / 2 + 0.6]}>
-                <planeGeometry args={[vw + 0.36, 0.68]} />
-                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
-              </mesh>
-
-            </group>
-
-            {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
-              <group key={`eco-col-${idx}`} position={[px, 0.18, vd / 2 - 0.2]}>
-                <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={WHITE_GLOSS_MAT} />
-                <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={WHITE_GLOSS_MAT} />
-                {[0.65, 1.35, 2.05].map((py, bIdx) => (
-                  <mesh
-                    key={`vine-${bIdx}`}
-                    position={[0, py, 0.16]}
-                    geometry={PLANT_BUSH_GEOM}
-                    material={EMERALD_PLANT_MAT}
-                  />
+                {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
+                  <group key={`oak-pil-${idx}`} position={[px, 0.18, vd / 2 - 0.18]}>
+                    <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={WARM_OAK_MAT} />
+                    <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={WARM_OAK_MAT} />
+                  </group>
                 ))}
               </group>
-            ))}
-          </group>
+            )}
+
+            {theme === 'coffee' && (
+              <group>
+                <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
+                  <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={ESPRESSO_WOOD_MAT}>
+                    <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
+                  </mesh>
+                  {/* Top Architectural Copper Cornice & Side Brackets */}
+                  <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={COPPER_CRAFT_MAT} />
+                  {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                    <mesh key={`coffee-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={ESPRESSO_WOOD_MAT} />
+                  ))}
+                  <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                    <planeGeometry args={[vw + 0.36, 0.68]} />
+                    <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+                  </mesh>
+                </group>
+
+                {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
+                  <group key={`cafe-col-${idx}`} position={[px, 0.18, vd / 2 - 0.18]}>
+                    <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={ESPRESSO_WOOD_MAT} />
+                    <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={ESPRESSO_WOOD_MAT} />
+                  </group>
+                ))}
+              </group>
+            )}
+
+            {theme === 'robotics' && (
+              <group>
+                <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
+                  <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={SLATE_DARK_MAT}>
+                    <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
+                  </mesh>
+                  {/* Top Architectural Dark Slate Cornice & Brackets */}
+                  <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={SLATE_DARK_MAT} />
+                  {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                    <mesh key={`rob-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={DARK_NAVY_MAT} />
+                  ))}
+                  <mesh position={[0, -0.26, vd / 2 + 0.44]} material={GOLD_BASIC_MAT}>
+                    <boxGeometry args={[vw + 0.6, 0.06, 0.38]} />
+                  </mesh>
+                  <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                    <planeGeometry args={[vw + 0.36, 0.68]} />
+                    <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+                  </mesh>
+                </group>
+
+                {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
+                  <group key={`rob-truss-${idx}`} position={[px, 0.18, vd / 2 - 0.2]}>
+                    <mesh position={[0, 0.09, 0]} geometry={TRUSS_BASE_GEOM} material={DARK_NAVY_MAT} />
+                    <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={TRUSS_PILLAR_GEOM} material={CHROME_PILLAR_MAT} />
+                    <mesh position={[0, WALL_HEIGHT * 0.4, 0]} geometry={TRUSS_RING_GEOM} material={GOLD_BASIC_MAT} />
+                    <mesh position={[0, WALL_HEIGHT * 0.78, 0]} geometry={TRUSS_RING_GEOM} material={CYAN_GLOW_MAT} />
+                    <mesh position={[0, WALL_HEIGHT * 0.95, 0]} geometry={TRUSS_GUSSET_GEOM} material={SLATE_DARK_MAT} />
+                  </group>
+                ))}
+              </group>
+            )}
+
+            {theme === 'design' && (
+              <group>
+                <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
+                  <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={VIOLET_ART_MAT}>
+                    <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
+                  </mesh>
+                  {/* Top Architectural Magenta Cornice & Brackets */}
+                  <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={MAGENTA_ART_MAT} />
+                  {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                    <mesh key={`design-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={VIOLET_ART_MAT} />
+                  ))}
+                  <mesh position={[0, -0.26, vd / 2 + 0.44]} material={MAGENTA_ART_MAT}>
+                    <boxGeometry args={[vw + 0.6, 0.07, 0.38]} />
+                  </mesh>
+                  <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                    <planeGeometry args={[vw + 0.36, 0.68]} />
+                    <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+                  </mesh>
+                </group>
+              </group>
+            )}
+
+            {theme === 'energy' && (
+              <group>
+                <group position={[0, WALL_HEIGHT + 0.58, 0.72]}>
+                  <mesh position={[0, -0.65, vd / 2 + 0.42]} castShadow material={DARK_NAVY_MAT}>
+                    <boxGeometry args={[vw + 0.56, 0.74, 0.34]} />
+                  </mesh>
+                  {/* Top Architectural Emerald Cornice & Brackets */}
+                  <mesh position={[0, -0.25, vd / 2 + 0.46]} geometry={SIGN_HOOD_VISOR_GEOM} scale={[vw + 0.66, 1, 1]} material={EMERALD_GLOW_MAT} />
+                  {[-vw / 2 - 0.24, vw / 2 + 0.24].map((bx, idx) => (
+                    <mesh key={`energy-bracket-${idx}`} position={[bx, -0.65, vd / 2 + 0.38]} geometry={SIGN_BRACKET_GEOM} material={DARK_NAVY_MAT} />
+                  ))}
+                  <mesh position={[0, -0.26, vd / 2 + 0.44]} material={EMERALD_GLOW_MAT}>
+                    <boxGeometry args={[vw + 0.6, 0.07, 0.38]} />
+                  </mesh>
+                  <mesh position={[0, -0.65, vd / 2 + 0.6]}>
+                    <planeGeometry args={[vw + 0.36, 0.68]} />
+                    <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+                  </mesh>
+                </group>
+
+                {[-vw / 2 - 0.28, vw / 2 + 0.28].map((px, idx) => (
+                  <group key={`eco-col-${idx}`} position={[px, 0.18, vd / 2 - 0.2]}>
+                    <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={WHITE_GLOSS_MAT} />
+                    <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={WHITE_GLOSS_MAT} />
+                    {[0.65, 1.35, 2.05].map((py, bIdx) => (
+                      <mesh
+                        key={`vine-${bIdx}`}
+                        position={[0, py, 0.16]}
+                        geometry={PLANT_BUSH_GEOM}
+                        material={EMERALD_PLANT_MAT}
+                      />
+                    ))}
+                  </group>
+                ))}
+              </group>
+            )}
+          </>
         )}
       </group>
     );
