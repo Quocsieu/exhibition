@@ -39,7 +39,7 @@ export const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
   {
     x: -6,
     z: -5,
-    benchOffsetZ: 0.62,
+    benchOffsetZ: 1.35,
     signPos: [-5.6, -18.2],
     signText: {
       title: '↖ KHU CÔNG NGHỆ & NỘI THẤT',
@@ -50,7 +50,7 @@ export const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
   {
     x: 6,
     z: -5,
-    benchOffsetZ: 0.62,
+    benchOffsetZ: 1.35,
     signPos: [5.6, -18.2],
     signText: {
       title: '↗ KHU NÔNG SẢN & ĐẶC SẢN',
@@ -61,7 +61,7 @@ export const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
   {
     x: -6,
     z: 5,
-    benchOffsetZ: -0.62,
+    benchOffsetZ: -1.35,
     signPos: [-5.6, 18.2],
     signText: {
       title: '↙ KHU ROBOTICS & TỰ ĐỘNG HÓA',
@@ -72,7 +72,7 @@ export const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
   {
     x: 6,
     z: 5,
-    benchOffsetZ: -0.62,
+    benchOffsetZ: -1.35,
     signPos: [5.6, 18.2],
     signText: {
       title: '↘ KHU THIẾT KẾ & NĂNG LƯỢNG',
@@ -335,7 +335,7 @@ const PLANTER_SOIL_GEOM = new THREE.BoxGeometry(1.26, 0.06, 1.26);
 const PLANTER_BOX_MAT = new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.65 });
 const PLANTER_SOIL_MAT = new THREE.MeshStandardMaterial({ color: '#065f46', roughness: 0.9 });
 
-// Stylized 3D City Asphalt Road Network Segments (Outside Central Pedestrian Plaza r = 8.4m)
+// Stylized 3D City Asphalt Road Network Segments (Widened 4.8m-5.4m continuous multi-lane network)
 const ASPHALT_ROAD_SEGMENTS: {
   x: number;
   z: number;
@@ -343,18 +343,63 @@ const ASPHALT_ROAD_SEGMENTS: {
   length: number;
   ry: number;
 }[] = [
-  // South Grand Entrance Boulevard (from Entrance Gate z=21.4 to South Plaza edge z=8.4)
-  { x: 0, z: 14.9, w: 5.4, length: 13.0, ry: 0 },
-  // West Cross-Avenue (from West perimeter x=-21.6 to West Plaza edge x=-8.4)
-  { x: -15.0, z: 0, w: 5.2, length: 13.2, ry: Math.PI / 2 },
-  // East Cross-Avenue (from East Plaza edge x=8.4 to East perimeter x=21.6)
-  { x: 15.0, z: 0, w: 5.2, length: 13.2, ry: Math.PI / 2 },
-  // Outer Perimeter Ring Road Segments (Stylized 3D City Boulevard loop)
-  { x: 0, z: -19.8, w: 3.4, length: 42.4, ry: Math.PI / 2 },
-  { x: -13.2, z: 19.8, w: 3.2, length: 16.0, ry: Math.PI / 2 },
-  { x: 13.2, z: 19.8, w: 3.2, length: 16.0, ry: Math.PI / 2 },
-  { x: -20.2, z: 0, w: 3.4, length: 36.2, ry: 0 },
-  { x: 20.2, z: 0, w: 3.4, length: 36.2, ry: 0 },
+  // South Grand Entrance Boulevard (from Gate z=22.8 to South Plaza edge z=8.4)
+  { x: 0, z: 15.6, w: 5.4, length: 14.4, ry: 0 },
+  // West Cross-Avenue (from West Boulevard x=-18.0 to West Plaza edge x=-8.4)
+  { x: -13.2, z: 0, w: 5.2, length: 9.6, ry: Math.PI / 2 },
+  // East Cross-Avenue (from East Plaza edge x=8.4 to East Boulevard x=18.0)
+  { x: 13.2, z: 0, w: 5.2, length: 9.6, ry: Math.PI / 2 },
+
+  // Outer Widened Boulevard Network (width 4.8m, expanded outward to z/x = ±22.8m)
+  // North Boulevard (continuous seamless horizontal span from x = -22.8 to 22.8)
+  { x: 0, z: -20.4, w: 4.8, length: 45.6, ry: Math.PI / 2 },
+  // South Boulevard (flanking South Grand Entrance Boulevard)
+  { x: -12.75, z: 20.4, w: 4.8, length: 20.1, ry: Math.PI / 2 },
+  { x: 12.75, z: 20.4, w: 4.8, length: 20.1, ry: Math.PI / 2 },
+  // West Boulevard (north & south of West Cross-Avenue)
+  { x: -20.4, z: -10.3, w: 4.8, length: 15.4, ry: 0 },
+  { x: -20.4, z: 10.3, w: 4.8, length: 15.4, ry: 0 },
+  // East Boulevard (north & south of East Cross-Avenue)
+  { x: 20.4, z: -10.3, w: 4.8, length: 15.4, ry: 0 },
+  { x: 20.4, z: 10.3, w: 4.8, length: 15.4, ry: 0 },
+
+  // Seamless T-Junction Intersections (coplanar roadway junctions with zero curb obstruction)
+  { x: -20.4, z: 0, w: 4.8, length: 5.2, ry: 0 },
+  { x: 20.4, z: 0, w: 4.8, length: 5.2, ry: 0 },
+  { x: 0, z: 20.4, w: 5.4, length: 4.8, ry: Math.PI / 2 },
+];
+
+// Granite Curbs along Pedestrian Sidewalk Borders (leaving all road intersections 100% open)
+const SIDEWALK_CURBS: {
+  x: number;
+  z: number;
+  w: number;
+  length: number;
+  ry: number;
+}[] = [
+  // Plaza Courtyard Inner Perimeter Curbs
+  { x: 0, z: -18.14, w: 0.28, length: 36.0, ry: Math.PI / 2 },
+  { x: -18.14, z: -10.3, w: 0.28, length: 15.4, ry: 0 },
+  { x: -18.14, z: 10.3, w: 0.28, length: 15.4, ry: 0 },
+  { x: 18.14, z: -10.3, w: 0.28, length: 15.4, ry: 0 },
+  { x: 18.14, z: 10.3, w: 0.28, length: 15.4, ry: 0 },
+  { x: -10.35, z: 18.14, w: 0.28, length: 15.3, ry: Math.PI / 2 },
+  { x: 10.35, z: 18.14, w: 0.28, length: 15.3, ry: Math.PI / 2 },
+
+  // Cross-Avenue Pedestrian Curbs
+  { x: -13.2, z: -2.74, w: 0.28, length: 9.6, ry: Math.PI / 2 },
+  { x: -13.2, z: 2.74, w: 0.28, length: 9.6, ry: Math.PI / 2 },
+  { x: 13.2, z: -2.74, w: 0.28, length: 9.6, ry: Math.PI / 2 },
+  { x: 13.2, z: 2.74, w: 0.28, length: 9.6, ry: Math.PI / 2 },
+  { x: -2.84, z: 13.2, w: 0.28, length: 9.6, ry: 0 },
+  { x: 2.84, z: 13.2, w: 0.28, length: 9.6, ry: 0 },
+
+  // Outer Boulevard Curbs (framing the outer roadway border)
+  { x: 0, z: -22.94, w: 0.28, length: 45.6, ry: Math.PI / 2 },
+  { x: -22.94, z: 0, w: 0.28, length: 45.6, ry: 0 },
+  { x: 22.94, z: 0, w: 0.28, length: 45.6, ry: 0 },
+  { x: -12.75, z: 22.94, w: 0.28, length: 20.1, ry: Math.PI / 2 },
+  { x: 12.75, z: 22.94, w: 0.28, length: 20.1, ry: Math.PI / 2 },
 ];
 
 // Zebra Crosswalks at Avenue & Plaza Intersections
@@ -379,31 +424,31 @@ const MANHOLE_COVERS: { x: number; z: number }[] = [
   { x: 0, z: 17.0 },
   { x: -14.5, z: 0 },
   { x: 14.5, z: 0 },
-  { x: -12.0, z: -19.8 },
-  { x: 12.0, z: -19.8 },
-  { x: -20.2, z: -10.0 },
-  { x: 20.2, z: -10.0 },
-  { x: -20.2, z: 10.0 },
-  { x: 20.2, z: 10.0 },
+  { x: -12.0, z: -20.4 },
+  { x: 12.0, z: -20.4 },
+  { x: -20.4, z: -10.0 },
+  { x: 20.4, z: -10.0 },
+  { x: -20.4, z: 10.0 },
+  { x: 20.4, z: 10.0 },
 ];
 
 // Street storm drain grates along road gutters
 const STORM_DRAIN_GRATES: { x: number; z: number; ry: number }[] = [
-  { x: -2.3, z: 11.2, ry: 0 },
-  { x: 2.3, z: 11.2, ry: 0 },
-  { x: -2.3, z: 16.5, ry: 0 },
-  { x: 2.3, z: 16.5, ry: 0 },
-  { x: -14.0, z: -2.3, ry: Math.PI / 2 },
-  { x: -14.0, z: 2.3, ry: Math.PI / 2 },
-  { x: 14.0, z: -2.3, ry: Math.PI / 2 },
-  { x: 14.0, z: 2.3, ry: Math.PI / 2 },
+  { x: -2.35, z: 11.2, ry: 0 },
+  { x: 2.35, z: 11.2, ry: 0 },
+  { x: -2.35, z: 16.5, ry: 0 },
+  { x: 2.35, z: 16.5, ry: 0 },
+  { x: -14.0, z: -2.35, ry: Math.PI / 2 },
+  { x: -14.0, z: 2.35, ry: Math.PI / 2 },
+  { x: 14.0, z: -2.35, ry: Math.PI / 2 },
+  { x: 14.0, z: 2.35, ry: Math.PI / 2 },
 ];
 
 // Speed bumps (gờ giảm tốc) before crosswalk intersections
 const SPEED_BUMPS: { x: number; z: number; w: number; ry: number }[] = [
-  { x: 0, z: 12.8, w: 4.8, ry: 0 },
-  { x: -12.8, z: 0, w: 4.6, ry: Math.PI / 2 },
-  { x: 12.8, z: 0, w: 4.6, ry: Math.PI / 2 },
+  { x: 0, z: 12.8, w: 5.0, ry: 0 },
+  { x: -12.8, z: 0, w: 4.8, ry: Math.PI / 2 },
+  { x: 12.8, z: 0, w: 4.8, ry: Math.PI / 2 },
 ];
 const SPEED_BUMP_YELLOW_MAT = new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.45 });
 const SPEED_BUMP_DARK_MAT = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.65 });
@@ -418,9 +463,9 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const fountainPlacements = useMemo<ExteriorPlacement[]>(() => [{ position: [0, 0.02, 0] }], []);
     const cityPlacements = useMemo(
       () =>
-        (['city-1', 'city-2', 'city-3', 'city-4'] as const).map((id, variant) => ({
+        (['city-1', 'city-2', 'city-4'] as const).map((id, variant) => ({
           id,
-          placements: STYLIZED_CITY_BUILDINGS.filter((_, i) => i % 4 === variant).map(b => ({
+          placements: STYLIZED_CITY_BUILDINGS.filter((_, i) => i % 4 === (variant === 2 ? 3 : variant)).map(b => ({
             position: [b.x, -0.65, b.z] as [number, number, number],
             scale: [b.sx, b.sy, b.sz] as [number, number, number],
             rotation: b.ry,
@@ -487,13 +532,6 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const urnPlacements = useMemo<ExteriorPlacement[]>(() => PLANTER_URN_POSITIONS.map(([x, z]) => ({ position: [x, .02, z] })), []);
     const binPlacements = useMemo<ExteriorPlacement[]>(() => EXHIBITION_BIN_POSITIONS.map(([x, z]) => ({ position: [x, 0, z] })), []);
     const manholePlacements = useMemo<ExteriorPlacement[]>(() => MANHOLE_COVERS.map((mh, idx) => ({ position: [mh.x, 0.02, mh.z], rotation: (idx * 1.1) % Math.PI })), []);
-    const groundSlabPlacements = useMemo<ExteriorPlacement[]>(() =>
-      REST_LOUNGE_ZONES.map(z => ({
-        position: [z.x, 0.012, z.z] as [number, number, number],
-        rotation: z.x > 0 ? Math.PI / 2 : 0,
-        scale: [0.72, 1, 0.72] as [number, number, number],
-      })),
-    []);
 
     const plazaBannerTexture = useMemo(
       () =>
@@ -647,31 +685,36 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
             2. STYLIZED 3D CITY ASPHALT ROAD NETWORK, ZEBRA CROSSWALKS,
                RAISED GRANITE CURBS & 6 TILED SIDEWALK PROMENADES
            ================================================================ */}
-        {/* Stylized 3D City Asphalt Road Segments with White Shoulder Lines, Dashed Center Divider & Raised 3D Curbs */}
+        {/* Continuous Multi-Lane Stylized 3D City Asphalt Road Network */}
         {ASPHALT_ROAD_SEGMENTS.map((road, idx) => (
-          <group
+          <mesh
             key={`asphalt-road-${idx}`}
             position={[road.x, 0.011, road.z]}
-            rotation={[0, road.ry, 0]}
+            rotation={[-Math.PI / 2, 0, road.ry]}
+            receiveShadow
           >
-            <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-              <planeGeometry args={[road.w, road.length]} />
-              <meshStandardMaterial
-                map={asphaltRoadTexture}
-                bumpMap={asphaltBumpTexture}
-                bumpScale={0.022}
-                roughness={0.92}
-                metalness={0}
-              />
-            </mesh>
-            {/* 3D Raised Granite Curbs (Bó vỉa hè) separating Asphalt Road from Tiled Sidewalks */}
-            <mesh position={[-road.w / 2 - 0.14, 0.028, 0]} receiveShadow material={curbStoneMat}>
-              <boxGeometry args={[0.28, 0.056, road.length]} />
-            </mesh>
-            <mesh position={[road.w / 2 + 0.14, 0.028, 0]} receiveShadow material={curbStoneMat}>
-              <boxGeometry args={[0.28, 0.056, road.length]} />
-            </mesh>
-          </group>
+            <planeGeometry args={[road.w, road.length]} />
+            <meshStandardMaterial
+              map={asphaltRoadTexture}
+              bumpMap={asphaltBumpTexture}
+              bumpScale={0.022}
+              roughness={0.92}
+              metalness={0}
+            />
+          </mesh>
+        ))}
+
+        {/* 3D Raised Granite Curbs along Pedestrian Sidewalk Borders (Leaving All Intersections Open) */}
+        {SIDEWALK_CURBS.map((curb, idx) => (
+          <mesh
+            key={`sidewalk-curb-${idx}`}
+            position={[curb.x, 0.028, curb.z]}
+            rotation={[0, curb.ry, 0]}
+            receiveShadow
+            material={curbStoneMat}
+          >
+            <boxGeometry args={[curb.w, 0.056, curb.length]} />
+          </mesh>
         ))}
 
         {/* High-Contrast White Zebra Crosswalks at Avenue & Plaza Intersections */}
@@ -975,9 +1018,6 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
 
         <ExteriorAssets id="flowers" placements={flowerPlacements} shadows={false} />
 
-        {/* 4 Paved Pavilion Foundation Ground Slabs from roof_opt.glb (Non-roof ground paving) */}
-        <ExteriorAssets id="plaza-ground-slab" placements={groundSlabPlacements} shadows={false} />
-
         {/* 4 Instanced Perimeter Rest Lounge Pavilions (Tables & Parasol Umbrellas) */}
         <Instances geometry={LOUNGE_TABLE_BASE_GEOM} material={BENCH_IRON_MAT}>
           {REST_LOUNGE_ZONES.map((z, i) => (
@@ -1014,28 +1054,6 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
             />
           ))}
         </Instances>
-
-        {/* Perimeter Balustrades */}
-        <mesh position={[0, 0.45, WORLD_BOUNDS.minZ]} receiveShadow>
-          <boxGeometry args={[width, 0.9, 0.28]} />
-          <meshStandardMaterial color="#475569" roughness={0.45} metalness={0.3} />
-        </mesh>
-        <mesh position={[WORLD_BOUNDS.minX, 0.45, 0]} receiveShadow>
-          <boxGeometry args={[0.28, 0.9, depth]} />
-          <meshStandardMaterial color="#475569" roughness={0.45} metalness={0.3} />
-        </mesh>
-        <mesh position={[WORLD_BOUNDS.maxX, 0.45, 0]} receiveShadow>
-          <boxGeometry args={[0.28, 0.9, depth]} />
-          <meshStandardMaterial color="#475569" roughness={0.45} metalness={0.3} />
-        </mesh>
-        <mesh position={[-14.8, 0.38, WORLD_BOUNDS.maxZ]} receiveShadow>
-          <boxGeometry args={[18.4, 0.76, 0.28]} />
-          <meshStandardMaterial color="#475569" roughness={0.45} />
-        </mesh>
-        <mesh position={[14.8, 0.38, WORLD_BOUNDS.maxZ]} receiveShadow>
-          <boxGeometry args={[18.4, 0.76, 0.28]} />
-          <meshStandardMaterial color="#475569" roughness={0.45} />
-        </mesh>
 
         {/* ================================================================
             7. CLICK-TO-MOVE TARGET INDICATOR
