@@ -1,0 +1,227 @@
+{
+  "timestamp": "2026-11-14T00:45:03.668Z",
+  "loadTimeSec": 12.461,
+  "explore": {
+    "run1": {
+      "avgFps": 28.17,
+      "p1LowFps": 13.79,
+      "p5LowFps": 16.21,
+      "avgFrameTimeMs": 35.49,
+      "calls": 1325,
+      "triangles": 2049073,
+      "points": 0,
+      "lines": 0,
+      "geometries": 1408,
+      "textures": 148,
+      "webglError": 0
+    },
+    "run2": {
+      "avgFps": 28.57,
+      "p1LowFps": 18.8,
+      "p5LowFps": 19.6,
+      "avgFrameTimeMs": 35,
+      "calls": 1325,
+      "triangles": 2049073,
+      "points": 0,
+      "lines": 0,
+      "geometries": 1408,
+      "textures": 148,
+      "webglError": 0
+    },
+    "avgFps": "28.37",
+    "calls": 1325,
+    "triangles": 2049073,
+    "textures": 148,
+    "geometries": 1408
+  },
+  "overview": {
+    "run1": {
+      "avgFps": 16.57,
+      "p1LowFps": 9.17,
+      "p5LowFps": 10.39,
+      "avgFrameTimeMs": 60.34,
+      "calls": 1961,
+      "triangles": 3964099,
+      "points": 0,
+      "lines": 0,
+      "geometries": 1505,
+      "textures": 164,
+      "webglError": 0
+    },
+    "run2": {
+      "avgFps": 16.45,
+      "p1LowFps": 10.42,
+      "p5LowFps": 10.79,
+      "avgFrameTimeMs": 60.79,
+      "calls": 1961,
+      "triangles": 3964099,
+      "points": 0,
+      "lines": 0,
+      "geometries": 1505,
+      "textures": 164,
+      "webglError": 0
+    },
+    "avgFps": "16.51",
+    "calls": 1961,
+    "triangles": 3964099,
+    "textures": 164,
+    "geometries": 1505
+  },
+  "sceneBreakdown": {
+    "other": {
+      "meshCount": 705,
+      "instancedMeshCount": 10,
+      "totalInstances": 771,
+      "triangles": 29339,
+      "castShadowCount": 118,
+      "receiveShadowCount": 215
+    },
+    "exterior-glb:city-1": {
+      "meshCount": 0,
+      "instancedMeshCount": 24,
+      "totalInstances": 98,
+      "triangles": 51520,
+      "castShadowCount": 0,
+      "receiveShadowCount": 24
+    },
+    "exterior-glb:city-2": {
+      "meshCount": 0,
+      "instancedMeshCount": 800,
+      "totalInstances": 2171,
+      "triangles": 724770,
+      "castShadowCount": 0,
+      "receiveShadowCount": 800
+    },
+    "exterior-glb:city-3": {
+      "meshCount": 0,
+      "instancedMeshCount": 1,
+      "totalInstances": 4,
+      "triangles": 39888,
+      "castShadowCount": 0,
+      "receiveShadowCount": 1
+    },
+    "exterior-glb:city-4": {
+      "meshCount": 0,
+      "instancedMeshCount": 24,
+      "totalInstances": 84,
+      "triangles": 45692,
+      "castShadowCount": 0,
+      "receiveShadowCount": 24
+    },
+    "exterior-glb:water-manhole": {
+      "meshCount": 0,
+      "instancedMeshCount": 2,
+      "totalInstances": 20,
+      "triangles": 63010,
+      "castShadowCount": 2,
+      "receiveShadowCount": 2
+    },
+    "exterior-glb:fountain": {
+      "meshCount": 0,
+      "instancedMeshCount": 8,
+      "totalInstances": 8,
+      "triangles": 2644,
+      "castShadowCount": 8,
+      "receiveShadowCount": 8
+    },
+    "exterior-glb:recycling-bin": {
+      "meshCount": 0,
+      "instancedMeshCount": 1,
+      "totalInstances": 8,
+      "triangles": 85616,
+      "castShadowCount": 1,
+      "receiveShadowCount": 1
+    },
+    "exterior-glb:jacaranda-tree": {
+      "meshCount": 0,
+      "instancedMeshCount": 3,
+      "totalInstances": 30,
+      "triangles": 830520,
+      "castShadowCount": 3,
+      "receiveShadowCount": 3
+    },
+    "exterior-glb:env-tree-oak": {
+      "meshCount": 0,
+      "instancedMeshCount": 54,
+      "totalInstances": 108,
+      "triangles": 125890,
+      "castShadowCount": 54,
+      "receiveShadowCount": 54
+    },
+    "exterior-glb:env-tree-blossom": {
+      "meshCount": 0,
+      "instancedMeshCount": 54,
+      "totalInstances": 108,
+      "triangles": 125890,
+      "castShadowCount": 54,
+      "receiveShadowCount": 54
+    },
+    "exterior-glb:env-tree-pine": {
+      "meshCount": 0,
+      "instancedMeshCount": 54,
+      "totalInstances": 108,
+      "triangles": 125890,
+      "castShadowCount": 54,
+      "receiveShadowCount": 54
+    },
+    "exterior-glb:env-planter-urn": {
+      "meshCount": 0,
+      "instancedMeshCount": 3,
+      "totalInstances": 18,
+      "triangles": 22608,
+      "castShadowCount": 3,
+      "receiveShadowCount": 3
+    },
+    "exterior-glb:flowers": {
+      "meshCount": 0,
+      "instancedMeshCount": 36,
+      "totalInstances": 576,
+      "triangles": 196928,
+      "castShadowCount": 0,
+      "receiveShadowCount": 36
+    },
+    "exterior-glb:plaza-ground-slab": {
+      "meshCount": 0,
+      "instancedMeshCount": 1,
+      "totalInstances": 4,
+      "triangles": 115256,
+      "castShadowCount": 0,
+      "receiveShadowCount": 1
+    },
+    "exterior-glb:env-park-bench": {
+      "meshCount": 0,
+      "instancedMeshCount": 16,
+      "totalInstances": 256,
+      "triangles": 342336,
+      "castShadowCount": 16,
+      "receiveShadowCount": 16
+    },
+    "exterior-glb:env-street-lamp": {
+      "meshCount": 0,
+      "instancedMeshCount": 2,
+      "totalInstances": 16,
+      "triangles": 12080,
+      "castShadowCount": 2,
+      "receiveShadowCount": 2
+    },
+    "exterior-glb:booth-planter": {
+      "meshCount": 0,
+      "instancedMeshCount": 18,
+      "totalInstances": 30,
+      "triangles": 37680,
+      "castShadowCount": 18,
+      "receiveShadowCount": 18
+    },
+    "booth-shell": {
+      "meshCount": 25,
+      "instancedMeshCount": 0,
+      "totalInstances": 25,
+      "triangles": 28568,
+      "castShadowCount": 25,
+      "receiveShadowCount": 25
+    }
+  },
+  "errors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+}

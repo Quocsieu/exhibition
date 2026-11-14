@@ -509,6 +509,13 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const urnPlacements = useMemo<ExteriorPlacement[]>(() => PLANTER_URN_POSITIONS.map(([x, z]) => ({ position: [x, .02, z] })), []);
     const binPlacements = useMemo<ExteriorPlacement[]>(() => EXHIBITION_BIN_POSITIONS.map(([x, z]) => ({ position: [x, 0, z] })), []);
     const manholePlacements = useMemo<ExteriorPlacement[]>(() => MANHOLE_COVERS.map((mh, idx) => ({ position: [mh.x, 0.02, mh.z], rotation: (idx * 1.1) % Math.PI })), []);
+    const groundSlabPlacements = useMemo<ExteriorPlacement[]>(() =>
+      REST_LOUNGE_ZONES.map(z => ({
+        position: [z.x, 0.012, z.z] as [number, number, number],
+        rotation: z.x > 0 ? Math.PI / 2 : 0,
+        scale: [0.72, 1, 0.72] as [number, number, number],
+      })),
+    []);
 
     const plazaBannerTexture = useMemo(
       () =>
@@ -709,7 +716,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         ))}
 
         {/* Cast-Iron Manhole Covers on Asphalt Roadways (4K GLB) */}
-        <ExteriorAssets id="water-manhole" placements={manholePlacements} />
+        <ExteriorAssets id="water-manhole" placements={manholePlacements} shadows={false} />
 
         {/* Street Storm Drain Grates along Road Gutters */}
         {STORM_DRAIN_GRATES.map((sd, idx) => (
@@ -983,12 +990,15 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         <ExteriorAssets id="jacaranda-tree" placements={jacarandaPlacements} />
 
         {/* Outer parkland trees framing the distant avenue */}
-        {treeBatches.map(b => <ExteriorAssets key={b.id} id={b.id} placements={b.placements} />)}
+        {treeBatches.map(b => <ExteriorAssets key={b.id} id={b.id} placements={b.placements} shadows={false} />)}
 
         {/* 6 Sculpted Stone Planter Urns along Grand Avenue & Entrance */}
         <ExteriorAssets id="env-planter-urn" placements={urnPlacements} />
 
         <ExteriorAssets id="flowers" placements={flowerPlacements} shadows={false} />
+
+        {/* 4 Paved Pavilion Foundation Ground Slabs from roof_opt.glb (Non-roof ground paving) */}
+        <ExteriorAssets id="plaza-ground-slab" placements={groundSlabPlacements} shadows={false} />
 
         {/* 4 Instanced Perimeter Rest Lounge Pavilions (Tables & Parasol Umbrellas) */}
         <Instances geometry={LOUNGE_TABLE_BASE_GEOM} material={BENCH_IRON_MAT}>

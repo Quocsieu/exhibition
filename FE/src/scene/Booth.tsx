@@ -17,6 +17,7 @@ import {
 } from './sceneTextures';
 import { cloneCachedAsset, getBoothGlbAssetId } from './assetLoader';
 import { RooflessBoothShell } from './RooflessBoothShell';
+import { ExteriorAssets, type ExteriorPlacement } from './ExteriorAssets';
 
 export interface BoothProps {
   booth: BoothType;
@@ -591,6 +592,37 @@ export const Booth: React.FC<BoothProps> = React.memo(
       }
     });
 
+    const boothDecorPlacements = useMemo<ExteriorPlacement[]>(() => {
+      switch (theme) {
+        case 'tech':
+          return [{ position: [-vw / 2 + 0.28, 0.02, vd / 2 + 0.15], rotation: 0.2 }];
+        case 'living':
+          return [
+            { position: [-vw / 2 - 0.35, 0.02, vd / 2 + 0.15], rotation: 0.1 },
+            { position: [vw / 2 + 0.35, 0.02, vd / 2 + 0.15], rotation: -0.1 },
+          ];
+        case 'coffee':
+          return [
+            { position: [-vw / 2 - 0.35, 0.02, vd / 2 + 0.15], rotation: 0.3 },
+            { position: [vw / 2 + 0.35, 0.02, vd / 2 + 0.15], rotation: -0.3 },
+          ];
+        case 'robotics':
+          return [{ position: [vw / 2 - 0.28, 0.02, vd / 2 + 0.15], rotation: -0.2 }];
+        case 'design':
+          return [
+            { position: [-vw / 2 + 0.32, 0.02, vd / 2 + 0.15], rotation: 0.4 },
+            { position: [vw / 2 - 0.32, 0.02, vd / 2 + 0.15], rotation: -0.4 },
+          ];
+        case 'energy':
+          return [
+            { position: [-vw / 2 - 0.35, 0.02, vd / 2 + 0.15], rotation: 0.15 },
+            { position: [vw / 2 + 0.35, 0.02, vd / 2 + 0.15], rotation: -0.15 },
+          ];
+        default:
+          return [];
+      }
+    }, [theme, vw, vd]);
+
     return (
       <group
         visible={visible}
@@ -610,6 +642,8 @@ export const Booth: React.FC<BoothProps> = React.memo(
           document.body.style.cursor = 'auto';
         }}
       >
+        {/* Architectural Landscaping Decorator (PBR Planter & Shrub Plants) */}
+        <ExteriorAssets id="booth-planter" placements={boothDecorPlacements} />
         {/* ================================================================
             1. ROOFLESS BLENDER FRAME + ORIGINAL EXHIBITION FLOOR
            ================================================================ */}
@@ -929,8 +963,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
               <group key={`oak-pil-${idx}`} position={[px, 0.18, vd / 2 - 0.18]}>
                 <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={WARM_OAK_MAT} />
                 <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={WARM_OAK_MAT} />
-                <mesh position={[idx === 0 ? -0.38 : 0.38, 0.19, 0.25]} geometry={PLANT_POT_GEOM} material={CREAM_WALL_MAT} />
-                <mesh position={[idx === 0 ? -0.38 : 0.38, 0.52, 0.25]} geometry={PLANT_BUSH_GEOM} material={EMERALD_PLANT_MAT} />
               </group>
             ))}
           </group>
@@ -957,8 +989,6 @@ export const Booth: React.FC<BoothProps> = React.memo(
               <group key={`cafe-col-${idx}`} position={[px, 0.18, vd / 2 - 0.18]}>
                 <mesh position={[0, 0.08, 0]} geometry={TRUSS_BASE_GEOM} material={ESPRESSO_WOOD_MAT} />
                 <mesh position={[0, WALL_HEIGHT / 2, 0]} geometry={SQUARE_PILLAR_GEOM} material={ESPRESSO_WOOD_MAT} />
-                <mesh position={[idx === 0 ? -0.38 : 0.38, 0.19, 0.28]} geometry={PLANT_POT_GEOM} material={COPPER_CRAFT_MAT} />
-                <mesh position={[idx === 0 ? -0.38 : 0.38, 0.52, 0.28]} geometry={PLANT_BUSH_GEOM} material={EMERALD_PLANT_MAT} />
               </group>
             ))}
           </group>

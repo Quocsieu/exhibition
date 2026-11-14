@@ -14,23 +14,25 @@ interface AssetSpec {
 }
 
 const specs = {
-  'env-tree-oak': { file: 'fir_tree_01_opt', bounds: [4.2, 6.2, 4.2], dir: 'env' },
-  'env-tree-blossom': { file: 'fir_tree_01_opt', bounds: [3.8, 5.6, 3.8], dir: 'env' },
-  'env-tree-pine': { file: 'fir_tree_01_opt', bounds: [4.0, 5.8, 4.0], dir: 'env' },
-  'jacaranda-tree': { file: 'jacaranda_tree_opt', bounds: [7.2, 6.8, 7.2], dir: 'env' },
-  'env-park-bench': { file: 'modular_street_seating_opt', bounds: [1.86, 0.75, 1.17], dir: 'env' },
-  'env-street-lamp': { file: 'RO32ltX6zJ', bounds: [.9, 3.8, .9] },
+  'env-tree-oak': { file: 'fir_tree_01_joined', bounds: [4.2, 6.2, 4.2], dir: 'env' },
+  'env-tree-blossom': { file: 'fir_tree_01_joined', bounds: [3.8, 5.6, 3.8], dir: 'env' },
+  'env-tree-pine': { file: 'fir_tree_01_joined', bounds: [4.0, 5.8, 4.0], dir: 'env' },
+  'jacaranda-tree': { file: 'jacaranda_tree_lod', bounds: [7.2, 6.8, 7.2], dir: 'env' },
+  'env-park-bench': { file: 'modular_street_seating_joined', bounds: [1.86, 0.75, 1.17], dir: 'env' },
+  'env-street-lamp': { file: 'Street_Lamp', bounds: [1.2, 4.22, 1.2], dir: 'env' },
   fountain: { file: '7b_tCaBRLCI', bounds: [3.3, 2.65, 3.3] },
-  flowers: { file: 'shrub_01_opt', bounds: [.65, .55, .65], dir: 'env' },
+  flowers: { file: 'shrub_01_joined', bounds: [.65, .55, .65], dir: 'env' },
   'water-manhole': { file: 'water_manhole_cover_opt', bounds: [.72, .08, .72], dir: 'env' },
-  'env-planter-urn': { file: 'planter_fluted_01', bounds: [.94, 1.3, .94] },
-  'recycling-bin': { file: 'recycling_bin_01', bounds: [.44, .7, .44] },
+  'env-planter-urn': { file: 'planter', bounds: [1.18, 1.02, 1.18], dir: 'env' },
+  'recycling-bin': { file: 'trash_opt', bounds: [.52, 1.05, .52], dir: 'env' },
+  'plaza-ground-slab': { file: 'roof_opt', bounds: [8.19, 0.08, 7.13], dir: 'env' },
+  'booth-planter': { file: 'planter', bounds: [0.65, 0.58, 0.65], dir: 'env' },
   'city-a': { file: 'ppwtREejXg', bounds: [1, 1, 1] },
   'city-b': { file: 'yKo7F36Qk2', bounds: [1, 1, 1] },
-  'city-1': { file: 'city_detail_v2_01', bounds: [1, 1, 1] },
-  'city-2': { file: 'city_detail_v2_02', bounds: [1, 1, 1] },
-  'city-3': { file: 'city_detail_v2_03', bounds: [1, 1, 1] },
-  'city-4': { file: 'city_detail_v2_04', bounds: [1, 1, 1] },
+  'city-1': { file: 'building03_joined', bounds: [1, 1, 1], dir: 'env' },
+  'city-2': { file: 'Building01_joined', bounds: [1, 1, 1], dir: 'env' },
+  'city-3': { file: 'BlendBuilding', bounds: [1, 1, 1], dir: 'env' },
+  'city-4': { file: 'building03_joined', bounds: [1, 1, 1], dir: 'env' },
 } satisfies Record<string, AssetSpec>;
 export type ExteriorAssetId = keyof typeof specs;
 export interface ExteriorPlacement { position: [number, number, number]; rotation?: number; scale?: number | [number, number, number] }
@@ -103,7 +105,16 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
         m.bumpScale = 0.022;
       }
       if (id.startsWith('city-') && /window/i.test(m.name)) { m.roughness = .32; m.metalness = .15; }
-      if (id === 'env-street-lamp') m.emissiveIntensity = .35;
+      if (id === 'env-street-lamp') {
+        if (/glass/i.test(m.name)) {
+          m.emissive = new THREE.Color('#fef08a');
+          m.emissiveIntensity = 0.85;
+          m.toneMapped = false;
+        } else {
+          m.roughness = 0.35;
+          m.metalness = 0.7;
+        }
+      }
       if (/leaf|leaves/i.test(m.name)) {
         m.alphaTest = 0.45;
         m.depthWrite = true;
@@ -151,8 +162,6 @@ function release(id: ExteriorAssetId, entry: Entry) {
 
 function AssetPart({ part, placements, shadows, level = 'all' }: { part: Part; placements: ExteriorPlacement[]; shadows: boolean; level?: 'all' | 'near' | 'far' }) {
   const ref = useRef<THREE.InstancedMesh>(null);
-  const position = useMemo(() => new THREE.Vector3(), []);
-  const culling = useMemo(() => ({ frustum: new THREE.Frustum(), matrix: new THREE.Matrix4(), previous: new THREE.Matrix4().makeScale(0, 0, 0), sphere: new THREE.Sphere() }), []);
   const matrices = useMemo(() => {
     const transform = new THREE.Object3D();
     return placements.map(p => {
@@ -164,37 +173,29 @@ function AssetPart({ part, placements, shadows, level = 'all' }: { part: Part; p
       return transform.matrix.clone();
     });
   }, [placements]);
+
   useLayoutEffect(() => {
     const mesh = ref.current;
     if (!mesh) return;
     matrices.forEach((matrix, i) => mesh.setMatrixAt(i, matrix));
-    culling.previous.makeScale(0, 0, 0);
     mesh.count = placements.length;
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
     mesh.computeBoundingBox();
     return () => { mesh.dispose(); }; // Per-instance buffers; cached geometry/material stay alive.
-  }, [matrices, culling, placements.length]);
-  useFrame(({ camera }) => {
-    if (!ref.current) return;
-    culling.matrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    if (culling.matrix.equals(culling.previous)) return;
-    culling.previous.copy(culling.matrix);
-    culling.frustum.setFromProjectionMatrix(culling.matrix);
-    const mesh = ref.current;
-    let count = 0;
-    placements.forEach((p, i) => {
-      const far = camera.position.distanceToSquared(position.fromArray(p.position)) > 42 * 42;
-      culling.sphere.copy(part.geometry.boundingSphere!).applyMatrix4(matrices[i]);
-      // A conservative margin retains nearby offscreen shadow casters.
-      if (shadows) culling.sphere.radius += 4;
-      if ((level === 'all' || far === (level === 'far')) && culling.frustum.intersectsSphere(culling.sphere)) mesh.setMatrixAt(count++, matrices[i]);
-    });
-    mesh.count = count;
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingSphere();
-  });
-  return <instancedMesh ref={ref} args={[part.geometry, part.material, placements.length]} castShadow={shadows} receiveShadow frustumCulled raycast={noRaycast} dispose={null} />;
+  }, [matrices, placements.length]);
+
+  return (
+    <instancedMesh
+      ref={ref}
+      args={[part.geometry, part.material, placements.length]}
+      castShadow={shadows}
+      receiveShadow
+      frustumCulled
+      raycast={noRaycast}
+      dispose={null}
+    />
+  );
 }
 
 function Fallback({ id, placements }: { id: ExteriorAssetId; placements: ExteriorPlacement[] }) {
@@ -202,9 +203,14 @@ function Fallback({ id, placements }: { id: ExteriorAssetId; placements: Exterio
     if (id === 'fountain') return buildCentralPlazaFountainModel();
     if (id.startsWith('env-')) return cloneCachedAsset(id as GlbAssetId);
     const group = new THREE.Group();
-    const geometry = id === 'flowers' ? new THREE.SphereGeometry(.16, 8, 6) : id === 'recycling-bin' ? new THREE.CylinderGeometry(.2, .17, .64, 12) : id === 'jacaranda-tree' ? new THREE.CylinderGeometry(0.2, 0.4, 5, 8) : new THREE.BoxGeometry(1, 1, 1);
-    geometry.translate(0, id === 'flowers' ? .1 : id === 'recycling-bin' ? .32 : id === 'jacaranda-tree' ? 2.5 : .5, 0);
-    group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: id === 'flowers' ? '#7f9962' : id === 'jacaranda-tree' ? '#4d7c0f' : '#a6aaa8', roughness: .9 })));
+    const geometry = id === 'flowers' ? new THREE.SphereGeometry(.16, 8, 6)
+      : id === 'recycling-bin' ? new THREE.CylinderGeometry(.2, .17, .64, 12)
+      : id === 'jacaranda-tree' ? new THREE.CylinderGeometry(0.2, 0.4, 5, 8)
+      : id === 'booth-planter' ? new THREE.BoxGeometry(0.65, 0.58, 0.65)
+      : id === 'plaza-ground-slab' ? new THREE.BoxGeometry(8.19, 0.08, 7.13)
+      : new THREE.BoxGeometry(1, 1, 1);
+    geometry.translate(0, id === 'flowers' ? .1 : id === 'recycling-bin' ? .32 : id === 'jacaranda-tree' ? 2.5 : id === 'booth-planter' ? 0.29 : .5, 0);
+    group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: id === 'flowers' || id === 'booth-planter' ? '#7f9962' : id === 'jacaranda-tree' ? '#4d7c0f' : '#a6aaa8', roughness: .9 })));
     return group;
   }), [id, placements]);
   useEffect(() => () => {
