@@ -18,7 +18,7 @@ const specs = {
   'env-tree-blossom': { file: 'fir_tree_01_joined', bounds: [3.8, 5.6, 3.8], dir: 'env' },
   'env-tree-pine': { file: 'fir_tree_01_joined', bounds: [4.0, 5.8, 4.0], dir: 'env' },
   'jacaranda-tree': { file: 'jacaranda_tree_lod', bounds: [7.2, 6.8, 7.2], dir: 'env' },
-  'env-park-bench': { file: 'modular_street_seating_joined', bounds: [1.86, 0.75, 1.17], dir: 'env' },
+  'env-park-bench': { file: 'bench', bounds: [1.85, 0.82, 0.88], dir: 'env' },
   'env-street-lamp': { file: 'Street_Lamp', bounds: [1.2, 4.22, 1.2], dir: 'env' },
   fountain: { file: '7b_tCaBRLCI', bounds: [3.3, 2.65, 3.3] },
   flowers: { file: 'shrub_01_joined', bounds: [.65, .55, .65], dir: 'env' },
@@ -105,19 +105,50 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
         m.bumpScale = 0.022;
       }
       if (id.startsWith('city-') && /window/i.test(m.name)) { m.roughness = .32; m.metalness = .15; }
+      if (id === 'env-park-bench') {
+        m.color.set('#b46a36'); // warm teak / cedar wood finish matching park bench reference
+        m.roughness = 0.52;
+        m.metalness = 0.12;
+      }
       if (id === 'env-street-lamp') {
         if (/glass/i.test(m.name)) {
-          m.emissive = new THREE.Color('#fef08a');
-          m.emissiveIntensity = 0.85;
-          m.toneMapped = false;
+          m.color.set('#fef08a');
+          m.roughness = 0.18;
+          m.metalness = 0.08;
+          m.emissive = new THREE.Color('#fde047');
+          m.emissiveIntensity = 0.62;
+          m.toneMapped = true;
         } else {
-          m.roughness = 0.35;
-          m.metalness = 0.7;
+          m.color.set('#1e242b'); // dark charcoal metal
+          m.roughness = 0.38;
+          m.metalness = 0.72; // subtle metallic reflection
         }
       }
-      if (/leaf|leaves/i.test(m.name)) {
-        m.alphaTest = 0.45;
+      if (id === 'env-planter-urn' || id === 'booth-planter') {
+        if (/concret/i.test(m.name)) {
+          m.color.set('#d8dcd6'); // bright natural limestone / terrazzo
+          m.roughness = 0.65;
+          m.metalness = 0.04;
+        } else if (/metal/i.test(m.name)) {
+          m.color.set('#334155'); // anodized dark slate metal trim
+          m.roughness = 0.35;
+          m.metalness = 0.75;
+        }
+      }
+      if (/leaf|leaves|twig|shrub|flower/i.test(m.name)) {
+        m.side = THREE.DoubleSide; // double-sided rendering eliminates black unlit leaf backs
+        m.alphaTest = 0.32;
         m.depthWrite = true;
+        m.roughness = 0.52;
+        m.metalness = 0.0;
+        m.color.setRGB(1.5, 1.62, 1.3); // brighten foliage tone naturally, eliminating dark crushing
+        m.emissive = new THREE.Color(0.14, 0.22, 0.08); // lush ambient foliage bounce prevents pitch black self-shadowing
+      }
+      if (/trunk|bark|branch/i.test(m.name)) {
+        m.roughness = 0.75;
+        m.metalness = 0.05;
+        m.color.setRGB(1.28, 1.22, 1.15); // lift dark shadows on tree bark to natural warm wood
+        m.emissive = new THREE.Color(0.08, 0.06, 0.04); // subtle warm wood bounce
       }
       for (const value of Object.values(m)) if (value instanceof THREE.Texture) value.anisotropy = 4;
     });

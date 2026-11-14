@@ -233,17 +233,7 @@ const HORIZON_HILLS: { x: number; z: number; sx: number; sy: number; sz: number 
   { x: -44, z: 14, sx: 12, sy: 4.2, sz: 15 },
 ];
 
-// 8 Perimeter Festival Flag Totems along outer balustrade
-const FESTIVAL_TOTEMS: { x: number; z: number; ry: number }[] = [
-  { x: -22.6, z: -12.5, ry: Math.PI / 2 },
-  { x: -22.6, z: -4.5, ry: Math.PI / 2 },
-  { x: -22.6, z: 4.5, ry: Math.PI / 2 },
-  { x: -22.6, z: 12.5, ry: Math.PI / 2 },
-  { x: 22.6, z: -12.5, ry: -Math.PI / 2 },
-  { x: 22.6, z: -4.5, ry: -Math.PI / 2 },
-  { x: 22.6, z: 4.5, ry: -Math.PI / 2 },
-  { x: 22.6, z: 12.5, ry: -Math.PI / 2 },
-];
+// 8 Perimeter Festival Flag Totems along outer balustrade removed per exterior visual fix request
 
 // Colorful Flower Clusters placed inside low-profile central planters & entrance beds
 const FLOWER_CLUSTERS_PINK: [number, number, number][] = [
@@ -273,9 +263,6 @@ const PARASOL_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.06, 2.35, 10);
 const PARASOL_CANOPY_GEOM = new THREE.ConeGeometry(1.55, 0.58, 12);
 const LOUNGE_TABLE_TOP_GEOM = new THREE.CylinderGeometry(0.68, 0.68, 0.07, 16);
 const LOUNGE_TABLE_BASE_GEOM = new THREE.CylinderGeometry(0.12, 0.34, 0.72, 12);
-
-const FLAG_POLE_GEOM = new THREE.CylinderGeometry(0.04, 0.06, 3.6, 10);
-const FLAG_BANNER_GEOM = new THREE.BoxGeometry(0.04, 1.45, 0.58);
 
 // Instanced Exhibition Street Furniture: Illuminated Bollards, Recycling Bins & Wayfinding Posts
 const BOLLARD_BODY_GEOM = new THREE.CylinderGeometry(0.11, 0.13, 0.78, 12);
@@ -315,10 +302,6 @@ const PARASOL_CREAM_MAT = new THREE.MeshStandardMaterial({
 const TABLE_WHITE_MAT = new THREE.MeshStandardMaterial({
   color: '#f8fafc',
   roughness: 0.3,
-});
-const FLAG_ACCENT_MAT = new THREE.MeshStandardMaterial({
-  color: '#0ea5e9',
-  roughness: 0.38,
 });
 
 const BENCH_IRON_MAT = new THREE.MeshStandardMaterial({
@@ -388,11 +371,6 @@ const ZEBRA_CROSSWALKS: {
   { x: 0, z: 9.5, w: 5.0, d: 2.1, ry: 0 },
   // Grand South Entrance Gate Crossing
   { x: 0, z: 17.6, w: 5.0, d: 2.2, ry: 0 },
-  // Outer Boulevard Pedestrian Crossings
-  { x: -18.5, z: -3.2, w: 4.8, d: 1.9, ry: Math.PI / 2 },
-  { x: 18.5, z: -3.2, w: 4.8, d: 1.9, ry: Math.PI / 2 },
-  { x: -18.5, z: 3.2, w: 4.8, d: 1.9, ry: Math.PI / 2 },
-  { x: 18.5, z: 3.2, w: 4.8, d: 1.9, ry: Math.PI / 2 },
 ];
 
 // Cast-iron manhole covers on asphalt roadways
@@ -1019,22 +997,6 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         <Instances geometry={PARASOL_CANOPY_GEOM} material={PARASOL_CREAM_MAT}>
           {REST_LOUNGE_ZONES.map((z, i) => (
             <Instance key={`pcanopy-${i}`} position={[z.x, 2.38, z.z]} />
-          ))}
-        </Instances>
-
-        {/* 8 Instanced Perimeter Festival Flag Totems */}
-        <Instances geometry={FLAG_POLE_GEOM} material={LAMP_POLE_MAT}>
-          {FESTIVAL_TOTEMS.map((f, i) => (
-            <Instance key={`fpole-${i}`} position={[f.x, 1.8, f.z]} />
-          ))}
-        </Instances>
-        <Instances geometry={FLAG_BANNER_GEOM} material={FLAG_ACCENT_MAT}>
-          {FESTIVAL_TOTEMS.map((f, i) => (
-            <Instance
-              key={`fbanner-${i}`}
-              position={[f.x + (f.x < 0 ? 0.28 : -0.28), 2.65, f.z]}
-              rotation={[0, f.ry, 0]}
-            />
           ))}
         </Instances>
 
