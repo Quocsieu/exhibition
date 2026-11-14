@@ -7,14 +7,22 @@ import { buildCentralPlazaFountainModel } from './architecturalModels';
 import { createFountainStoneHeight, FOUNTAIN_STONE_COLORS, setStoneUVs } from './exteriorStone';
 
 // Imported artwork only. Bounds are visual envelopes, never navigation inputs.
+interface AssetSpec {
+  file: string;
+  bounds: number[];
+  dir?: string;
+}
+
 const specs = {
-  'env-tree-oak': { file: 'etFGNvsiFv', bounds: [3.8, 5.4, 3.8] },
-  'env-tree-blossom': { file: 'R7qMWzb7nk', bounds: [3.4, 5.6, 3.4] },
-  'env-tree-pine': { file: 'etFGNvsiFv-variant', bounds: [3.5, 5.2, 3.5] },
-  'env-park-bench': { file: 'kn0sMwbspb', bounds: [1.35, .9, .62] },
+  'env-tree-oak': { file: 'fir_tree_01_opt', bounds: [4.2, 6.2, 4.2], dir: 'env' },
+  'env-tree-blossom': { file: 'fir_tree_01_opt', bounds: [3.8, 5.6, 3.8], dir: 'env' },
+  'env-tree-pine': { file: 'fir_tree_01_opt', bounds: [4.0, 5.8, 4.0], dir: 'env' },
+  'jacaranda-tree': { file: 'jacaranda_tree_opt', bounds: [7.2, 6.8, 7.2], dir: 'env' },
+  'env-park-bench': { file: 'modular_street_seating_opt', bounds: [1.86, 0.75, 1.17], dir: 'env' },
   'env-street-lamp': { file: 'RO32ltX6zJ', bounds: [.9, 3.8, .9] },
   fountain: { file: '7b_tCaBRLCI', bounds: [3.3, 2.65, 3.3] },
-  flowers: { file: 'NBUxHir6FJ', bounds: [.55, .3, .55] },
+  flowers: { file: 'shrub_01_opt', bounds: [.65, .55, .65], dir: 'env' },
+  'water-manhole': { file: 'water_manhole_cover_opt', bounds: [.72, .08, .72], dir: 'env' },
   'env-planter-urn': { file: 'planter_fluted_01', bounds: [.94, 1.3, .94] },
   'recycling-bin': { file: 'recycling_bin_01', bounds: [.44, .7, .44] },
   'city-a': { file: 'ppwtREejXg', bounds: [1, 1, 1] },
@@ -23,7 +31,7 @@ const specs = {
   'city-2': { file: 'city_detail_v2_02', bounds: [1, 1, 1] },
   'city-3': { file: 'city_detail_v2_03', bounds: [1, 1, 1] },
   'city-4': { file: 'city_detail_v2_04', bounds: [1, 1, 1] },
-} satisfies Record<string, { file: string; bounds: number[] }>;
+} satisfies Record<string, AssetSpec>;
 export type ExteriorAssetId = keyof typeof specs;
 export interface ExteriorPlacement { position: [number, number, number]; rotation?: number; scale?: number | [number, number, number] }
 interface Part { geometry: THREE.BufferGeometry; material: THREE.Material | THREE.Material[] }
@@ -53,10 +61,11 @@ function releaseAsset(asset: Asset) {
 }
 
 async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
-  const spec = specs[id];
-  const { scene } = await loader.loadAsync(`${import.meta.env.BASE_URL}models/exterior/${spec.file}${low ? '-lod' : ''}.glb`);
+  const spec: AssetSpec = specs[id];
+  const dir = spec.dir ?? 'exterior';
+  const { scene } = await loader.loadAsync(`${import.meta.env.BASE_URL}models/${dir}/${spec.file}${low ? '-lod' : ''}.glb`);
   // Artist's bench length runs along Z; existing plaza benches run along X.
-  if (id === 'env-park-bench') scene.rotation.y = Math.PI / 2;
+  if (id === 'env-park-bench' && spec.dir !== 'env') scene.rotation.y = Math.PI / 2;
   scene.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(scene);
   const size = box.getSize(new THREE.Vector3());
@@ -95,13 +104,17 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
       }
       if (id.startsWith('city-') && /window/i.test(m.name)) { m.roughness = .32; m.metalness = .15; }
       if (id === 'env-street-lamp') m.emissiveIntensity = .35;
+      if (/leaf|leaves/i.test(m.name)) {
+        m.alphaTest = 0.45;
+        m.depthWrite = true;
+      }
       for (const value of Object.values(m)) if (value instanceof THREE.Texture) value.anisotropy = 4;
     });
     parts.push({ geometry, material: obj.material });
   });
   scene.userData.exteriorSource = spec.file;
   const asset: Asset = { source: scene, parts };
-  if (!low && (id.startsWith('env-tree') || id.startsWith('city-'))) {
+  if (!low && spec.dir !== 'env' && (id.startsWith('env-tree') || id.startsWith('city-'))) {
     try {
       const lod = await loadAsset(id, true);
       asset.lowParts = lod.parts;
@@ -189,9 +202,9 @@ function Fallback({ id, placements }: { id: ExteriorAssetId; placements: Exterio
     if (id === 'fountain') return buildCentralPlazaFountainModel();
     if (id.startsWith('env-')) return cloneCachedAsset(id as GlbAssetId);
     const group = new THREE.Group();
-    const geometry = id === 'flowers' ? new THREE.SphereGeometry(.16, 8, 6) : id === 'recycling-bin' ? new THREE.CylinderGeometry(.2, .17, .64, 12) : new THREE.BoxGeometry(1, 1, 1);
-    geometry.translate(0, id === 'flowers' ? .1 : id === 'recycling-bin' ? .32 : .5, 0);
-    group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: id === 'flowers' ? '#7f9962' : '#a6aaa8', roughness: .9 })));
+    const geometry = id === 'flowers' ? new THREE.SphereGeometry(.16, 8, 6) : id === 'recycling-bin' ? new THREE.CylinderGeometry(.2, .17, .64, 12) : id === 'jacaranda-tree' ? new THREE.CylinderGeometry(0.2, 0.4, 5, 8) : new THREE.BoxGeometry(1, 1, 1);
+    geometry.translate(0, id === 'flowers' ? .1 : id === 'recycling-bin' ? .32 : id === 'jacaranda-tree' ? 2.5 : .5, 0);
+    group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: id === 'flowers' ? '#7f9962' : id === 'jacaranda-tree' ? '#4d7c0f' : '#a6aaa8', roughness: .9 })));
     return group;
   }), [id, placements]);
   useEffect(() => () => {

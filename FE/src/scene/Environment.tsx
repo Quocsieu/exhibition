@@ -269,8 +269,6 @@ const FLOWER_CLUSTERS_GOLD: [number, number, number][] = [
 ];
 
 // Shared module-level Geometries & Materials to minimize WebGL memory & state switches
-const TREE_BASE_GEOM = new THREE.CylinderGeometry(0.85, 0.95, 0.44, 16);
-
 const PARASOL_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.06, 2.35, 10);
 const PARASOL_CANOPY_GEOM = new THREE.ConeGeometry(1.55, 0.58, 12);
 const LOUNGE_TABLE_TOP_GEOM = new THREE.CylinderGeometry(0.68, 0.68, 0.07, 16);
@@ -309,9 +307,6 @@ export const EXHIBITION_BIN_POSITIONS: [number, number][] = [
 ];
 
 const BOLLARD_GLOW_MAT = new THREE.MeshBasicMaterial({ color: '#38bdf8' });
-
-const SLATE_POT_MAT = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.65 });
-
 
 const PARASOL_CREAM_MAT = new THREE.MeshStandardMaterial({
   color: '#fffbeb',
@@ -493,10 +488,17 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       []
     );
 
+    const jacarandaPlacements = useMemo<ExteriorPlacement[]>(() =>
+      PERIMETER_TREES.map(([x, z, scale], idx) => ({
+        position: [x, 0.02, z] as [number, number, number],
+        rotation: idx * 0.85,
+        scale,
+      })),
+    []);
     const treeBatches = useMemo(() => (['env-tree-oak', 'env-tree-blossom', 'env-tree-pine'] as ExteriorAssetId[]).map(id => ({
       id,
-      placements: ALL_TREES.filter(t => t.assetId === id).map(t => ({
-        position: [t.x, Math.abs(t.x) > 24 ? -0.75 : 0.44, t.z] as [number, number, number],
+      placements: ALL_TREES.filter(t => t.assetId === id && Math.abs(t.x) > 24).map(t => ({
+        position: [t.x, -0.75, t.z] as [number, number, number],
         rotation: t.ry,
         scale: t.scale,
       })),
@@ -506,6 +508,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const flowerPlacements = useMemo<ExteriorPlacement[]>(() => [...FLOWER_CLUSTERS_PINK, ...FLOWER_CLUSTERS_GOLD].map(([x, , z], i) => ({ position: [x, Math.abs(z) < 6 ? .36 : .35, z], rotation: i * 1.37 })), []);
     const urnPlacements = useMemo<ExteriorPlacement[]>(() => PLANTER_URN_POSITIONS.map(([x, z]) => ({ position: [x, .02, z] })), []);
     const binPlacements = useMemo<ExteriorPlacement[]>(() => EXHIBITION_BIN_POSITIONS.map(([x, z]) => ({ position: [x, 0, z] })), []);
+    const manholePlacements = useMemo<ExteriorPlacement[]>(() => MANHOLE_COVERS.map((mh, idx) => ({ position: [mh.x, 0.02, mh.z], rotation: (idx * 1.1) % Math.PI })), []);
 
     const plazaBannerTexture = useMemo(
       () =>
@@ -705,22 +708,8 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           </mesh>
         ))}
 
-        {/* Cast-Iron Manhole Covers on Asphalt Roadways */}
-        {MANHOLE_COVERS.map((mh, idx) => (
-          <mesh
-            key={`manhole-${idx}`}
-            position={[mh.x, 0.018, mh.z]}
-            rotation={[-Math.PI / 2, 0, (idx * 1.1) % Math.PI]}
-            receiveShadow
-          >
-            <circleGeometry args={[0.42, 24]} />
-            <meshStandardMaterial
-              map={manholeTexture}
-              roughness={0.72}
-              metalness={0.65}
-            />
-          </mesh>
-        ))}
+        {/* Cast-Iron Manhole Covers on Asphalt Roadways (4K GLB) */}
+        <ExteriorAssets id="water-manhole" placements={manholePlacements} />
 
         {/* Street Storm Drain Grates along Road Gutters */}
         {STORM_DRAIN_GRATES.map((sd, idx) => (
@@ -987,10 +976,13 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         <ExteriorAssets id="recycling-bin" placements={binPlacements} />
 
         {/* ================================================================
-            6. ASSET-DRIVEN TREES (`env-tree-*.glb`), BENCHES (`env-park-bench.glb`),
+            6. ASSET-DRIVEN TREES (`jacaranda-tree`, `env-tree-*.glb`), BENCHES (`env-park-bench.glb`),
                STREET LAMPS (`env-street-lamp.glb`) & PLANTER URNS (`env-planter-urn.glb`)
            ================================================================ */}
-        {/* Imported leafy tree variants and birch; legacy asset IDs retain placement compatibility */}
+        {/* 10 Majestic Jacaranda Trees positioned around Plaza Perimeter without circular stone bases */}
+        <ExteriorAssets id="jacaranda-tree" placements={jacarandaPlacements} />
+
+        {/* Outer parkland trees framing the distant avenue */}
         {treeBatches.map(b => <ExteriorAssets key={b.id} id={b.id} placements={b.placements} />)}
 
         {/* 6 Sculpted Stone Planter Urns along Grand Avenue & Entrance */}
@@ -1033,13 +1025,6 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
               position={[f.x + (f.x < 0 ? 0.28 : -0.28), 2.65, f.z]}
               rotation={[0, f.ry, 0]}
             />
-          ))}
-        </Instances>
-
-        {/* 8 Instanced Perimeter Tree Planter Bases */}
-        <Instances geometry={TREE_BASE_GEOM} material={SLATE_POT_MAT} receiveShadow>
-          {PERIMETER_TREES.map(([tx, tz], i) => (
-            <Instance key={`tbase-${i}`} position={[tx, 0.22, tz]} />
           ))}
         </Instances>
 

@@ -13,3 +13,6 @@ coverage/
 *.log
 FE/booth-modeling/tools/
 FE/booth-modeling/sand3d-repo/
+# Large raw 3D assets (>100MB GitHub limit, kept locally on disk)
+FE/public/models/env/*_4k.glb
+FE/public/models/env/Building01.glb
