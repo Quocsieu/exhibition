@@ -235,24 +235,9 @@ const HORIZON_HILLS: { x: number; z: number; sx: number; sy: number; sz: number 
 
 // 8 Perimeter Festival Flag Totems along outer balustrade removed per exterior visual fix request
 
-// Colorful Flower Clusters placed inside low-profile central planters
-const FLOWER_CLUSTERS_PINK: [number, number, number][] = [
-  [-6.35, 0.46, -5.35],
-  [-5.65, 0.46, -4.65],
-  [6.35, 0.46, -5.35],
-  [5.65, 0.46, -4.65],
-  [-6.35, 0.46, 5.35],
-  [6.35, 0.46, 5.35],
-];
-
-const FLOWER_CLUSTERS_GOLD: [number, number, number][] = [
-  [-6.35, 0.46, -4.65],
-  [6.35, 0.46, -4.65],
-  [-5.65, 0.46, 5.35],
-  [-6.35, 0.46, 4.65],
-  [5.65, 0.46, 5.35],
-  [6.35, 0.46, 4.65],
-];
+// Colorful Flower Clusters inside old central planters cleared (replaced by 3D planter-near-ch models)
+const FLOWER_CLUSTERS_PINK: [number, number, number][] = [];
+const FLOWER_CLUSTERS_GOLD: [number, number, number][] = [];
 
 // Shared module-level Geometries & Materials to minimize WebGL memory & state switches
 const PARASOL_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.06, 2.35, 10);
@@ -326,10 +311,6 @@ const HORIZON_HILL_MAT = new THREE.MeshStandardMaterial({
   roughness: 0.82,
 });
 
-const PLANTER_BOX_GEOM = new THREE.BoxGeometry(1.48, 0.36, 1.48);
-const PLANTER_SOIL_GEOM = new THREE.BoxGeometry(1.26, 0.06, 1.26);
-const PLANTER_BOX_MAT = new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.65 });
-const PLANTER_SOIL_MAT = new THREE.MeshStandardMaterial({ color: '#065f46', roughness: 0.9 });
 
 // Stylized 3D City Asphalt Road Network Segments (Widened 4.8m-5.4m continuous multi-lane network)
 const ASPHALT_ROAD_SEGMENTS: {
@@ -523,6 +504,15 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       })),
     })), []);
     const benchPlacements = useMemo<ExteriorPlacement[]>(() => ALL_BENCHES.map(b => ({ position: [b.x, .02, b.z], rotation: b.rotationY })), []);
+    const planterBenchPlacements = useMemo<ExteriorPlacement[]>(() => {
+      return CENTRAL_PLANTER_ISLANDS.flatMap((island) => {
+        const rot = island.benchOffsetZ > 0 ? 0 : Math.PI;
+        return [
+          { position: [island.x - 0.6, 0.02, island.z] as [number, number, number], rotation: rot },
+          { position: [island.x + 0.6, 0.02, island.z] as [number, number, number], rotation: rot },
+        ];
+      });
+    }, []);
     const lampPlacements = useMemo<ExteriorPlacement[]>(
       () =>
         PERIMETER_LAMPS.map(([x, z]) => {
@@ -945,21 +935,6 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
            ================================================================ */}
         {CENTRAL_PLANTER_ISLANDS.map((island, idx) => (
           <React.Fragment key={`planter-island-${idx}`}>
-            <group position={[island.x, 0, island.z]}>
-              <mesh
-                geometry={PLANTER_BOX_GEOM}
-                material={PLANTER_BOX_MAT}
-                position={[0, 0.18, 0]}
-                castShadow
-                receiveShadow
-              />
-              <mesh
-                geometry={PLANTER_SOIL_GEOM}
-                material={PLANTER_SOIL_MAT}
-                position={[0, 0.37, 0]}
-              />
-            </group>
-
             <group position={[island.signPos[0], 0, island.signPos[1]]}>
               <mesh
                 geometry={SIGNPOST_POLE_GEOM}
@@ -1036,6 +1011,9 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
 
         {/* Imported wood and iron park benches */}
         <ExteriorAssets id="env-park-bench" placements={benchPlacements} />
+
+        {/* 8 Planters near Central Park Benches (1 old planter replaced with 2 new side-by-side) */}
+        <ExteriorAssets id="env-planter-bench" placements={planterBenchPlacements} />
 
         {/* Imported textured street lamps + warm light pools */}
         <ExteriorAssets id="env-street-lamp" placements={lampPlacements} />

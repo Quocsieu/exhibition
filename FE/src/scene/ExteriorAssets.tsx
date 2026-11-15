@@ -19,6 +19,7 @@ const specs = {
   'env-tree-pine': { file: 'fir_tree_01_joined', bounds: [4.0, 5.8, 4.0], dir: 'env' },
   'jacaranda-tree': { file: 'jacaranda_tree_lod', bounds: [7.2, 6.8, 7.2], dir: 'env' },
   'env-park-bench': { file: 'bench', bounds: [1.85, 0.82, 0.88], dir: 'env' },
+  'env-planter-bench': { file: 'planter-near-ch', bounds: [1.2, 0.8314, 0.6312], dir: 'env' },
   'env-street-lamp': { file: 'Street_Lamp', bounds: [1.2, 4.22, 1.2], dir: 'env' },
   fountain: { file: '7b_tCaBRLCI', bounds: [3.3, 2.65, 3.3] },
   flowers: { file: 'shrub_01_joined', bounds: [.65, .55, .65], dir: 'env' },
@@ -87,10 +88,33 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
     const geometry = obj.geometry.clone().applyMatrix4(normalization.clone().multiply(obj.matrixWorld));
     geometry.computeBoundingSphere();
     geometry.computeBoundingBox();
+    if (id === 'env-planter-bench') {
+      obj.material = Array.isArray(obj.material) ? obj.material.map(m => m.clone()) : obj.material.clone();
+    }
     const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
     if (stoneHeight && materials.some(m => FOUNTAIN_STONE_COLORS[m.name])) setStoneUVs(geometry);
     materials.forEach(m => {
       if (!(m instanceof THREE.MeshStandardMaterial)) return;
+      if (id === 'env-planter-bench') {
+        if (obj.name.startsWith('Component')) {
+          // Warm teak / cedar wood planter box slats & posts matching park bench
+          m.color.set('#8c532b');
+          m.roughness = 0.58;
+          m.metalness = 0.05;
+        } else if (obj.name.includes('009')) {
+          // Potting soil bed
+          m.color.set('#271f18');
+          m.roughness = 0.95;
+          m.metalness = 0.0;
+        } else {
+          // Shrub & flower foliage (Group_002)
+          m.color.set('#2d6a4f'); // rich botanical park green
+          m.roughness = 0.68;
+          m.metalness = 0.0;
+          m.emissive = new THREE.Color(0.02, 0.05, 0.02);
+          m.side = THREE.DoubleSide;
+        }
+      }
       if (id === 'fountain' && m.transparent) {
         m.depthWrite = false;
         m.roughness = 0.08;
