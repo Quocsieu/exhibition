@@ -139,10 +139,16 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
         m.side = THREE.DoubleSide; // double-sided rendering eliminates black unlit leaf backs
         m.alphaTest = 0.32;
         m.depthWrite = true;
-        m.roughness = 0.52;
+        m.roughness = 0.58;
         m.metalness = 0.0;
-        m.color.setRGB(1.5, 1.62, 1.3); // brighten foliage tone naturally, eliminating dark crushing
-        m.emissive = new THREE.Color(0.14, 0.22, 0.08); // lush ambient foliage bounce prevents pitch black self-shadowing
+        if (m.map) {
+          m.color.setRGB(1.25, 1.32, 1.18); // natural foliage tone lift
+          m.emissive = new THREE.Color(0.06, 0.09, 0.04);
+        } else {
+          // Foliage without diffuse texture (e.g. planter.glb Leaves): rich botanical park green
+          m.color.set(id === 'booth-planter' ? '#386641' : '#2d6a4f');
+          m.emissive = new THREE.Color(0.02, 0.05, 0.02);
+        }
       }
       if (/trunk|bark|branch/i.test(m.name)) {
         m.roughness = 0.75;

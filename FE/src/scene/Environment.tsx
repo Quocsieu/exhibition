@@ -235,7 +235,7 @@ const HORIZON_HILLS: { x: number; z: number; sx: number; sy: number; sz: number 
 
 // 8 Perimeter Festival Flag Totems along outer balustrade removed per exterior visual fix request
 
-// Colorful Flower Clusters placed inside low-profile central planters & entrance beds
+// Colorful Flower Clusters placed inside low-profile central planters
 const FLOWER_CLUSTERS_PINK: [number, number, number][] = [
   [-6.35, 0.46, -5.35],
   [-5.65, 0.46, -4.65],
@@ -243,8 +243,6 @@ const FLOWER_CLUSTERS_PINK: [number, number, number][] = [
   [5.65, 0.46, -4.65],
   [-6.35, 0.46, 5.35],
   [6.35, 0.46, 5.35],
-  [-6.2, 0.42, 20.8],
-  [6.2, 0.42, 20.8],
 ];
 
 const FLOWER_CLUSTERS_GOLD: [number, number, number][] = [
@@ -254,8 +252,6 @@ const FLOWER_CLUSTERS_GOLD: [number, number, number][] = [
   [-6.35, 0.46, 4.65],
   [5.65, 0.46, 5.35],
   [6.35, 0.46, 4.65],
-  [-6.6, 0.42, 21.1],
-  [6.6, 0.42, 21.1],
 ];
 
 // Shared module-level Geometries & Materials to minimize WebGL memory & state switches
@@ -527,7 +523,16 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       })),
     })), []);
     const benchPlacements = useMemo<ExteriorPlacement[]>(() => ALL_BENCHES.map(b => ({ position: [b.x, .02, b.z], rotation: b.rotationY })), []);
-    const lampPlacements = useMemo<ExteriorPlacement[]>(() => PERIMETER_LAMPS.map(([x, z]) => ({ position: [x, .02, z], rotation: Math.atan2(-x, -z) })), []);
+    const lampPlacements = useMemo<ExteriorPlacement[]>(
+      () =>
+        PERIMETER_LAMPS.map(([x, z]) => {
+          let rot = Math.atan2(-x, -z);
+          if (x < -10) rot = -Math.PI / 2;
+          else if (x > 10) rot = Math.PI / 2;
+          return { position: [x, 0.02, z], rotation: rot };
+        }),
+      []
+    );
     const flowerPlacements = useMemo<ExteriorPlacement[]>(() => [...FLOWER_CLUSTERS_PINK, ...FLOWER_CLUSTERS_GOLD].map(([x, , z], i) => ({ position: [x, Math.abs(z) < 6 ? .36 : .35, z], rotation: i * 1.37 })), []);
     const urnPlacements = useMemo<ExteriorPlacement[]>(() => PLANTER_URN_POSITIONS.map(([x, z]) => ({ position: [x, .02, z] })), []);
     const binPlacements = useMemo<ExteriorPlacement[]>(() => EXHIBITION_BIN_POSITIONS.map(([x, z]) => ({ position: [x, 0, z] })), []);
@@ -891,17 +896,6 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
             </group>
           ))}
 
-          {/* Flanking Entrance Flower Beds */}
-          {[-6.4, 6.4].map((fx, i) => (
-            <group key={`gate-flowerbed-${i}`} position={[fx, 0.16, -0.1]}>
-              <mesh receiveShadow material={PLANTER_BOX_MAT}>
-                <boxGeometry args={[1.6, 0.32, 1.1]} />
-              </mesh>
-              <mesh position={[0, 0.18, 0]} material={PLANTER_SOIL_MAT}>
-                <boxGeometry args={[1.4, 0.06, 0.92]} />
-              </mesh>
-            </group>
-          ))}
 
           <mesh position={[0, 4.95, 0]} castShadow receiveShadow>
             <boxGeometry args={[12.2, 0.95, 1.85]} />
@@ -1046,13 +1040,16 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
         {/* Imported textured street lamps + warm light pools */}
         <ExteriorAssets id="env-street-lamp" placements={lampPlacements} />
         <Instances geometry={LAMP_POOL_GEOM} material={LAMP_POOL_MAT}>
-          {PERIMETER_LAMPS.map(([lx, lz], i) => (
-            <Instance
-              key={`lpool-${i}`}
-              position={[lx, 0.019, lz]}
-              rotation={[-Math.PI / 2, 0, 0]}
-            />
-          ))}
+          {PERIMETER_LAMPS.map(([lx, lz], i) => {
+            const poolX = lx < -10 ? lx - 1.35 : lx > 10 ? lx + 1.35 : lx;
+            return (
+              <Instance
+                key={`lpool-${i}`}
+                position={[poolX, 0.019, lz]}
+                rotation={[-Math.PI / 2, 0, 0]}
+              />
+            );
+          })}
         </Instances>
 
         {/* ================================================================
