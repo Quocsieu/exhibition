@@ -14,11 +14,8 @@ FE/booth-modeling/
 │   ├── generate_roofless_frames.py       # Sinh 6 khung gian hàng fallback V1 (booths/roofless-v1/*.glb)
 │   ├── optimize_env_4k_assets.py         # Hạ độ phân giải texture & decimate cho các model 4K
 │   ├── optimize_jacaranda.py             # Tối ưu hóa cây phượng tím (jacaranda_tree)
-│   ├── optimize_building03.py            # Tối ưu hóa tòa nhà ngoại vi (building03)
-│   ├── optimize_street_props.py          # Tối ưu hóa đạo cụ đường phố (trash_opt.glb, v.v.)
 │   ├── decimate_foliage_models.py        # Tinh chỉnh tỷ lệ decimate cho cây thông và bụi hoa
-│   ├── consolidate_and_export_glbs.py    # Gộp mesh thành single-draw-call (*_joined.glb, *_lod.glb)
-│   └── fix_planter_leaves.py             # Chuẩn hóa vật liệu PBR cho lá chậu cây (planter.glb)
+│   └── consolidate_and_export_glbs.py    # Gộp mesh thành single-draw-call (*_joined.glb, *_lod.glb)
 └── README.md
 ```
 
