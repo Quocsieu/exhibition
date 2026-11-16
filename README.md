@@ -26,7 +26,8 @@ exhibition/
 │   │   ├── types/                    # Định nghĩa kiểu dữ liệu, va chạm & tìm đường A* (expo.ts)
 │   │   └── __tests__/                # Unit tests cho va chạm, tìm đường A*, camera, 36 slots & textures
 │   ├── booth-modeling/               # Pipeline script Python Blender tái tạo gian hàng V2 & tối ưu model
-│   ├── scripts/                      # Script hỗ trợ xuất GLB thủ tục (generateGlbAssets.ts)
+│   ├── scripts/                      # Script hỗ trợ xuất GLB (generateGlbAssets.ts) & kiểm thử hồi quy (browserRegressionTest.cjs)
+│   ├── .env                          # Biến môi trường Frontend local (được .gitignore bảo vệ)
 │   ├── package.json
 │   └── vite.config.ts
 │
@@ -42,10 +43,9 @@ exhibition/
 │   │   ├── services/                 # Tầng dịch vụ nghiệp vụ (expoService.ts)
 │   │   ├── server.ts                 # Điểm vào chính của Backend (cổng mặc định 4000)
 │   │   └── __tests__/                # Integration tests cho REST API, Auth, SSRF & Socket.IO
+│   ├── .env                          # Biến môi trường Backend local (được .gitignore bảo vệ)
 │   └── package.json
 │
-├── qa-reports/                       # Kịch bản kiểm thử hồi quy trình duyệt (final_regression_test.cjs)
-├── .env.example                      # File mẫu cấu hình biến môi trường (không chứa khóa bí mật)
 ├── .gitignore
 ├── package.json                      # Cấu hình npm Workspaces gốc (FE, BE)
 ├── vercel.json                       # Cấu hình triển khai Frontend trên Vercel
@@ -66,12 +66,9 @@ cd exhibition
 
 # 2. Cài đặt toàn bộ dependencies cho cả Root, FE và BE
 npm install
-
-# 3. (Tùy chọn) Tạo file .env từ file mẫu .env.example
-cp .env.example .env
 ```
 
-> **Lưu ý:** Dự án có thể chạy ngay lập tức sau khi `npm install` mà không bắt buộc phải tạo file `.env` (Backend tự động dùng cổng `4000` và tự động khởi tạo cơ sở dữ liệu SQLite mẫu tại `BE/data/expo.db`).
+> **Lưu ý:** Dự án có thể chạy ngay lập tức sau khi `npm install` mà không bắt buộc phải tạo file `.env` (Backend tự động dùng cổng `4000` và tự động khởi tạo cơ sở dữ liệu SQLite mẫu tại `BE/data/expo.db`). Nếu muốn tùy chỉnh cấu hình local, tạo `FE/.env` và `BE/.env` theo hướng dẫn tại Mục 4 bên dưới.
 
 ---
 
@@ -90,26 +87,49 @@ cp .env.example .env
 ### Địa chỉ Truy cập Khi Chạy Local
 - **Không gian Triển lãm 3D (`FE`)**: `http://localhost:5173`
 - **Bảng điều khiển Quản trị (`Admin Dashboard`)**: `http://localhost:5173/#admin`
-  - Tài khoản PoC mặc định khi chưa đặt biến môi trường: Username `admin` / Password `expo-admin-2026`
+  - Tài khoản quản trị được xác thực theo biến môi trường `ADMIN_USERNAME` và `ADMIN_PASSWORD` (hoặc giá trị mặc định PoC trong chế độ phát triển local khi chưa đặt biến môi trường).
 - **Kiểm tra trạng thái Backend (`API Healthcheck`)**: `http://localhost:4000/api/health`
 
 ---
 
-## 4. Cấu hình Biến Môi trường (`.env`)
+## 4. Cấu hình Biến Môi trường (`FE/.env` & `BE/.env`)
 
-Sao chép `.env.example` thành `.env` nếu muốn tùy chỉnh cấu hình:
+Dự án tách biệt biến môi trường theo từng phân hệ (`FE/.env` cho Frontend và `BE/.env` cho Backend). Trên môi trường Production, cấu hình trực tiếp trong mục **Environment Variables** của **Vercel Dashboard** (`FE`) và **Render Dashboard** (`BE`).
 
-| Biến môi trường | Phân hệ | Giá trị mặc định (Dev) | Công dụng |
-|---|---|---|---|
-| `PORT` | `BE` | `4000` | Cổng lắng nghe HTTP & Socket.IO của Backend. |
-| `CORS_ORIGIN` | `BE` | `*` | Danh sách origin được phép gọi API (phân tách bằng dấu phẩy). |
-| `SQLITE_DB_PATH` | `BE` | `./data/expo.db` | Đường dẫn lưu file cơ sở dữ liệu SQLite. |
-| `ADMIN_USERNAME` | `BE` | `admin` | Tên đăng nhập trang Quản trị (`/#admin`). |
-| `ADMIN_PASSWORD` | `BE` | `expo-admin-2026` | Mật khẩu trang Quản trị (**Bắt buộc đổi trên môi trường Production**). |
-| `ADMIN_TOKEN_SECRET` | `BE` | *(Sinh ngẫu nhiên 32 bytes)* | Khóa ký HMAC-SHA256 cho Bearer Token của Admin. |
-| `VITE_API_URL` | `FE` | `""` *(Dùng proxy Vite)* | URL gốc của Backend API khi triển khai Production. |
-| `VITE_SOCKET_URL` | `FE` | `""` *(Dùng proxy Vite)* | URL gốc của máy chủ Socket.IO khi triển khai Production. |
-| `VITE_USE_REMOTE_API_IN_DEV` | `FE` | `false` | Đặt `true` nếu muốn Frontend local gọi thẳng lên Backend từ xa. |
+> **Cảnh báo bảo mật:** Tuyệt đối không commit file `.env`, mật khẩu thực hoặc khóa bí mật (`ADMIN_PASSWORD`, `ADMIN_TOKEN_SECRET`) lên Git. Toàn bộ các file `.env*` đều đã được `.gitignore` chặn tự động.
+
+### 4.1. Tạo `BE/.env` (Cấu hình Backend Local)
+
+```env
+PORT=4000
+CORS_ORIGIN=http://localhost:5173
+SQLITE_DB_PATH=./data/expo.db
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=<dat-mat-khau-quan-tri-tai-day>
+ADMIN_TOKEN_SECRET=<chuoi-ngau-nhien-toi-thieu-32-ky-tu>
+```
+
+### 4.2. Tạo `FE/.env` (Cấu hình Frontend Local)
+
+```env
+VITE_API_URL=
+VITE_SOCKET_URL=
+VITE_USE_REMOTE_API_IN_DEV=false
+```
+
+### 4.3. Bảng Danh mục Biến Môi trường
+
+| Biến môi trường | File đích (Local) | Bắt buộc (Local / Prod) | Giá trị mặc định (Dev) | Công dụng |
+|---|---|---|---|---|
+| `PORT` | `BE/.env` | Tùy chọn / Render tự cấp | `4000` | Cổng lắng nghe HTTP & Socket.IO của Backend (khớp với proxy `http://localhost:4000` của Vite). |
+| `CORS_ORIGIN` | `BE/.env` | Tùy chọn / Khuyến nghị | `*` | Danh sách origin được phép gọi API (phân tách bằng dấu phẩy). |
+| `SQLITE_DB_PATH` | `BE/.env` | Tùy chọn | `./data/expo.db` | Đường dẫn lưu file cơ sở dữ liệu SQLite (tính từ thư mục `BE/`). |
+| `ADMIN_USERNAME` | `BE/.env` | Tùy chọn (Dev) / **Bắt buộc (Prod)** | `admin` | Tên đăng nhập trang Quản trị (`/#admin`, `/admin`). |
+| `ADMIN_PASSWORD` | `BE/.env` | Tùy chọn (Dev) / **Bắt buộc (Prod)** | *(Fallback local dev)* | Mật khẩu trang Quản trị (**Bắt buộc đặt giá trị bảo mật riêng trên Production**). |
+| `ADMIN_TOKEN_SECRET` | `BE/.env` | Tùy chọn (Dev) / **Bắt buộc (Prod)** | *(Sinh ngẫu nhiên 32 bytes)* | Khóa ký HMAC-SHA256 cho Bearer Token của Admin. |
+| `VITE_API_URL` | `FE/.env` | Tùy chọn | `""` *(Dùng proxy Vite ở Dev)* | URL gốc của Backend API trên Production (mặc định fallback sang `DEFAULT_PRODUCTION_BACKEND_URL`). |
+| `VITE_SOCKET_URL` | `FE/.env` | Tùy chọn | `""` *(Dùng proxy Vite ở Dev)* | URL gốc của máy chủ Socket.IO trên Production (mặc định fallback sang `VITE_API_URL` / `DEFAULT_PRODUCTION_BACKEND_URL`). |
+| `VITE_USE_REMOTE_API_IN_DEV` | `FE/.env` | Tùy chọn | `false` | Đặt `true` nếu muốn Frontend local gọi thẳng lên Backend từ xa thay vì qua Vite proxy. |
 
 ---
 
@@ -118,18 +138,18 @@ Sao chép `.env.example` thành `.env` nếu muốn tùy chỉnh cấu hình:
 1. **Backend (`BE` — Render / VPS / Docker)**:
    - Build command: `npm install && npm run build -w BE`
    - Start command: `npm run start -w BE`
-   - Thiết lập các biến môi trường `PORT`, `CORS_ORIGIN`, `SQLITE_DB_PATH`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_TOKEN_SECRET`.
+   - Thiết lập các biến môi trường trên Render Dashboard: `PORT`, `CORS_ORIGIN`, `SQLITE_DB_PATH`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_TOKEN_SECRET`.
 2. **Frontend (`FE` — Vercel / Cloudflare Pages / Nginx)**:
    - Cấu hình đã có sẵn trong `vercel.json` ở thư mục gốc (`buildCommand: "npm run build -w FE"`, `outputDirectory: "FE/dist"`).
-   - Thiết lập `VITE_API_URL` và `VITE_SOCKET_URL` trỏ tới địa chỉ HTTPS của Backend.
+   - Thiết lập `VITE_API_URL` và `VITE_SOCKET_URL` trên Vercel Dashboard trỏ tới địa chỉ HTTPS của Backend.
 
 ---
 
 ## 6. Các File Local Không Lưu Trong Git (`.gitignore`)
 
-Để giữ cho repository gọn nhẹ (`~96 MB`) và an toàn khi chia sẻ nhóm, các file sau được `.gitignore` loại trừ và **thành viên nhóm không cần có các file này để chạy dự án**:
+Để giữ cho repository gọn nhẹ (`~91 MB`) và an toàn khi chia sẻ nhóm, các file sau được `.gitignore` loại trừ và **thành viên nhóm không cần có các file này để chạy dự án**:
 
 - `node_modules/`, `FE/dist/`, `BE/dist/`: Được tạo tự động khi chạy `npm install` và `npm run build`.
-- `.env`, `.env.local`: File cấu hình môi trường cá nhân tại máy local.
+- `FE/.env`, `BE/.env`, `.env*`: File cấu hình môi trường cá nhân tại máy local.
 - `BE/data/*.db*`, `data/*.db*`: Cơ sở dữ liệu SQLite tự động khởi tạo và nạp sẵn 6 gian hàng + 12 sản phẩm mẫu ngay lần chạy đầu tiên.
 - `FE/public/models/env/*_4k.glb`, `FE/public/models/env/Building01.glb`, `FE/booth-modeling/tools/`, `FE/booth-modeling/sand3d-repo/`: Các file model gốc 4K dung lượng lớn (`>100 MB`) và bộ cài Blender chỉ dùng khi muốn biên tập lại mesh 3D gốc; toàn bộ 25 model `.glb` đã tối ưu phục vụ website đều đã được commit sẵn trong `FE/public/models/`.

@@ -1,7 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
 
-const RUNTIME_SECRET = process.env.ADMIN_TOKEN_SECRET || crypto.randomBytes(32).toString('hex');
+const FALLBACK_SECRET = crypto.randomBytes(32).toString('hex');
+
+function getSigningSecret(): string {
+  return process.env.ADMIN_TOKEN_SECRET || FALLBACK_SECRET;
+}
 
 function getExpectedCredentials(): { username: string; password: string } {
   const username = process.env.ADMIN_USERNAME || 'admin';
@@ -14,7 +18,7 @@ export function issueAdminToken(username: string): string {
   const payload = Buffer.from(JSON.stringify({ sub: username, role: 'admin', exp })).toString(
     'base64url'
   );
-  const sig = crypto.createHmac('sha256', RUNTIME_SECRET).update(payload).digest('base64url');
+  const sig = crypto.createHmac('sha256', getSigningSecret()).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }
 
@@ -23,7 +27,7 @@ export function verifyAdminToken(token: string): { valid: boolean; username?: st
   if (parts.length !== 2) return { valid: false };
   const [payload, sig] = parts;
   const expectedSig = crypto
-    .createHmac('sha256', RUNTIME_SECRET)
+    .createHmac('sha256', getSigningSecret())
     .update(payload)
     .digest('base64url');
 

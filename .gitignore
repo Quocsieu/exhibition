@@ -9,7 +9,11 @@ data/*.db-*
 BE/data/*.db
 BE/data/*.db-*
 .env
-.env.local
+.env.*
+FE/.env
+FE/.env.*
+BE/.env
+BE/.env.*
 .DS_Store
 coverage/
 *.log

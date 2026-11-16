@@ -1,7 +1,7 @@
-import 'dotenv/config';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 import express, { type Express } from 'express';
 import cors from 'cors';
 import type { Server } from 'socket.io';
@@ -11,6 +11,11 @@ import { ExpoController, type DataMutationCallback } from './controllers/expoCon
 import { createApiRoutes } from './routes/apiRoutes.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 import type { ServerToClientEvents, ClientToServerEvents } from './schemas/expoSchemas.js';
+
+const BE_ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+if (!process.env.VITEST) {
+  dotenv.config({ path: path.resolve(BE_ROOT_DIR, '.env') });
+}
 
 export type CorsOriginConfig =
   | string
@@ -76,7 +81,11 @@ const isMain =
 if (isMain) {
   const PORT = Number(process.env.PORT || 4000);
   const CORS_ORIGIN = buildCorsOriginChecker(process.env.CORS_ORIGIN || '*');
-  const dbPath = process.env.SQLITE_DB_PATH || './data/expo.db';
+  const rawDbPath = process.env.SQLITE_DB_PATH || './data/expo.db';
+  const dbPath =
+    rawDbPath === ':memory:' || path.isAbsolute(rawDbPath)
+      ? rawDbPath
+      : path.resolve(BE_ROOT_DIR, rawDbPath);
 
   const db = new ExpoDatabase(dbPath);
   const app = createApp(db, CORS_ORIGIN);

@@ -4,7 +4,6 @@ import type { Socket } from 'node:net';
 
 export default defineConfig({
   plugins: [react()],
-  envDir: '..',
   server: {
     port: 5173,
     proxy: {
