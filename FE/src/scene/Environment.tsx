@@ -7,7 +7,6 @@ import {
   createAsphaltBumpTexture,
   createAsphaltRoadTexture,
   createBannerSignTexture,
-  createCityBuildingFacadeTexture,
   createCrosswalkTexture,
   createCurbStoneTexture,
   createManholeCoverTexture,

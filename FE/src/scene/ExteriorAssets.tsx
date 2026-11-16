@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { useFrame } from '@react-three/fiber';
@@ -266,7 +266,7 @@ function release(id: ExteriorAssetId, entry: Entry) {
   }, 1000);
 }
 
-function AssetPart({ part, placements, shadows, level = 'all' }: { part: Part; placements: ExteriorPlacement[]; shadows: boolean; level?: 'all' | 'near' | 'far' }) {
+function AssetPart({ part, placements, shadows }: { part: Part; placements: ExteriorPlacement[]; shadows: boolean }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   const matrices = useMemo(() => {
     const transform = new THREE.Object3D();
@@ -344,7 +344,7 @@ export function ExteriorAssets({ id, placements, shadows = true }: { id: Exterio
   if (result?.id !== id) return null;
   if (result.error) return <Fallback id={id} placements={placements} />;
   return <group name={`exterior-glb:${id}`} dispose={null}>
-    {result.asset?.parts.map((part, i) => <AssetPart key={`near-${i}`} part={part} placements={placements} shadows={shadows} level={result.asset?.lowParts ? 'near' : 'all'} />)}
-    {result.asset?.lowParts?.map((part, i) => <AssetPart key={`far-${i}`} part={part} placements={placements} shadows={false} level="far" />)}
+    {result.asset?.parts.map((part, i) => <AssetPart key={`near-${i}`} part={part} placements={placements} shadows={shadows} />)}
+    {result.asset?.lowParts?.map((part, i) => <AssetPart key={`far-${i}`} part={part} placements={placements} shadows={false} />)}
   </group>;
 }

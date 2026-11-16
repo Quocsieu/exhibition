@@ -1,164 +1,135 @@
-# Virtual Expo 2.5D — Website Triển Lãm Thương Mại Ảo (3-Day PoC)
+# Virtual Expo Plaza 3D — Website Triển Lãm Thương Mại Ảo
 
-Website triển lãm thương mại ảo 2.5D hoàn chỉnh với không gian 3D Isometric (React Three Fiber), di chuyển đa phương thức có tìm đường tránh vật cản (A*), đồng bộ nhiều khách tham quan thời gian thực (Socket.IO), cơ sở dữ liệu SQLite, tích hợp sản phẩm đa nguồn (URL JSON-LD / Open Graph, CSV, JSON) và bảng điều khiển quản trị (Admin Dashboard).
+Website triển lãm thương mại ảo 3D (**Virtual Expo Plaza 3D**) xây dựng trên kiến trúc **npm Workspaces Monorepo (`FE` + `BE`)** với không gian quảng trường 3D (React Three Fiber + Three.js + GLB), 6 gian hàng V2 gồm 36 vị trí trưng bày sản phẩm (`Product Slots`), điều khiển nhân vật đa phương thức (`WASD` + `Click-to-Move` tìm đường A* + Joystick cảm ứng), đồng bộ nhiều khách tham quan thời gian thực (`Socket.IO`), cơ sở dữ liệu `SQLite` (`node:sqlite`), và trang quản trị (`Admin Dashboard`).
 
 ---
 
 ## 1. Cấu trúc Thư mục Dự án (`FE` & `BE`)
 
-Dự án được tổ chức thành hai thư mục ứng dụng chính `FE` và `BE` thông qua `npm workspaces`:
-
 ```text
-virtual-expo/
-│
-├── FE/
+exhibition/
+├── FE/                               # Ứng dụng Web 3D Frontend (React 18 + TypeScript + Vite + R3F)
 │   ├── public/
-│   │   ├── models/
-│   │   ├── textures/
-│   │   └── images/
-│   │
+│   │   └── models/                   # Các model 3D (.glb) phục vụ runtime & fallback
+│   │       ├── booths/               # 6 gian hàng V2 (v2/, kinetix-v2/) & fallback V1 (roofless-v1/)
+│   │       ├── env/                  # Cây xanh, ghế gỗ, ô dù (umbrella), bồn cây, đèn đường, tòa nhà
+│   │       └── exterior/             # Đài phun nước trung tâm (7b_tCaBRLCI.glb) & tài liệu bản quyền CC-BY
 │   ├── src/
-│   │   ├── scene/
-│   │   │   ├── ExhibitionScene.tsx
-│   │   │   ├── Environment.tsx
-│   │   │   ├── Booth.tsx
-│   │   │   ├── LocalPlayer.tsx
-│   │   │   └── RemotePlayers.tsx
-│   │   ├── controls/
-│   │   │   ├── useKeyboard.ts
-│   │   │   ├── useClickToMove.ts
-│   │   │   └── MobileJoystick.tsx
-│   │   ├── components/
-│   │   │   ├── BoothPanel.tsx
-│   │   │   ├── ProductPanel.tsx
-│   │   │   └── LoadingScreen.tsx
-│   │   ├── pages/
-│   │   │   ├── ExhibitionPage.tsx
-│   │   │   └── AdminPage.tsx
-│   │   ├── hooks/
-│   │   │   └── useRealtime.ts
-│   │   ├── services/
-│   │   │   └── api.ts
-│   │   ├── types/
-│   │   │   └── expo.ts
-│   │   ├── App.tsx
-│   │   └── main.tsx
+│   │   ├── components/               # BoothPanel, ProductPanel, LoadingScreen
+│   │   ├── config/                   # Cấu hình endpoint REST API & Socket.IO (apiConfig.ts)
+│   │   ├── controls/                 # Điều khiển WASD (useKeyboard), Click-to-Move (A*), MobileJoystick
+│   │   ├── hooks/                    # Đồng bộ thời gian thực Socket.IO (useRealtime.ts)
+│   │   ├── pages/                    # ExhibitionPage (khuôn viên 3D) & AdminPage (quản trị /#admin)
+│   │   ├── scene/                    # ExhibitionScene, Environment, ExteriorAssets, Booth, RooflessBoothShell,
+│   │   │                             # ShopShowcaseStage, LocalPlayer, RemotePlayers, sceneTextures
+│   │   ├── services/                 # REST API client (api.ts)
+│   │   ├── types/                    # Định nghĩa kiểu dữ liệu, va chạm & tìm đường A* (expo.ts)
+│   │   └── __tests__/                # Unit tests cho va chạm, tìm đường A*, camera, 36 slots & textures
+│   ├── booth-modeling/               # Pipeline script Python Blender tái tạo gian hàng V2 & tối ưu model
+│   ├── scripts/                      # Script hỗ trợ xuất GLB thủ tục (generateGlbAssets.ts)
 │   ├── package.json
 │   └── vite.config.ts
 │
-├── BE/
+├── BE/                               # Máy chủ Backend (Node.js + Express + Socket.IO + node:sqlite)
 │   ├── src/
-│   │   ├── routes/
-│   │   │   └── apiRoutes.ts
-│   │   ├── controllers/
-│   │   │   └── expoController.ts
-│   │   ├── services/
-│   │   │   └── expoService.ts
-│   │   ├── realtime/
-│   │   │   └── socketServer.ts
-│   │   ├── integrations/
-│   │   │   └── productAdapter.ts
-│   │   ├── database/
-│   │   │   └── db.ts
-│   │   ├── middleware/
-│   │   │   └── adminAuth.ts
-│   │   ├── schemas/
-│   │   │   └── expoSchemas.ts
-│   │   └── server.ts
-│   ├── data/
+│   │   ├── controllers/              # Xử lý nghiệp vụ HTTP (expoController.ts)
+│   │   ├── database/                 # Khởi tạo & seed SQLite tự động (db.ts)
+│   │   ├── integrations/             # Trích xuất sản phẩm từ URL / JSON / CSV (productAdapter.ts)
+│   │   ├── middleware/               # Xác thực token quản trị (adminAuth.ts)
+│   │   ├── realtime/                 # Đồng bộ vị trí khách & cập nhật dữ liệu (socketServer.ts)
+│   │   ├── routes/                   # Định tuyến REST API /api/* (apiRoutes.ts)
+│   │   ├── schemas/                  # Validation Zod & dữ liệu mẫu mặc định (expoSchemas.ts)
+│   │   ├── services/                 # Tầng dịch vụ nghiệp vụ (expoService.ts)
+│   │   ├── server.ts                 # Điểm vào chính của Backend (cổng mặc định 4000)
+│   │   └── __tests__/                # Integration tests cho REST API, Auth, SSRF & Socket.IO
 │   └── package.json
 │
-├── .env.example
+├── qa-reports/                       # Tài liệu đặc tả cảnh quan V4.1 & script kiểm thử hồi quy
+├── .env.example                      # File mẫu cấu hình biến môi trường (không chứa khóa bí mật)
 ├── .gitignore
-├── package.json
+├── package.json                      # Cấu hình npm Workspaces gốc (FE, BE)
+├── vercel.json                       # Cấu hình triển khai Frontend trên Vercel
 └── README.md
 ```
 
 ---
 
-## 2. Yêu cầu Hệ thống & Cài đặt
+## 2. Yêu cầu Hệ thống & Cài đặt Nhanh (Clone & Setup)
 
-- **Node.js**: `>= 22.5.0` (Sử dụng module `node:sqlite` tích hợp sẵn trong Node.js 22, không cần trình biên dịch C++).
-- **npm**: `>= 10.0.0`.
+- **Node.js**: Bắt buộc **`>= 22.5.0`** (khuyến nghị Node `22.20.0` LTS) vì Backend sử dụng module tích hợp sẵn `node:sqlite` (`DatabaseSync`), không cần cài trình biên dịch C++.
+- **npm**: `>= 10.0.0` (hỗ trợ `npm workspaces`).
 
 ```bash
-# 1. Cài đặt toàn bộ dependencies cho cả FE và BE từ thư mục gốc
+# 1. Clone repository về máy
+git clone <repository-url>
+cd exhibition
+
+# 2. Cài đặt toàn bộ dependencies cho cả Root, FE và BE
 npm install
 
-# 2. (Tùy chọn) Sao chép cấu hình môi trường
+# 3. (Tùy chọn) Tạo file .env từ file mẫu .env.example
 cp .env.example .env
 ```
 
-Thông tin đăng nhập Quản trị (Admin Dashboard) mặc định:
-- **Username (`ADMIN_USERNAME`)**: `admin`
-- **Password (`ADMIN_PASSWORD`)**: `expo-admin-2026`
+> **Lưu ý:** Dự án có thể chạy ngay lập tức sau khi `npm install` mà không bắt buộc phải tạo file `.env` (Backend tự động dùng cổng `4000` và tự động khởi tạo cơ sở dữ liệu SQLite mẫu tại `BE/data/expo.db`).
 
 ---
 
-## 3. Lệnh Chạy & Kiểm thử từ Thư mục Gốc
+## 3. Các Lệnh Chạy, Kiểm thử & Build
 
-- **Chạy đồng thời `FE` và `BE` (Development)**:
-  ```bash
-  npm run dev
-  ```
-  - **Khuôn viên Triển lãm 3D (`FE`)**: `http://localhost:5173`
-  - **Dashboard Quản trị**: `http://localhost:5173/#admin` (hoặc bấm nút **⚙️ Quản trị (Dashboard)** trên thanh HUD)
-  - **Backend (`BE`)**: `http://localhost:4000` (SQLite tự động tạo tại `BE/data/expo.db` với 6 gian hàng và 12 sản phẩm mẫu)
+| Lệnh | Mô tả chi tiết |
+|---|---|
+| `npm run dev` | Chạy song song cả Backend (`http://localhost:4000`) và Frontend (`http://localhost:5173`). |
+| `npm run dev:be` | Chỉ chạy Backend ở chế độ theo dõi thay đổi (`tsx watch src/server.ts` tại `http://localhost:4000`). |
+| `npm run dev:fe` | Chỉ chạy Frontend Vite dev server (`http://localhost:5173`, tự động proxy `/api` và `/socket.io` sang cổng `4000`). |
+| `npm run typecheck` | Kiểm tra kiểu dữ liệu TypeScript (`tsc --noEmit`) trên cả `BE` và `FE`. |
+| `npm run build` | Biên dịch bản Production cho cả `BE` (`BE/dist`) và `FE` (`FE/dist`). |
+| `npm test` | Chạy toàn bộ 31 bài kiểm thử tự động (`vitest run`) cho cả `FE` (22 tests) và `BE` (9 tests). |
+| `npm start` | Chạy bản build Production của Backend (`node BE/dist/server.js`). |
 
-- **Kiểm tra kiểu dữ liệu TypeScript (`FE` + `BE`)**:
-  ```bash
-  npm run typecheck
-  ```
-
-- **Build Production (`FE` + `BE`)**:
-  ```bash
-  npm run build
-  ```
-
-- **Chạy kiểm thử tự động (Vitest)**:
-  ```bash
-  npm run test
-  ```
+### Địa chỉ Truy cập Khi Chạy Local
+- **Không gian Triển lãm 3D (`FE`)**: `http://localhost:5173`
+- **Bảng điều khiển Quản trị (`Admin Dashboard`)**: `http://localhost:5173/#admin`
+  - Tài khoản PoC mặc định khi chưa đặt biến môi trường: Username `admin` / Password `expo-admin-2026`
+- **Kiểm tra trạng thái Backend (`API Healthcheck`)**: `http://localhost:4000/api/health`
 
 ---
 
-## 4. Hướng dẫn Trình diễn Demo (5 Phút)
+## 4. Cấu hình Biến Môi trường (`.env`)
 
-1. **Tham quan 2.5D & Điều khiển (DAY 1)**:
-   - Mở `http://localhost:5173`.
-   - Dùng phím `WASD` hoặc phím mũi tên để đi dạo quanh sân triển lãm, thử va chạm vào gian hàng hoặc đài phun nước trung tâm (nhân vật trượt dọc cạnh tường, không đi xuyên vật cản).
-   - Click chuột xuống mặt đất phía sau đài phun nước để xem nhân vật tự động tìm đường **A*** (vẽ đường nét đứt màu vàng) đi vòng qua vật cản. Bấm `WASD` khi đang đi để thấy lộ trình tự động lập tức hủy.
-   - Kéo **Joystick cảm ứng** ở góc dưới bên trái.
-2. **Đồng bộ Realtime Nhiều Khách (DAY 2)**:
-   - Mở thêm cửa sổ trình duyệt thứ hai tại `http://localhost:5173`.
-   - Quan sát số khách trực tuyến tăng lên `2`, hai nhân vật nhìn thấy nhau di chuyển thời gian thực với chuyển động nội suy mượt mà, và đổi tên/màu sắc trực tiếp trên thanh HUD.
-3. **Xem Gian hàng & Sản phẩm (DAY 2)**:
-   - Click vào một gian hàng bất kỳ để mở `BoothPanel` (`<dialog>`), xem danh sách sản phẩm kèm ảnh và giá bán.
-   - Bấm **"Xem chi tiết"** để mở `ProductPanel`, xem bộ sưu tập ảnh, phát video giới thiệu sản phẩm và bấm **"Mua tại website nguồn ↗"** hoặc **"Liên hệ tư vấn"**.
-4. **Quản trị & Import Đa Nguồn (DAY 3)**:
-   - Bấm **"⚙️ Quản trị (Dashboard)"**, đăng nhập (`admin` / `expo-admin-2026`).
-   - Thêm/sửa/xóa gian hàng hoặc sản phẩm.
-   - Sang tab **Import Sản phẩm (URL / JSON / CSV)** để thử trích xuất sản phẩm từ URL công khai (JSON-LD / Open Graph) hoặc import hàng loạt qua JSON/CSV.
+Sao chép `.env.example` thành `.env` nếu muốn tùy chỉnh cấu hình:
+
+| Biến môi trường | Phân hệ | Giá trị mặc định (Dev) | Công dụng |
+|---|---|---|---|
+| `PORT` | `BE` | `4000` | Cổng lắng nghe HTTP & Socket.IO của Backend. |
+| `CORS_ORIGIN` | `BE` | `*` | Danh sách origin được phép gọi API (phân tách bằng dấu phẩy). |
+| `SQLITE_DB_PATH` | `BE` | `./data/expo.db` | Đường dẫn lưu file cơ sở dữ liệu SQLite. |
+| `ADMIN_USERNAME` | `BE` | `admin` | Tên đăng nhập trang Quản trị (`/#admin`). |
+| `ADMIN_PASSWORD` | `BE` | `expo-admin-2026` | Mật khẩu trang Quản trị (**Bắt buộc đổi trên môi trường Production**). |
+| `ADMIN_TOKEN_SECRET` | `BE` | *(Sinh ngẫu nhiên 32 bytes)* | Khóa ký HMAC-SHA256 cho Bearer Token của Admin. |
+| `VITE_API_URL` | `FE` | `""` *(Dùng proxy Vite)* | URL gốc của Backend API khi triển khai Production. |
+| `VITE_SOCKET_URL` | `FE` | `""` *(Dùng proxy Vite)* | URL gốc của máy chủ Socket.IO khi triển khai Production. |
+| `VITE_USE_REMOTE_API_IN_DEV` | `FE` | `false` | Đặt `true` nếu muốn Frontend local gọi thẳng lên Backend từ xa. |
 
 ---
 
-## 5. Hướng dẫn Deploy Production
+## 5. Hướng dẫn Triển khai (Deployment)
 
-1. Thiết lập các biến môi trường trên máy chủ:
-   - `PORT=4000`
-   - `SQLITE_DB_PATH=./data/expo.db`
-   - `ADMIN_USERNAME=<admin-user>`
-   - `ADMIN_PASSWORD=<strong-password>`
-   - `ADMIN_TOKEN_SECRET=<random-64-char-secret>`
-   - `VITE_API_URL=https://api.your-domain.com`
-   - `VITE_SOCKET_URL=https://api.your-domain.com`
-2. Chạy `npm run build` để tạo bản build tại `BE/dist` và `FE/dist`.
-3. Chạy `npm run start` để khởi động Backend (`BE/dist/server.js`) và phục vụ thư mục tĩnh `FE/dist` qua Nginx / Cloudflare Pages / Vercel.
+1. **Backend (`BE` — Render / VPS / Docker)**:
+   - Build command: `npm install && npm run build -w BE`
+   - Start command: `npm run start -w BE`
+   - Thiết lập các biến môi trường `PORT`, `CORS_ORIGIN`, `SQLITE_DB_PATH`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_TOKEN_SECRET`.
+2. **Frontend (`FE` — Vercel / Cloudflare Pages / Nginx)**:
+   - Cấu hình đã có sẵn trong `vercel.json` ở thư mục gốc (`buildCommand: "npm run build -w FE"`, `outputDirectory: "FE/dist"`).
+   - Thiết lập `VITE_API_URL` và `VITE_SOCKET_URL` trỏ tới địa chỉ HTTPS của Backend.
 
 ---
 
-## 6. Các Hạn chế Trong Phạm vi PoC
+## 6. Các File Local Không Lưu Trong Git (`.gitignore`)
 
-1. **URL Import**: Các trang thương mại điện tử bật CAPTCHA / Cloudflare chống bot hoặc chỉ render bằng client-side JS sẽ không thể trích xuất HTML tĩnh; hệ thống tự động thông báo và chuyển sang biểu mẫu nhập thủ công hoặc import CSV/JSON.
-2. **Quy mô tải**: Danh sách khách online lưu trong RAM của một tiến trình Node.js, phù hợp quy mô PoC 10–30 khách đồng thời.
-3. **Mô hình 3D**: Sử dụng Low-Poly Procedural Geometry để đảm bảo tốc độ tải nhanh và không phụ thuộc vào asset thương mại bên ngoài.
+Để giữ cho repository gọn nhẹ (`~96 MB`) và an toàn khi chia sẻ nhóm, các file sau được `.gitignore` loại trừ và **thành viên nhóm không cần có các file này để chạy dự án**:
+
+- `node_modules/`, `FE/dist/`, `BE/dist/`: Được tạo tự động khi chạy `npm install` và `npm run build`.
+- `.env`, `.env.local`: File cấu hình môi trường cá nhân tại máy local.
+- `BE/data/*.db*`, `data/*.db*`: Cơ sở dữ liệu SQLite tự động khởi tạo và nạp sẵn 6 gian hàng + 12 sản phẩm mẫu ngay lần chạy đầu tiên.
+- `FE/public/models/env/*_4k.glb`, `FE/public/models/env/Building01.glb`, `FE/booth-modeling/tools/`, `FE/booth-modeling/sand3d-repo/`: Các file model gốc 4K dung lượng lớn (`>100 MB`) và bộ cài Blender chỉ dùng khi muốn biên tập lại mesh 3D gốc; toàn bộ 25 model `.glb` đã tối ưu phục vụ website đều đã được commit sẵn trong `FE/public/models/`.

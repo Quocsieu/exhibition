@@ -111,7 +111,6 @@ const BEACON_RING_GEOM = new THREE.RingGeometry(0.34, 0.48, 24);
 const BEACON_CORE_GEOM = new THREE.CircleGeometry(0.26, 20);
 
 const PLANT_BUSH_GEOM = new THREE.DodecahedronGeometry(0.28, 0);
-const PLANT_POT_GEOM = new THREE.CylinderGeometry(0.26, 0.2, 0.38, 10);
 
 // ============================================================================
 // Shared Module-Level Materials across all 6 booths
@@ -122,7 +121,6 @@ const DARK_NAVY_MAT = new THREE.MeshStandardMaterial({
   metalness: 0.25,
 });
 const SLATE_DARK_MAT = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.45 });
-const SLATE_MID_MAT = new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.5 });
 const WHITE_GLOSS_MAT = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.24 });
 const CREAM_WALL_MAT = new THREE.MeshStandardMaterial({ color: '#fffbeb', roughness: 0.55 });
 const CARPET_MAT = new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.72 });
