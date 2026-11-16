@@ -242,6 +242,7 @@ interface ExploreOrbitState {
   yaw: number;
   pitch: number;
   isDragging: boolean;
+  lastManualOrbitAt: number;
 }
 
 interface HybridCameraRigProps {
@@ -431,9 +432,14 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
         smoothedTpCamPos.current.copy(initTp.cameraPosition);
         smoothedTpLookAt.current.copy(initTp.lookAtTarget);
       } else {
-        // When following an auto-path from the quick-nav dropdown and user is not dragging camera,
-        // smoothly align orbit yaw behind the path direction.
-        if (hasActiveAutoPath && liveState === 'walk' && !orbitStateRef.current.isDragging) {
+        // When following an auto-path (Click-to-Move or quick-nav) and user is not actively dragging camera,
+        // smoothly align orbit yaw behind the character's movement direction.
+        if (
+          hasActiveAutoPath &&
+          liveState === 'walk' &&
+          !orbitStateRef.current.isDragging &&
+          performance.now() - orbitStateRef.current.lastManualOrbitAt > 1600
+        ) {
           const autoDiff = shortestAngleDiff(orbitStateRef.current.yaw, liveRotY);
           const autoAlpha = 1 - Math.exp(-3.6 * delta);
           orbitStateRef.current.yaw += autoDiff * autoAlpha;
@@ -523,6 +529,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
       yaw: playerTransformRef ? playerTransformRef.current.rotationY : player.rotationY,
       pitch: 0,
       isDragging: false,
+      lastManualOrbitAt: 0,
     });
     const activePointerIdRef = useRef<number | null>(null);
     const lastPointerPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -565,11 +572,9 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     const handleEnvironmentGroundClick = useCallback(
       (pt: Point2D) => {
         if (performance.now() < suppressClickUntilRef.current) return;
-        // In Third-Person Explore Mode, clicking/tapping the ground does NOT auto-walk
-        if (cameraMode === 'explore') return;
         onGroundClick(pt.x, pt.z);
       },
-      [cameraMode, onGroundClick]
+      [onGroundClick]
     );
 
     const handleBoothSelect = useCallback(
@@ -591,8 +596,8 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     const handlePointerDown = useCallback(
       (e: React.PointerEvent<HTMLDivElement>) => {
         if (cameraMode !== 'explore') return;
-        // On PC mouse, only rotate with Left Mouse Button (button === 0)
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        // On PC mouse, hold Right Mouse Button (button === 2) to rotate camera; Left Mouse Button clicks ground/booths
+        if (e.pointerType === 'mouse' && e.button !== 2) return;
         if (activePointerIdRef.current !== null) return;
 
         activePointerIdRef.current = e.pointerId;
@@ -618,6 +623,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             orbitStateRef.current.isDragging = true;
             setIsDraggingOrbit(true);
           }
+          orbitStateRef.current.lastManualOrbitAt = performance.now();
           const yawSens = e.pointerType === 'touch' ? 0.0068 : 0.0052;
           const pitchSens = e.pointerType === 'touch' ? 0.0046 : 0.0038;
           orbitStateRef.current.yaw -= dx * yawSens;
@@ -641,6 +647,15 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
       setIsDraggingOrbit(false);
     }, []);
 
+    const handleContextMenu = useCallback(
+      (e: React.MouseEvent<HTMLDivElement>) => {
+        if (cameraMode === 'explore') {
+          e.preventDefault();
+        }
+      },
+      [cameraMode]
+    );
+
     const handleWheel = useCallback(
       (e: React.WheelEvent<HTMLDivElement>) => {
         if (!onZoomChange || cameraMode === 'focus') return;
@@ -663,6 +678,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
         onPointerUp={handlePointerUpOrCancel}
         onPointerCancel={handlePointerUpOrCancel}
         onPointerLeave={handlePointerUpOrCancel}
+        onContextMenu={handleContextMenu}
         onWheel={handleWheel}
       >
         <Canvas

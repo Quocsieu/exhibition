@@ -128,12 +128,12 @@ export const ALL_TREES: {
 ];
 
 export const PLANTER_URN_POSITIONS: [number, number][] = [
-  [-5.8, 18.2],
-  [5.8, 18.2],
-  [-5.8, -17.5],
-  [5.8, -17.5],
-  [-17.2, -3.4],
-  [17.2, -3.4],
+  [-6.8, 17.4],
+  [6.8, 17.4],
+  [-6.8, -17.2],
+  [6.8, -17.2],
+  [-17.2, -4.8],
+  [17.2, -4.8],
 ];
 
 // 4 Cozy Perimeter Rest Lounge Zones (located in protected pedestrian promenade pockets, safely clear of all roadways & sightlines)
@@ -505,11 +505,17 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     })), []);
     const benchPlacements = useMemo<ExteriorPlacement[]>(() => ALL_BENCHES.map(b => ({ position: [b.x, .02, b.z], rotation: b.rotationY })), []);
     const planterBenchPlacements = useMemo<ExteriorPlacement[]>(() => {
+      const rowOffsetZ = 0.3155;
+      const colOffsetX = 0.60;
       return CENTRAL_PLANTER_ISLANDS.flatMap((island) => {
         const rot = island.benchOffsetZ > 0 ? 0 : Math.PI;
         return [
-          { position: [island.x - 0.6, 0.02, island.z] as [number, number, number], rotation: rot },
-          { position: [island.x + 0.6, 0.02, island.z] as [number, number, number], rotation: rot },
+          // Row 1 (Back)
+          { position: [island.x - colOffsetX, 0.02, island.z - rowOffsetZ] as [number, number, number], rotation: rot },
+          { position: [island.x + colOffsetX, 0.02, island.z - rowOffsetZ] as [number, number, number], rotation: rot },
+          // Row 2 (Front)
+          { position: [island.x - colOffsetX, 0.02, island.z + rowOffsetZ] as [number, number, number], rotation: rot },
+          { position: [island.x + colOffsetX, 0.02, island.z + rowOffsetZ] as [number, number, number], rotation: rot },
         ];
       });
     }, []);
@@ -660,6 +666,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           position={[0, 0, 0]}
           receiveShadow
           onClick={(e) => {
+            if (e.button !== undefined && e.button !== 0) return;
             e.stopPropagation();
             onGroundClick(e.point);
           }}

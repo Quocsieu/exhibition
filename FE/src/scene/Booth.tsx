@@ -594,30 +594,34 @@ export const Booth: React.FC<BoothProps> = React.memo(
     });
 
     const boothDecorPlacements = useMemo<ExteriorPlacement[]>(() => {
+      // Position planters cleanly outside the V2 booth plinth (X: ±3.62, Z: 2.72) and front steps (X: ±2.82, Z: 3.17)
+      // in front of the front facade corners (Task B)
+      const cornerX = 3.48;
+      const frontZ = 3.55;
       switch (theme) {
         case 'tech':
-          return [{ position: [-vw / 2 + 0.28, 0.02, vd / 2 + 0.15], rotation: 0.2 }];
+          return [{ position: [-cornerX, 0.02, frontZ], rotation: 0.2 }];
         case 'living':
           return [
-            { position: [-vw / 2 - 0.35, 0.02, vd / 2 + 0.15], rotation: 0.1 },
-            { position: [vw / 2 + 0.35, 0.02, vd / 2 + 0.15], rotation: -0.1 },
+            { position: [-cornerX, 0.02, frontZ], rotation: 0.15 },
+            { position: [cornerX, 0.02, frontZ], rotation: -0.15 },
           ];
         case 'coffee':
           return [
-            { position: [-vw / 2 - 0.35, 0.02, vd / 2 + 0.15], rotation: 0.3 },
-            { position: [vw / 2 + 0.35, 0.02, vd / 2 + 0.15], rotation: -0.3 },
+            { position: [-cornerX, 0.02, frontZ], rotation: 0.2 },
+            { position: [cornerX, 0.02, frontZ], rotation: -0.2 },
           ];
         case 'robotics':
-          return [{ position: [vw / 2 - 0.28, 0.02, vd / 2 + 0.15], rotation: -0.2 }];
+          return [{ position: [cornerX, 0.02, frontZ], rotation: -0.2 }];
         case 'design':
           return [
-            { position: [-vw / 2 + 0.32, 0.02, vd / 2 + 0.15], rotation: 0.4 },
-            { position: [vw / 2 - 0.32, 0.02, vd / 2 + 0.15], rotation: -0.4 },
+            { position: [-cornerX, 0.02, frontZ], rotation: 0.2 },
+            { position: [cornerX, 0.02, frontZ], rotation: -0.2 },
           ];
         case 'energy':
           return [
-            { position: [-vw / 2 - 0.35, 0.02, vd / 2 + 0.15], rotation: 0.15 },
-            { position: [vw / 2 + 0.35, 0.02, vd / 2 + 0.15], rotation: -0.15 },
+            { position: [-cornerX, 0.02, frontZ], rotation: 0.15 },
+            { position: [cornerX, 0.02, frontZ], rotation: -0.15 },
           ];
         default:
           return [];

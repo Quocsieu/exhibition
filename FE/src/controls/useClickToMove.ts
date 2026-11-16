@@ -139,6 +139,11 @@ export function useClickToMove({
       let nextState: 'idle' | 'walk' = 'idle';
 
       if (manualLen > 0.05) {
+        if (pathRef.current.length > 0) {
+          pathRef.current = [];
+          pendingBoothRef.current = null;
+          setActivePath([]);
+        }
         const localX = moveX / Math.max(1, manualLen);
         const localZ = moveZ / Math.max(1, manualLen);
         let normX = localX;

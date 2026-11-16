@@ -506,11 +506,6 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
   const handleGroundClick = useCallback(
     (x: number, z: number) => {
-      // In Third-Person Explore Mode (`cameraMode === 'explore'`), mouse/touch on the canvas
-      // is reserved for rotating the camera — clicking/tapping the ground does NOT auto-walk.
-      if (cameraMode === 'explore') {
-        return;
-      }
       if (cameraMode === 'focus') {
         setCameraMode('explore');
         setSelectedBooth(null);
