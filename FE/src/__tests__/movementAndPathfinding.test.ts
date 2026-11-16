@@ -63,6 +63,18 @@ import {
   DEFAULT_PRODUCTION_BACKEND_URL,
   normalizeBackendOrigin,
 } from '../config/apiConfig';
+import {
+  buildBoothPresentationPlan,
+  computeNpcPlacement,
+  filterValidBoothSlotProducts,
+  formatVietnameseSpeechPrice,
+  getNpcAssistantProfile,
+  sanitizeSpeechText,
+  selectVietnameseVoice,
+  verifyNpcPlacementSafety,
+} from '../services/npcPresentationService';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => {
   it('enforces world boundary limits accurately', () => {
@@ -829,5 +841,141 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
         expect(frustumBottomY).toBeLessThanOrEqual(0.22);
       }
     }
+  });
+
+  it('places 6 Vietnamese Female 3D Sales Assistant NPCs beside all 6 booths without overlapping slots, approach paths, or booth structures', () => {
+    const worldPositions = new Set<string>();
+    const profileNames = new Set<string>();
+
+    for (const booth of DEFAULT_BOOTHS) {
+      const profile = getNpcAssistantProfile(booth);
+      expect(profile.assistantName.length).toBeGreaterThan(3);
+      expect(profile.roleTitle.length).toBeGreaterThan(5);
+      profileNames.add(profile.assistantName);
+
+      const placement = computeNpcPlacement(booth);
+      expect(placement.localX).toBeCloseTo(3.18, 2);
+      expect(placement.localY).toBeCloseTo(0.02, 3);
+      expect(placement.localZ).toBeCloseTo(2.45, 2);
+      expect(isWithinWorldBounds(placement.worldX, placement.worldZ)).toBe(true);
+
+      const safety = verifyNpcPlacementSafety(booth);
+      expect(safety.valid).toBe(true);
+      expect(safety.withinWorldBounds).toBe(true);
+      expect(safety.clearOfApproachPoint).toBe(true);
+      expect(safety.clearOfProductSlots).toBe(true);
+      expect(safety.clearOfBoothInterior).toBe(true);
+
+      const posKey = `${placement.worldX.toFixed(2)},${placement.worldZ.toFixed(2)}`;
+      worldPositions.add(posKey);
+    }
+
+    expect(worldPositions.size).toBe(6);
+    expect(profileNames.size).toBe(6);
+  });
+
+  it('builds sequential Vietnamese product presentation scripts from valid booth slots and skips empty/invalid slots cleanly', () => {
+    for (const booth of DEFAULT_BOOTHS) {
+      const slotViews = buildBoothSlotViews(booth.id, DEFAULT_PRODUCTS, FALLBACK_SLOT_ASSIGNMENTS);
+      const validProducts = filterValidBoothSlotProducts(booth.id, slotViews, DEFAULT_PRODUCTS);
+      expect(validProducts.length).toBe(2);
+      expect(validProducts[0].slot.slotId).toBe('slot_01');
+      expect(validProducts[0].slot.slotId < validProducts[1].slot.slotId).toBe(true);
+
+      const plan = buildBoothPresentationPlan(booth, slotViews, DEFAULT_PRODUCTS);
+      expect(plan.totalProducts).toBe(2);
+      // 1 greeting + 2 products + 1 closing = 4 sequential steps
+      expect(plan.steps.length).toBe(4);
+      expect(plan.steps[0].type).toBe('GREETING');
+      expect(plan.steps[0].animation).toBe('WAVE');
+      expect(plan.steps[1].type).toBe('PRODUCT');
+      expect(plan.steps[1].productIndex).toBe(1);
+      expect(plan.steps[1].animation).toBe('PRESENT');
+      expect(plan.steps[2].type).toBe('PRODUCT');
+      expect(plan.steps[2].productIndex).toBe(2);
+      expect(plan.steps[2].animation).toBe('PRESENT');
+      expect(plan.steps[3].type).toBe('CLOSING');
+      expect(plan.steps[3].animation).toBe('WAVE');
+
+      for (const step of plan.steps) {
+        expect(step.text.includes('undefined')).toBe(false);
+        expect(step.text.includes('null')).toBe(false);
+        expect(step.text.includes('<')).toBe(false);
+        expect(step.text.length).toBeGreaterThan(20);
+      }
+    }
+
+    // Verify empty booth fallback (0 products assigned)
+    const emptyBooth = DEFAULT_BOOTHS[0];
+    const emptySlots = buildBoothSlotViews(emptyBooth.id, [], []);
+    const emptyPlan = buildBoothPresentationPlan(emptyBooth, emptySlots, []);
+    expect(emptyPlan.totalProducts).toBe(0);
+    expect(emptyPlan.steps.length).toBe(1);
+    expect(emptyPlan.steps[0].type).toBe('GREETING');
+    expect(emptyPlan.steps[0].text).toContain('chưa có sản phẩm');
+
+    // Verify foreign product (belonging to another booth) placed into an empty slot is strictly rejected
+    const tamperedSlots = buildBoothSlotViews(DEFAULT_BOOTHS[0].id, DEFAULT_PRODUCTS, FALLBACK_SLOT_ASSIGNMENTS);
+    tamperedSlots[4] = {
+      ...tamperedSlots[4],
+      product: DEFAULT_PRODUCTS.find((p) => p.boothId !== DEFAULT_BOOTHS[0].id) || null,
+    };
+    const filteredTampered = filterValidBoothSlotProducts(DEFAULT_BOOTHS[0].id, tamperedSlots, DEFAULT_PRODUCTS);
+    expect(filteredTampered.length).toBe(2);
+
+    // Verify speech sanitization and Vietnamese price formatting
+    expect(sanitizeSpeechText('<b>Camera AI</b> undefined null')).toBe('Camera AI');
+    expect(formatVietnameseSpeechPrice(6850000, 'VND')).toContain('6.850.000 đồng');
+    expect(formatVietnameseSpeechPrice(0, 'VND')).toBe('');
+  });
+
+  it('prioritizes Vietnamese female Web Speech API voices and never selects an English voice for Vietnamese speech', () => {
+    const englishOnlyVoices = [
+      { lang: 'en-US', name: 'Microsoft Zira - English (United States)', default: true, localService: true, voiceURI: 'zira' },
+      { lang: 'en-GB', name: 'Google UK English Female', default: false, localService: false, voiceURI: 'uk' },
+    ] as unknown as SpeechSynthesisVoice[];
+
+    expect(selectVietnameseVoice(englishOnlyVoices)).toBeNull();
+
+    const mixedVoices = [
+      ...englishOnlyVoices,
+      { lang: 'vi-VN', name: 'Microsoft NamMinh - Vietnamese (Vietnam)', default: false, localService: true, voiceURI: 'namminh' },
+      { lang: 'vi-VN', name: 'Microsoft HoaiMy Online (Natural) - Vietnamese (Vietnam)', default: false, localService: false, voiceURI: 'hoaimy' },
+    ] as unknown as SpeechSynthesisVoice[];
+
+    const chosen = selectVietnameseVoice(mixedVoices);
+    expect(chosen).not.toBeNull();
+    expect(chosen?.name).toContain('HoaiMy');
+  });
+
+  it('verifies the 3D Vietnamese Female Assistant GLB asset exists and embeds all 4 required animation clips (IDLE, WAVE, TALKING, PRESENT)', () => {
+    const glbPath = path.resolve(__dirname, '../../public/models/npc/vietnamese_female_assistant.glb');
+    expect(fs.existsSync(glbPath)).toBe(true);
+
+    const buffer = fs.readFileSync(glbPath);
+    // GLB header magic 'glTF' (0x46546C67) and version 2
+    expect(buffer.readUInt32LE(0)).toBe(0x46546c67);
+    expect(buffer.readUInt32LE(4)).toBe(2);
+    // Compact size (< 3 MB)
+    expect(buffer.byteLength).toBeGreaterThan(200_000);
+    expect(buffer.byteLength).toBeLessThan(3_000_000);
+
+    // Parse JSON chunk of GLB to inspect animations and materials
+    const jsonChunkLength = buffer.readUInt32LE(12);
+    const jsonChunkType = buffer.readUInt32LE(16);
+    expect(jsonChunkType).toBe(0x4e4f534a); // 'JSON'
+    const gltfJson = JSON.parse(buffer.subarray(20, 20 + jsonChunkLength).toString('utf8')) as {
+      animations?: { name: string }[];
+      materials?: { name: string }[];
+    };
+
+    const animNames = (gltfJson.animations ?? []).map((a) => a.name).sort();
+    expect(animNames).toEqual(['IDLE', 'PRESENT', 'TALKING', 'WAVE']);
+
+    const matNames = (gltfJson.materials ?? []).map((m) => m.name);
+    expect(matNames).toContain('NpcSkin');
+    expect(matNames).toContain('NpcHair');
+    expect(matNames).toContain('NpcTunicIvory');
+    expect(matNames).toContain('NpcBrandAccent');
   });
 });

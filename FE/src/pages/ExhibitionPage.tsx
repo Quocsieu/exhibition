@@ -15,8 +15,16 @@ import { ExhibitionScene, type CameraViewMode } from '../scene/ExhibitionScene';
 import { useClickToMove, type PlayerTransform } from '../controls/useClickToMove';
 import { MobileJoystick } from '../controls/MobileJoystick';
 import { BoothPanel } from '../components/BoothPanel';
+import { NpcAssistantPanel } from '../components/NpcAssistantPanel';
 import { LoadingScreen } from '../components/LoadingScreen';
 import { useRealtime } from '../hooks/useRealtime';
+import {
+  type NpcAnimationClipName,
+  type NpcPresentationPlan,
+  type NpcSessionStatus,
+  buildBoothPresentationPlan,
+  selectVietnameseVoice,
+} from '../services/npcPresentationService';
 import {
   apiClient,
   buildBoothSlotViews,
@@ -126,6 +134,71 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   const [editingProfile, setEditingProfile] = useState(false);
   const [draftName, setDraftName] = useState(playerName);
   const [draftColor, setDraftColor] = useState(playerColor);
+
+  // NPC Sales Assistant Presentation State Machine & Speech Synthesis Refs
+  const [npcPlan, setNpcPlan] = useState<NpcPresentationPlan | null>(null);
+  const [npcStatus, setNpcStatus] = useState<NpcSessionStatus>('IDLE');
+  const [npcStepIndex, setNpcStepIndex] = useState<number>(0);
+  const [npcAnimation, setNpcAnimation] = useState<NpcAnimationClipName>('IDLE');
+  const [npcMuted, setNpcMuted] = useState<boolean>(false);
+  const [hasVietnameseVoice, setHasVietnameseVoice] = useState<boolean>(false);
+  const npcMutedRef = useRef<boolean>(false);
+  npcMutedRef.current = npcMuted;
+  const utteranceTokenRef = useRef<number>(0);
+  const stepTimerRef = useRef<number | null>(null);
+  const animTimerRef = useRef<number | null>(null);
+
+  const cancelNpcAudioAndTimers = useCallback(() => {
+    utteranceTokenRef.current += 1;
+    if (stepTimerRef.current !== null) {
+      window.clearTimeout(stepTimerRef.current);
+      stepTimerRef.current = null;
+    }
+    if (animTimerRef.current !== null) {
+      window.clearTimeout(animTimerRef.current);
+      animTimerRef.current = null;
+    }
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {
+      // Ignore speechSynthesis errors in restricted environments
+    }
+  }, []);
+
+  const closeNpcSession = useCallback(() => {
+    cancelNpcAudioAndTimers();
+    setNpcPlan(null);
+    setNpcStatus('IDLE');
+    setNpcStepIndex(0);
+    setNpcAnimation('IDLE');
+  }, [cancelNpcAudioAndTimers]);
+
+  // Detect Vietnamese voice support (`vi-VN` / `vi`)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const syncVoices = () => {
+      try {
+        const voices = window.speechSynthesis.getVoices();
+        setHasVietnameseVoice(Boolean(selectVietnameseVoice(voices)));
+      } catch {
+        setHasVietnameseVoice(false);
+      }
+    };
+    syncVoices();
+    window.speechSynthesis.addEventListener?.('voiceschanged', syncVoices);
+    return () => {
+      window.speechSynthesis.removeEventListener?.('voiceschanged', syncVoices);
+    };
+  }, []);
+
+  // Ensure speech & timers are always stopped on unmount
+  useEffect(() => {
+    return () => {
+      cancelNpcAudioAndTimers();
+    };
+  }, [cancelNpcAudioAndTimers]);
 
   const nameInputId = useId();
   const boothSelectId = useId();
@@ -270,6 +343,9 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
   const handleSelectBooth = useCallback(
     (booth: Booth) => {
+      if (npcPlan && npcPlan.booth.id !== booth.id) {
+        closeNpcSession();
+      }
       setCameraMode((prev) => {
         if (prev === 'overview' || prev === 'explore') {
           previousExteriorModeRef.current = prev;
@@ -283,7 +359,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       setZoom(FOCUS_DEFAULT_ZOOM);
       void refreshExpoDataSilently();
     },
-    [booths, refreshExpoDataSilently]
+    [booths, closeNpcSession, npcPlan, refreshExpoDataSilently]
   );
 
   useEffect(() => {
@@ -401,31 +477,34 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   emitMovementRef.current = emitMovement;
 
   const handleReturnToExplore = useCallback(() => {
+    closeNpcSession();
     const restoredMode = previousExteriorModeRef.current;
     setCameraMode(restoredMode);
     setSelectedBooth(null);
     setSelectedProduct(null);
     setFocusedBooth(null);
     setZoom(restoredMode === 'overview' ? OVERVIEW_DEFAULT_ZOOM : EXPLORE_DEFAULT_ZOOM);
-  }, []);
+  }, [closeNpcSession]);
 
   const handleSwitchToOverview = useCallback(() => {
+    closeNpcSession();
     previousExteriorModeRef.current = 'overview';
     setCameraMode('overview');
     setSelectedBooth(null);
     setSelectedProduct(null);
     setFocusedBooth(null);
     setZoom(OVERVIEW_DEFAULT_ZOOM);
-  }, []);
+  }, [closeNpcSession]);
 
   const handleSwitchToExplore = useCallback(() => {
+    closeNpcSession();
     previousExteriorModeRef.current = 'explore';
     setCameraMode('explore');
     setSelectedBooth(null);
     setSelectedProduct(null);
     setFocusedBooth(null);
     setZoom(EXPLORE_DEFAULT_ZOOM);
-  }, []);
+  }, [closeNpcSession]);
 
   // Consistent WASD / Arrow behavior during Booth Focus Mode:
   // Pressing movement keys automatically exits Booth Focus back to Explore Mode
@@ -455,6 +534,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         e.code === 'ArrowLeft' ||
         e.code === 'ArrowRight'
       ) {
+        closeNpcSession();
         setCameraMode('explore');
         setSelectedBooth(null);
         setFocusedBooth(null);
@@ -464,11 +544,12 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [cameraMode]);
+  }, [cameraMode, closeNpcSession]);
 
   const handleJoystickMove = useCallback(
     (dx: number, dz: number) => {
       if ((dx !== 0 || dz !== 0) && cameraMode === 'focus') {
+        closeNpcSession();
         setCameraMode('explore');
         setSelectedBooth(null);
         setFocusedBooth(null);
@@ -476,7 +557,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       }
       setJoystickInput(dx, dz);
     },
-    [cameraMode, setJoystickInput]
+    [cameraMode, closeNpcSession, setJoystickInput]
   );
 
   const handleProfileSubmit = (e: React.FormEvent) => {
@@ -535,6 +616,186 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     }
     return counts;
   }, [booths, products, slotsByBooth]);
+
+  const playNpcStep = useCallback(
+    (plan: NpcPresentationPlan, stepIdx: number, mutedOverride?: boolean) => {
+      cancelNpcAudioAndTimers();
+      const token = utteranceTokenRef.current;
+
+      if (stepIdx < 0 || stepIdx >= plan.steps.length) {
+        setNpcStatus('COMPLETED');
+        setNpcAnimation('IDLE');
+        return;
+      }
+
+      const step = plan.steps[stepIdx];
+      setNpcStepIndex(stepIdx);
+      setNpcStatus(stepIdx === 0 ? 'GREETING' : 'PRESENTING');
+
+      // Initial gesture animation (`WAVE` for greeting/closing, `PRESENT` for product),
+      // transitioning smoothly to `TALKING` while speaking
+      const initialAnim: NpcAnimationClipName =
+        step.type === 'PRODUCT' ? 'PRESENT' : 'WAVE';
+      setNpcAnimation(initialAnim);
+
+      animTimerRef.current = window.setTimeout(() => {
+        if (utteranceTokenRef.current === token) {
+          setNpcAnimation('TALKING');
+        }
+      }, step.type === 'PRODUCT' ? 1600 : 1350);
+
+      const readingDurationMs = Math.min(8200, Math.max(2800, step.text.length * 48));
+      const effectiveMuted = mutedOverride !== undefined ? mutedOverride : npcMutedRef.current;
+
+      const advanceToNext = () => {
+        if (utteranceTokenRef.current !== token) return;
+        if (stepIdx + 1 < plan.steps.length) {
+          playNpcStep(plan, stepIdx + 1);
+        } else {
+          setNpcStatus('COMPLETED');
+          setNpcAnimation('IDLE');
+        }
+      };
+
+      let usedSpeechSynthesis = false;
+      if (!effectiveMuted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          const voices = window.speechSynthesis.getVoices();
+          const viVoice = selectVietnameseVoice(voices);
+          if (viVoice) {
+            setHasVietnameseVoice(true);
+            const utterance = new SpeechSynthesisUtterance(step.text);
+            utterance.lang = viVoice.lang || 'vi-VN';
+            utterance.voice = viVoice;
+            utterance.rate = 1.02;
+            utterance.pitch = 1.08;
+
+            utterance.onend = () => {
+              if (utteranceTokenRef.current !== token) return;
+              if (stepTimerRef.current !== null) {
+                window.clearTimeout(stepTimerRef.current);
+              }
+              stepTimerRef.current = window.setTimeout(advanceToNext, 380);
+            };
+
+            utterance.onerror = () => {
+              if (utteranceTokenRef.current !== token) return;
+              if (stepTimerRef.current === null) {
+                stepTimerRef.current = window.setTimeout(advanceToNext, 600);
+              }
+            };
+
+            window.speechSynthesis.speak(utterance);
+            usedSpeechSynthesis = true;
+          }
+        } catch {
+          usedSpeechSynthesis = false;
+        }
+      }
+
+      // Synchronized subtitle timer (or watchdog if Web Speech API does not fire onend in headless browsers)
+      const fallbackDelay = usedSpeechSynthesis ? readingDurationMs + 2400 : readingDurationMs;
+      stepTimerRef.current = window.setTimeout(advanceToNext, fallbackDelay);
+    },
+    [cancelNpcAudioAndTimers]
+  );
+
+  const handleActivateNpc = useCallback(
+    (booth: Booth) => {
+      const latestBooth = booths.find((b) => b.id === booth.id) || booth;
+      setCameraMode((prev) => {
+        if (prev === 'overview' || prev === 'explore') {
+          previousExteriorModeRef.current = prev;
+        }
+        return 'focus';
+      });
+      setSelectedBooth(latestBooth);
+      setFocusedBooth(latestBooth);
+      setSelectedProduct(null);
+      setZoom(FOCUS_DEFAULT_ZOOM);
+
+      const plan = buildBoothPresentationPlan(
+        latestBooth,
+        slotsByBooth[latestBooth.id],
+        products
+      );
+      setNpcPlan(plan);
+      playNpcStep(plan, 0);
+    },
+    [booths, playNpcStep, products, slotsByBooth]
+  );
+
+  const handleNpcPause = useCallback(() => {
+    if (!npcPlan) return;
+    if (stepTimerRef.current !== null) {
+      window.clearTimeout(stepTimerRef.current);
+      stepTimerRef.current = null;
+    }
+    if (animTimerRef.current !== null) {
+      window.clearTimeout(animTimerRef.current);
+      animTimerRef.current = null;
+    }
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.pause();
+      }
+    } catch {
+      // Ignore pause errors
+    }
+    setNpcStatus('PAUSED');
+    setNpcAnimation('IDLE');
+  }, [npcPlan]);
+
+  const handleNpcResume = useCallback(() => {
+    if (!npcPlan) return;
+    playNpcStep(npcPlan, npcStepIndex);
+  }, [npcPlan, npcStepIndex, playNpcStep]);
+
+  const handleNpcPrevious = useCallback(() => {
+    if (!npcPlan || npcStepIndex <= 0) return;
+    playNpcStep(npcPlan, npcStepIndex - 1);
+  }, [npcPlan, npcStepIndex, playNpcStep]);
+
+  const handleNpcNext = useCallback(() => {
+    if (!npcPlan || npcStepIndex >= npcPlan.steps.length - 1) return;
+    playNpcStep(npcPlan, npcStepIndex + 1);
+  }, [npcPlan, npcStepIndex, playNpcStep]);
+
+  const handleNpcStop = useCallback(() => {
+    cancelNpcAudioAndTimers();
+    setNpcStatus('CANCELLED');
+    setNpcAnimation('IDLE');
+  }, [cancelNpcAudioAndTimers]);
+
+  const handleNpcRestart = useCallback(() => {
+    if (!npcPlan) return;
+    const latestBooth = booths.find((b) => b.id === npcPlan.booth.id) || npcPlan.booth;
+    const refreshedPlan = buildBoothPresentationPlan(
+      latestBooth,
+      slotsByBooth[latestBooth.id],
+      products
+    );
+    setNpcPlan(refreshedPlan);
+    playNpcStep(refreshedPlan, 0);
+  }, [booths, npcPlan, playNpcStep, products, slotsByBooth]);
+
+  const handleNpcToggleMute = useCallback(() => {
+    const nextMuted = !npcMutedRef.current;
+    npcMutedRef.current = nextMuted;
+    setNpcMuted(nextMuted);
+    if (npcPlan && (npcStatus === 'GREETING' || npcStatus === 'PRESENTING')) {
+      playNpcStep(npcPlan, npcStepIndex, nextMuted);
+    }
+  }, [npcPlan, npcStatus, npcStepIndex, playNpcStep]);
+
+  const currentNpcStep =
+    npcPlan && npcStatus !== 'IDLE'
+      ? npcPlan.steps[Math.min(Math.max(0, npcStepIndex), npcPlan.steps.length - 1)]
+      : null;
+  const npcHighlightedProductId =
+    npcStatus === 'GREETING' || npcStatus === 'PRESENTING' || npcStatus === 'PAUSED'
+      ? currentNpcStep?.product?.id ?? null
+      : null;
 
   const handleSelectSlotProduct = useCallback(
     (product: Product | null) => {
@@ -830,6 +1091,10 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         slotsByBooth={slotsByBooth}
         activeBoothProducts={activeBoothProducts}
         selectedProductId={selectedProduct?.id ?? null}
+        npcHighlightedProductId={npcHighlightedProductId}
+        activeNpcBoothId={npcPlan && npcStatus !== 'IDLE' ? npcPlan.booth.id : null}
+        activeNpcAnimation={npcAnimation}
+        onActivateNpc={handleActivateNpc}
         onSelectProduct={handleSelectSlotProduct}
         player={playerDescriptor}
         playerTransformRef={transformRef}
@@ -855,8 +1120,26 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         slots={selectedBooth ? slotsByBooth[selectedBooth.id] : undefined}
         selectedProduct={selectedProduct}
         onSelectProduct={handleSelectSlotProduct}
+        onActivateNpc={handleActivateNpc}
         onClose={handleReturnToExplore}
         onWalkToBooth={handleWalkToBooth}
+      />
+
+      <NpcAssistantPanel
+        plan={npcPlan}
+        status={npcStatus}
+        currentStepIndex={npcStepIndex}
+        isMuted={npcMuted}
+        hasVietnameseVoice={hasVietnameseVoice}
+        onPause={handleNpcPause}
+        onResume={handleNpcResume}
+        onPrevious={handleNpcPrevious}
+        onNext={handleNpcNext}
+        onStop={handleNpcStop}
+        onRestart={handleNpcRestart}
+        onToggleMute={handleNpcToggleMute}
+        onClose={closeNpcSession}
+        onInspectProduct={handleSelectSlotProduct}
       />
     </main>
   );

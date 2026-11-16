@@ -550,15 +550,7 @@ dialog::backdrop {
    SHOP SHOWCASE SPLIT-SCREEN OVERLAY & DOCKED CATALOG DRAWER
    ============================================================================ */
 .shop-showcase-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 35;
-  pointer-events: none;
-  display: flex;
-  justify-content: space-between;
-  align-items: stretch;
-  padding: 74px 16px 16px;
-  gap: 16px;
+  display: contents;
 }
 
 .shop-showcase-stage-hud {
@@ -1339,7 +1331,7 @@ a:focus-visible {
 .product-detail-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: 80;
   background: rgba(15, 23, 42, 0.58);
   backdrop-filter: blur(4px);
   display: grid;
@@ -2305,5 +2297,323 @@ a:focus-visible {
   }
   .shop-showcase-hint-pill {
     display: none;
+  }
+}
+
+/* ==========================================================================
+   VIETNAMESE FEMALE 3D NPC SALES ASSISTANT DIALOGUE PANEL (Desktop & Mobile)
+   ========================================================================== */
+.npc-assistant-panel {
+  position: fixed;
+  top: 76px;
+  right: 16px;
+  z-index: 42;
+  width: min(410px, calc(100vw - 32px));
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 16px;
+  color: #f8fafc;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.npc-assistant-panel__strip {
+  height: 5px;
+  margin: 0 -16px;
+  background: linear-gradient(90deg, var(--npc-accent, #0ea5e9), #fbbf24);
+}
+
+.npc-assistant-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.npc-assistant-panel__persona {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.npc-assistant-panel__avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(30, 41, 59, 0.95);
+  border: 2px solid var(--npc-accent, #0ea5e9);
+  display: grid;
+  place-items: center;
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+
+.npc-assistant-panel__avatar--speaking {
+  border-color: #fbbf24;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.55);
+}
+
+.npc-assistant-panel__persona-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.npc-assistant-panel__name-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.npc-assistant-panel__name {
+  font-size: 0.98rem;
+  color: #ffffff;
+}
+
+.npc-assistant-panel__role-badge {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.16);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #bae6fd;
+  font-weight: 600;
+}
+
+.npc-assistant-panel__booth-name {
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.npc-assistant-panel__close-btn {
+  background: rgba(30, 41, 59, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #e2e8f0;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+
+.npc-assistant-panel__close-btn:hover {
+  border-color: #f43f5e;
+  color: #ffffff;
+}
+
+.npc-assistant-panel__status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.npc-status-pill {
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #e2e8f0;
+}
+
+.npc-status-pill--active {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.55);
+  color: #6ee7b7;
+}
+
+.npc-status-pill--paused {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #fcd34d;
+}
+
+.npc-counter-pill {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #fbbf24;
+}
+
+.npc-assistant-panel__subtitle-box {
+  background: rgba(30, 41, 59, 0.85);
+  border-left: 3.5px solid var(--npc-accent, #0ea5e9);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.npc-assistant-panel__subtitle-text {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: #f8fafc;
+}
+
+.npc-assistant-panel__voice-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: #94a3b8;
+}
+
+.npc-assistant-panel__product-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(30, 41, 59, 0.92);
+  border: 1px solid rgba(251, 191, 36, 0.42);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+
+.npc-assistant-panel__product-img {
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.npc-assistant-panel__product-placeholder {
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.8);
+  display: grid;
+  place-items: center;
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+
+.npc-assistant-panel__product-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.npc-assistant-panel__product-slot {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.npc-assistant-panel__product-title {
+  font-size: 0.84rem;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.npc-assistant-panel__product-price {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #fbbf24;
+}
+
+.npc-assistant-panel__inspect-btn {
+  flex-shrink: 0;
+}
+
+.npc-assistant-panel__progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.npc-progress-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.35);
+  transition: all 0.2s ease;
+}
+
+.npc-progress-dot--done {
+  background: var(--npc-accent, #0ea5e9);
+}
+
+.npc-progress-dot--current {
+  width: 20px;
+  border-radius: 999px;
+  background: #fbbf24;
+}
+
+.npc-assistant-panel__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.npc-ctrl-btn {
+  flex: 1 1 auto;
+  min-height: 34px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(30, 41, 59, 0.9);
+  color: #f8fafc;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.npc-ctrl-btn:hover:not(:disabled) {
+  border-color: #38bdf8;
+  background: rgba(51, 65, 85, 0.95);
+}
+
+.npc-ctrl-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.npc-ctrl-btn--primary {
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  border-color: #38bdf8;
+  color: #ffffff;
+}
+
+.npc-ctrl-btn--danger:hover:not(:disabled) {
+  border-color: #f43f5e;
+  color: #fda4af;
+}
+
+.npc-ctrl-btn--muted {
+  border-color: #f59e0b;
+  color: #fcd34d;
+}
+
+@media (max-width: 860px) {
+  .npc-assistant-panel {
+    top: auto;
+    bottom: 12px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: 46vh;
+    overflow-y: auto;
   }
 }

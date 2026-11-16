@@ -18,12 +18,18 @@ import {
 import { cloneCachedAsset, getBoothGlbAssetId } from './assetLoader';
 import { RooflessBoothShell } from './RooflessBoothShell';
 import { ExteriorAssets, type ExteriorPlacement } from './ExteriorAssets';
+import { SalesAssistantNpc } from './SalesAssistantNpc';
+import type { NpcAnimationClipName } from '../services/npcPresentationService';
 
 export interface BoothProps {
   booth: BoothType;
   productCount: number;
   slots?: BoothSlotView[];
   selectedProductId?: string | null;
+  npcHighlightedProductId?: string | null;
+  isActiveNpcSession?: boolean;
+  activeNpcAnimation?: NpcAnimationClipName;
+  onActivateNpc?: (booth: BoothType) => void;
   onSelectProduct?: (product: Product) => void;
   isSelected: boolean;
   onSelect: (booth: BoothType) => void;
@@ -425,6 +431,10 @@ export const Booth: React.FC<BoothProps> = React.memo(
     productCount,
     slots,
     selectedProductId = null,
+    npcHighlightedProductId = null,
+    isActiveNpcSession = false,
+    activeNpcAnimation = 'IDLE',
+    onActivateNpc,
     onSelectProduct,
     isSelected,
     onSelect,
@@ -921,11 +931,26 @@ export const Booth: React.FC<BoothProps> = React.memo(
             key={slotView.slot.slotId}
             slotView={slotView}
             accentColor={booth.color}
-            isSelected={Boolean(slotView.product && selectedProductId === slotView.product.id)}
+            isSelected={Boolean(
+              slotView.product &&
+                (selectedProductId === slotView.product.id ||
+                  npcHighlightedProductId === slotView.product.id)
+            )}
             brandMat={brandFlatMat}
             onSelectProduct={onSelectProduct}
           />
         ))}
+
+        {/* ================================================================
+            3B. VIETNAMESE FEMALE 3D SALES ASSISTANT NPC BESIDE BOOTH ENTRANCE
+           ================================================================ */}
+        <SalesAssistantNpc
+          booth={booth}
+          isActiveSession={isActiveNpcSession}
+          activeAnimation={activeNpcAnimation}
+          onActivate={onActivateNpc || onSelect}
+          visible={visible}
+        />
 
         {/* ================================================================
             4. KHU A — SINGLE UNIFIED BRAND HEADER & OUTWARD-FRAMED PILLARS BY THEME

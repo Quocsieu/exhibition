@@ -13,18 +13,19 @@ exhibition/
 │   │   └── models/                   # Các model 3D (.glb) phục vụ runtime & fallback
 │   │       ├── booths/               # 6 gian hàng V2 (v2/, kinetix-v2/) & fallback V1 (roofless-v1/)
 │   │       ├── env/                  # Cây xanh, ghế gỗ, ô dù (umbrella), bồn cây, đèn đường, tòa nhà
-│   │       └── exterior/             # Đài phun nước trung tâm (7b_tCaBRLCI.glb) & tài liệu bản quyền CC-BY
+│   │       ├── exterior/             # Đài phun nước trung tâm (7b_tCaBRLCI.glb) & tài liệu bản quyền CC-BY
+│   │       └── npc/                  # Tư vấn viên nữ 3D Việt Nam (vietnamese_female_assistant.glb + 4 animations)
 │   ├── src/
-│   │   ├── components/               # BoothPanel, ProductPanel, LoadingScreen
+│   │   ├── components/               # BoothPanel, ProductPanel, NpcAssistantPanel, LoadingScreen
 │   │   ├── config/                   # Cấu hình endpoint REST API & Socket.IO (apiConfig.ts)
 │   │   ├── controls/                 # Điều khiển WASD (useKeyboard), Click-to-Move (A*), MobileJoystick
 │   │   ├── hooks/                    # Đồng bộ thời gian thực Socket.IO (useRealtime.ts)
 │   │   ├── pages/                    # ExhibitionPage (khuôn viên 3D) & AdminPage (quản trị /#admin)
 │   │   ├── scene/                    # ExhibitionScene, Environment, ExteriorAssets, Booth, RooflessBoothShell,
-│   │   │                             # ShopShowcaseStage, LocalPlayer, RemotePlayers, sceneTextures
-│   │   ├── services/                 # REST API client (api.ts)
+│   │   │                             # ShopShowcaseStage, SalesAssistantNpc, LocalPlayer, RemotePlayers, sceneTextures
+│   │   ├── services/                 # REST API client (api.ts) & kịch bản thuyết trình NPC (npcPresentationService.ts)
 │   │   ├── types/                    # Định nghĩa kiểu dữ liệu, va chạm & tìm đường A* (expo.ts)
-│   │   └── __tests__/                # Unit tests cho va chạm, tìm đường A*, camera, 36 slots & textures
+│   │   └── __tests__/                # Unit tests cho va chạm, tìm đường A*, camera, 36 slots, NPC & textures
 │   ├── booth-modeling/               # Pipeline script Python Blender tái tạo gian hàng V2 & tối ưu model
 │   ├── .env                          # Biến môi trường Frontend local (được .gitignore bảo vệ)
 │   ├── package.json
@@ -80,7 +81,7 @@ npm install
 | `npm run dev:fe` | Chỉ chạy Frontend Vite dev server (`http://localhost:5173`, tự động proxy `/api` và `/socket.io` sang cổng `4000`). |
 | `npm run typecheck` | Kiểm tra kiểu dữ liệu TypeScript (`tsc --noEmit`) trên cả `BE` và `FE`. |
 | `npm run build` | Biên dịch bản Production cho cả `BE` (`BE/dist`) và `FE` (`FE/dist`). |
-| `npm test` | Chạy toàn bộ 31 bài kiểm thử tự động (`vitest run`) cho cả `FE` (22 tests) và `BE` (9 tests). |
+| `npm test` | Chạy toàn bộ 35 bài kiểm thử tự động (`vitest run`) cho cả `FE` (26 tests) và `BE` (9 tests). |
 | `npm start` | Chạy bản build Production của Backend (`node BE/dist/server.js`). |
 
 ### Địa chỉ Truy cập Khi Chạy Local

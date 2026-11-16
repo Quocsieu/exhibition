@@ -1,0 +1,333 @@
+import React from 'react';
+import type { Product } from '../types/expo';
+import type {
+  NpcPresentationPlan,
+  NpcPresentationStep,
+  NpcSessionStatus,
+} from '../services/npcPresentationService';
+import { formatCurrency } from './ProductPanel';
+
+export interface NpcAssistantPanelProps {
+  plan: NpcPresentationPlan | null;
+  status: NpcSessionStatus;
+  currentStepIndex: number;
+  isMuted: boolean;
+  hasVietnameseVoice: boolean;
+  onPause: () => void;
+  onResume: () => void;
+  onPrevious: () => void;
+  onNext: () => void;
+  onStop: () => void;
+  onRestart: () => void;
+  onToggleMute: () => void;
+  onClose: () => void;
+  onInspectProduct?: (product: Product) => void;
+}
+
+function getStatusLabel(status: NpcSessionStatus, step: NpcPresentationStep | undefined): string {
+  switch (status) {
+    case 'GREETING':
+      return '👋 Đang chào mừng khách tham quan';
+    case 'PRESENTING':
+      if (step?.type === 'PRODUCT' && step.productIndex && step.totalProducts) {
+        return `🎙️ Đang giới thiệu sản phẩm ${step.productIndex}/${step.totalProducts}`;
+      }
+      if (step?.type === 'CLOSING') {
+        return '✨ Lời cảm ơn & kết thúc';
+      }
+      return '🎙️ Đang thuyết minh';
+    case 'PAUSED':
+      return '⏸️ Đang tạm dừng thuyết minh';
+    case 'COMPLETED':
+      return '✅ Đã hoàn tất giới thiệu gian hàng';
+    case 'CANCELLED':
+      return '⏹️ Đã dừng thuyết minh';
+    case 'ERROR':
+      return '⚠️ Chế độ phụ đề văn bản';
+    default:
+      return '💬 Sẵn sàng tư vấn';
+  }
+}
+
+export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
+  ({
+    plan,
+    status,
+    currentStepIndex,
+    isMuted,
+    hasVietnameseVoice,
+    onPause,
+    onResume,
+    onPrevious,
+    onNext,
+    onStop,
+    onRestart,
+    onToggleMute,
+    onClose,
+    onInspectProduct,
+  }) => {
+    if (!plan || status === 'IDLE') {
+      return null;
+    }
+
+    const { booth, profile, steps, totalProducts } = plan;
+    const currentStep = steps[Math.min(Math.max(0, currentStepIndex), steps.length - 1)];
+    const activeProduct = currentStep?.product ?? null;
+    const isSpeaking = status === 'GREETING' || status === 'PRESENTING';
+    const isPaused = status === 'PAUSED';
+    const isFinishedOrStopped = status === 'COMPLETED' || status === 'CANCELLED';
+
+    const canGoPrevious = currentStepIndex > 0;
+    const canGoNext = currentStepIndex < steps.length - 1;
+
+    const productCounterBadge =
+      currentStep?.type === 'PRODUCT' && currentStep.productIndex
+        ? `Sản phẩm ${currentStep.productIndex}/${totalProducts}`
+        : totalProducts > 0
+          ? `${totalProducts} sản phẩm trưng bày`
+          : 'Chưa có sản phẩm';
+
+    return (
+      <aside
+        className="npc-assistant-panel"
+        style={{ '--npc-accent': booth.color } as React.CSSProperties}
+        aria-label={`Trợ lý ảo giới thiệu gian hàng ${booth.name}`}
+      >
+        {/* Top Accent Strip */}
+        <div className="npc-assistant-panel__strip" />
+
+        {/* Header: Assistant Avatar Badge, Name, Booth Title & Close Button */}
+        <header className="npc-assistant-panel__header">
+          <div className="npc-assistant-panel__persona">
+            <div
+              className={`npc-assistant-panel__avatar ${
+                isSpeaking ? 'npc-assistant-panel__avatar--speaking' : ''
+              }`}
+              aria-hidden="true"
+            >
+              👩‍💼
+            </div>
+            <div className="npc-assistant-panel__persona-info">
+              <div className="npc-assistant-panel__name-row">
+                <strong className="npc-assistant-panel__name">
+                  {profile.assistantName}
+                </strong>
+                <span className="npc-assistant-panel__role-badge">
+                  {profile.roleTitle}
+                </span>
+              </div>
+              <div className="npc-assistant-panel__booth-name">
+                📍 {booth.companyName || booth.name}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="npc-assistant-panel__close-btn"
+            onClick={onClose}
+            aria-label="Đóng bảng giới thiệu của trợ lý ảo"
+            title="Đóng (Dừng thuyết minh)"
+          >
+            ✕
+          </button>
+        </header>
+
+        {/* Status & Product Order Counter Bar */}
+        <div className="npc-assistant-panel__status-bar">
+          <span
+            className={`npc-status-pill ${
+              isSpeaking
+                ? 'npc-status-pill--active'
+                : isPaused
+                  ? 'npc-status-pill--paused'
+                  : 'npc-status-pill--idle'
+            }`}
+          >
+            {getStatusLabel(status, currentStep)}
+          </span>
+
+          <span className="npc-counter-pill">{productCounterBadge}</span>
+        </div>
+
+        {/* Subtitle Box (Vietnamese Transcript) */}
+        <div
+          className="npc-assistant-panel__subtitle-box"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="npc-assistant-panel__subtitle-text">
+            “{currentStep?.text || ''}”
+          </p>
+          <div className="npc-assistant-panel__voice-meta">
+            <span>
+              {isMuted
+                ? '🔇 Đang tắt tiếng (Hiển thị phụ đề)'
+                : hasVietnameseVoice
+                  ? '🔊 Giọng đọc Tiếng Việt (vi-VN)'
+                  : '📝 Phụ đề Tiếng Việt tự động'}
+            </span>
+            {currentStep?.slotLabel && (
+              <span>· Kệ: {currentStep.slotLabel}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Highlighted Product Preview Card (when presenting a specific product) */}
+        {activeProduct && (
+          <div className="npc-assistant-panel__product-card">
+            {activeProduct.images?.[0] ? (
+              <img
+                src={activeProduct.images[0]}
+                alt={activeProduct.name}
+                className="npc-assistant-panel__product-img"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            ) : (
+              <div className="npc-assistant-panel__product-placeholder">📦</div>
+            )}
+
+            <div className="npc-assistant-panel__product-info">
+              <div className="npc-assistant-panel__product-slot">
+                {currentStep?.slotId?.toUpperCase()} · {currentStep?.slotLabel}
+              </div>
+              <strong className="npc-assistant-panel__product-title">
+                {activeProduct.name}
+              </strong>
+              {activeProduct.price > 0 && (
+                <div className="npc-assistant-panel__product-price">
+                  {formatCurrency(activeProduct.price, activeProduct.currency)}
+                </div>
+              )}
+            </div>
+
+            {onInspectProduct && (
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm npc-assistant-panel__inspect-btn"
+                onClick={() => onInspectProduct(activeProduct)}
+                title="Mở hộp thoại thông tin chi tiết của sản phẩm này"
+              >
+                🔍 Chi tiết
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Step Progress Indicator Dots */}
+        {steps.length > 1 && (
+          <div className="npc-assistant-panel__progress" aria-label="Tiến độ thuyết minh">
+            {steps.map((s) => {
+              const isCurrent = s.stepIndex === currentStepIndex;
+              const isDone = s.stepIndex < currentStepIndex;
+              return (
+                <span
+                  key={s.stepIndex}
+                  className={`npc-progress-dot ${
+                    isCurrent
+                      ? 'npc-progress-dot--current'
+                      : isDone
+                        ? 'npc-progress-dot--done'
+                        : ''
+                  }`}
+                  title={
+                    s.type === 'GREETING'
+                      ? 'Chào mừng'
+                      : s.type === 'CLOSING'
+                        ? 'Kết thúc'
+                        : `Sản phẩm ${s.productIndex}: ${s.product?.name || ''}`
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {/* Playback Controls: Previous, Pause/Resume, Next, Stop/Restart, Mute */}
+        <div
+          className="npc-assistant-panel__controls"
+          role="group"
+          aria-label="Điều khiển thuyết minh sản phẩm"
+        >
+          <button
+            type="button"
+            className="npc-ctrl-btn"
+            onClick={onPrevious}
+            disabled={!canGoPrevious}
+            title="Quay lại bước / sản phẩm trước"
+            aria-label="Trước"
+          >
+            ⏮ Trước
+          </button>
+
+          {isPaused ? (
+            <button
+              type="button"
+              className="npc-ctrl-btn npc-ctrl-btn--primary"
+              onClick={onResume}
+              title="Tiếp tục thuyết minh"
+              aria-label="Tiếp tục"
+            >
+              ▶ Tiếp tục
+            </button>
+          ) : isFinishedOrStopped ? (
+            <button
+              type="button"
+              className="npc-ctrl-btn npc-ctrl-btn--primary"
+              onClick={onRestart}
+              title="Nghe giới thiệu lại từ đầu"
+              aria-label="Nghe lại"
+            >
+              🔄 Nghe lại
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="npc-ctrl-btn npc-ctrl-btn--primary"
+              onClick={onPause}
+              title="Tạm dừng thuyết minh"
+              aria-label="Tạm dừng"
+            >
+              ⏸ Tạm dừng
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="npc-ctrl-btn"
+            onClick={onNext}
+            disabled={!canGoNext}
+            title="Chuyển sang sản phẩm tiếp theo"
+            aria-label="Tiếp"
+          >
+            Tiếp ⏭
+          </button>
+
+          <button
+            type="button"
+            className="npc-ctrl-btn npc-ctrl-btn--danger"
+            onClick={onStop}
+            disabled={isFinishedOrStopped}
+            title="Dừng hẳn phiên thuyết minh hiện tại"
+            aria-label="Dừng"
+          >
+            ⏹ Dừng
+          </button>
+
+          <button
+            type="button"
+            className={`npc-ctrl-btn ${isMuted ? 'npc-ctrl-btn--muted' : ''}`}
+            onClick={onToggleMute}
+            aria-pressed={isMuted}
+            title={isMuted ? 'Bật giọng đọc tiếng Việt' : 'Tắt tiếng (Chỉ hiện phụ đề)'}
+            aria-label={isMuted ? 'Bật tiếng' : 'Tắt tiếng'}
+          >
+            {isMuted ? '🔇 Bật tiếng' : '🔊 Tắt tiếng'}
+          </button>
+        </div>
+      </aside>
+    );
+  }
+);

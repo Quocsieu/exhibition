@@ -17,6 +17,7 @@ import { Booth } from './Booth';
 import { ShopShowcaseStage } from './ShopShowcaseStage';
 import { LocalPlayer } from './LocalPlayer';
 import { RemotePlayers } from './RemotePlayers';
+import type { NpcAnimationClipName } from '../services/npcPresentationService';
 
 export type CameraViewMode = 'overview' | 'explore' | 'focus';
 
@@ -26,6 +27,10 @@ export interface ExhibitionSceneProps {
   slotsByBooth?: Record<string, BoothSlotView[]>;
   activeBoothProducts?: Product[];
   selectedProductId?: string | null;
+  npcHighlightedProductId?: string | null;
+  activeNpcBoothId?: string | null;
+  activeNpcAnimation?: NpcAnimationClipName;
+  onActivateNpc?: (booth: BoothType) => void;
   onSelectProduct?: (product: Product) => void;
   player: {
     name: string;
@@ -506,6 +511,10 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     slotsByBooth,
     activeBoothProducts = EMPTY_PRODUCTS,
     selectedProductId = null,
+    npcHighlightedProductId = null,
+    activeNpcBoothId = null,
+    activeNpcAnimation = 'IDLE',
+    onActivateNpc,
     onSelectProduct,
     player,
     playerTransformRef,
@@ -734,7 +743,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             onStepMovement={onStepMovement}
             cameraMode={cameraMode}
             focusedBooth={activeFocusedBooth}
-            isPanelOpen={false}
+            isPanelOpen={Boolean(activeNpcBoothId && activeFocusedBooth?.id === activeNpcBoothId)}
             zoom={zoom}
           />
 
@@ -784,6 +793,14 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
               productCount={productCountByBooth[booth.id] ?? 0}
               slots={slotsByBooth?.[booth.id]}
               selectedProductId={selectedProductId}
+              npcHighlightedProductId={
+                activeNpcBoothId === booth.id ? npcHighlightedProductId : null
+              }
+              isActiveNpcSession={activeNpcBoothId === booth.id}
+              activeNpcAnimation={
+                activeNpcBoothId === booth.id ? activeNpcAnimation : 'IDLE'
+              }
+              onActivateNpc={onActivateNpc}
               onSelectProduct={handleProductSelect}
               isSelected={
                 selectedBoothId === booth.id ||

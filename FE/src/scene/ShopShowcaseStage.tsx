@@ -1,5 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import React, { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import type { Booth, Product, BoothSlotView } from '../types/expo';
 import { resolveBoothTheme } from './Booth';
@@ -30,11 +29,6 @@ const BOLLARD_POST_GEOM = new THREE.CylinderGeometry(0.09, 0.11, 0.82, 10);
 const BOLLARD_TOP_GEOM = new THREE.CylinderGeometry(0.11, 0.11, 0.16, 10);
 const AFRAME_BOARD_GEOM = new THREE.BoxGeometry(0.56, 0.86, 0.06);
 
-const STAFF_TORSO_GEOM = new THREE.CapsuleGeometry(0.18, 0.36, 5, 10);
-const STAFF_HEAD_GEOM = new THREE.SphereGeometry(0.19, 12, 12);
-const STAFF_ARM_GEOM = new THREE.CapsuleGeometry(0.065, 0.24, 4, 8);
-const STAFF_APRON_GEOM = new THREE.BoxGeometry(0.32, 0.38, 0.04);
-
 const COURTYARD_STONE_MAT = new THREE.MeshStandardMaterial({
   color: '#334155',
   roughness: 0.72,
@@ -59,18 +53,13 @@ const BLOSSOM_GOLD_MAT = new THREE.MeshStandardMaterial({
   roughness: 0.35,
   flatShading: true,
 });
-const STAFF_SKIN_MAT = new THREE.MeshStandardMaterial({ color: '#fde68a', roughness: 0.45 });
 const STAFF_DARK_MAT = new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.5 });
 const GOLD_RING_MAT = new THREE.MeshBasicMaterial({ color: '#fbbf24' });
-const CYAN_RING_MAT = new THREE.MeshBasicMaterial({ color: '#38bdf8' });
+const CYAN_RING_MAT = new THREE.MeshBasicMaterial({ color: '#34d399' });
 const EMERALD_RING_MAT = new THREE.MeshBasicMaterial({ color: '#34d399' });
-const WHITE_APRON_MAT = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.35 });
 
 export const ShopShowcaseStage: React.FC<ShopShowcaseStageProps> = React.memo(
   ({ booth }) => {
-    const staffGroupRef = useRef<THREE.Group>(null);
-    const staffRightArmRef = useRef<THREE.Mesh>(null);
-
     const vw = Math.max(booth.width || 5.6, 6.0);
     const vd = Math.max(booth.depth || 4.2, 4.4);
     const theme = useMemo(() => resolveBoothTheme(booth), [booth]);
@@ -90,17 +79,6 @@ export const ShopShowcaseStage: React.FC<ShopShowcaseStageProps> = React.memo(
         brandAwningMat.dispose();
       };
     }, [brandAwningMat]);
-
-    useFrame(({ clock }) => {
-      const t = clock.getElapsedTime();
-      if (staffGroupRef.current) {
-        staffGroupRef.current.position.y = 0.18 + Math.sin(t * 2.2) * 0.025;
-        staffGroupRef.current.rotation.y = Math.sin(t * 1.1) * 0.15;
-      }
-      if (staffRightArmRef.current) {
-        staffRightArmRef.current.rotation.z = -0.45 + Math.sin(t * 3.2) * 0.22;
-      }
-    });
 
     return (
       <group
@@ -216,36 +194,6 @@ export const ShopShowcaseStage: React.FC<ShopShowcaseStageProps> = React.memo(
             </group>
           </>
         )}
-
-        {/* ================================================================
-            2. WELCOMING SPECIALIST OUTSIDE RIGHT ENTRANCE
-               (Positioned at x = vw/2 + 0.95 (3.95m), z = vd/2 + 0.35 without
-                any floating text banner so all 6 product slots are 100% clear)
-           ================================================================ */}
-        <group ref={staffGroupRef} position={[vw / 2 + 0.95, 0.18, vd / 2 + 0.35]}>
-          <mesh position={[0, 0.72, 0]} geometry={STAFF_TORSO_GEOM} material={brandAwningMat} />
-          <mesh position={[0, 0.68, 0.17]} geometry={STAFF_APRON_GEOM} material={WHITE_APRON_MAT} />
-          <mesh position={[0, 1.18, 0]} geometry={STAFF_HEAD_GEOM} material={STAFF_SKIN_MAT} />
-          <mesh
-            position={[0, 1.24, -0.02]}
-            scale={[1.04, 0.85, 1.04]}
-            geometry={STAFF_HEAD_GEOM}
-            material={STAFF_DARK_MAT}
-          />
-          <mesh
-            position={[-0.26, 0.76, 0.08]}
-            rotation={[0.3, 0, 0.2]}
-            geometry={STAFF_ARM_GEOM}
-            material={brandAwningMat}
-          />
-          <mesh
-            ref={staffRightArmRef}
-            position={[0.26, 0.86, 0.12]}
-            rotation={[0, 0, -0.45]}
-            geometry={STAFF_ARM_GEOM}
-            material={brandAwningMat}
-          />
-        </group>
       </group>
     );
   }

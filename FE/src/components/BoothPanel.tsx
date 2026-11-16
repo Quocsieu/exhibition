@@ -8,6 +8,7 @@ export interface BoothPanelProps {
   slots?: BoothSlotView[];
   selectedProduct?: Product | null;
   onSelectProduct?: (product: Product | null) => void;
+  onActivateNpc?: (booth: Booth) => void;
   onClose: () => void;
   onWalkToBooth?: (booth: Booth) => void;
 }
@@ -17,6 +18,7 @@ export const BoothPanel: React.FC<BoothPanelProps> = ({
   slots,
   selectedProduct: controlledSelectedProduct,
   onSelectProduct,
+  onActivateNpc,
   onClose,
 }) => {
   const modalTitleId = useId();
@@ -142,6 +144,16 @@ export const BoothPanel: React.FC<BoothPanelProps> = ({
           >
             ✉️ {booth.contactEmail}
           </a>
+        )}
+        {onActivateNpc && (
+          <button
+            type="button"
+            className="btn btn--primary btn--sm"
+            onClick={() => onActivateNpc(booth)}
+            title="Nghe chuyên viên tư vấn 3D giới thiệu tuần tự các sản phẩm của gian hàng"
+          >
+            👩‍💼 Nghe tư vấn viên giới thiệu
+          </button>
         )}
       </div>
 

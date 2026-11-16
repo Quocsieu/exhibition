@@ -12,6 +12,7 @@ FE/booth-modeling/
 │   ├── generate_five_booths_v2.py        # Sinh 5 gian hàng V2 (Aether, Nordic, EcoVita, Lumina, Solaris)
 │   ├── generate_kinetix_v2.py            # Sinh gian hàng V2 Kinetix Robotics (kinetix_booth_v2.glb)
 │   ├── generate_roofless_frames.py       # Sinh 6 khung gian hàng fallback V1 (booths/roofless-v1/*.glb)
+│   ├── generate_vietnamese_female_npc.py # Sinh NPC tư vấn viên nữ 3D Việt Nam + 4 animation (npc/vietnamese_female_assistant.glb)
 │   ├── optimize_env_4k_assets.py         # Hạ độ phân giải texture & decimate cho các model 4K
 │   ├── optimize_jacaranda.py             # Tối ưu hóa cây phượng tím (jacaranda_tree)
 │   ├── decimate_foliage_models.py        # Tinh chỉnh tỷ lệ decimate cho cây thông và bụi hoa
@@ -34,6 +35,8 @@ FE/booth-modeling/
    - `FE/public/models/booths/roofless-v1/{coffee,design,energy,living,robotics,tech}.glb`
 3. **12 Model Cảnh quan & Đô thị (`ACTIVE` trong `FE/public/models/env/`):**
    - `fir_tree_01_joined.glb`, `jacaranda_tree_lod.glb`, `shrub_01_joined.glb`, `building03_joined.glb`, `tree-gian.glb`, `planter-near-ch.glb`, `water_manhole_cover_opt.glb`, `trash_opt.glb`, `umbrella.glb`, `bench.glb`, `planter.glb`, `Street_Lamp.glb`.
+4. **1 Model NPC Tư vấn viên Nữ 3D Việt Nam (`ACTIVE` trong `FE/public/models/npc/`):**
+   - `FE/public/models/npc/vietnamese_female_assistant.glb` (nhúng sẵn 4 clip animation: `IDLE`, `WAVE`, `TALKING`, `PRESENT`, dùng chung cho 6 gian hàng).
 
 ---
 
@@ -50,4 +53,7 @@ blender --background --python "FE/booth-modeling/scripts/generate_kinetix_v2.py"
 
 # 3. Sinh lại 6 khung gian hàng fallback V1
 blender --background --python "FE/booth-modeling/scripts/generate_roofless_frames.py"
+
+# 4. Sinh lại NPC Tư vấn viên Nữ 3D Việt Nam + 4 animation
+blender --background --python "FE/booth-modeling/scripts/generate_vietnamese_female_npc.py"
 ```
