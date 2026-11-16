@@ -940,6 +940,10 @@ export const Booth: React.FC<BoothProps> = React.memo(
               <planeGeometry args={[vw + 0.36, 0.68]} />
               <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
             </mesh>
+            <mesh position={[0, 3.38, 3.36]} rotation={[0, Math.PI, 0]}>
+              <planeGeometry args={[vw + 0.36, 0.68]} />
+              <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+            </mesh>
           </group>
         ) : (
           <>

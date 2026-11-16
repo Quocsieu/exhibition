@@ -25,14 +25,14 @@ const specs = {
   flowers: { file: 'shrub_01_joined', bounds: [.65, .55, .65], dir: 'env' },
   'water-manhole': { file: 'water_manhole_cover_opt', bounds: [.72, .08, .72], dir: 'env' },
   'env-planter-urn': { file: 'planter', bounds: [1.18, 1.02, 1.18], dir: 'env' },
-  'env-umbrella': { file: 'umbrella', bounds: [2.25, 2.5, 2.25], dir: 'env' },
+  'env-umbrella': { file: 'umbrella', bounds: [2.1, 2.35, 2.1], dir: 'env' },
   'recycling-bin': { file: 'trash_opt', bounds: [.52, 1.05, .52], dir: 'env' },
   'plaza-ground-slab': { file: 'roof_opt', bounds: [8.19, 0.08, 7.13], dir: 'env' },
   'booth-planter': { file: 'tree-gian', bounds: [1.28, 2.08, 1.36], dir: 'env' },
   'city-a': { file: 'ppwtREejXg', bounds: [1, 1, 1] },
   'city-b': { file: 'yKo7F36Qk2', bounds: [1, 1, 1] },
   'city-1': { file: 'building03_joined', bounds: [1, 1, 1], dir: 'env' },
-  'city-2': { file: 'Building01_joined', bounds: [1, 1, 1], dir: 'env' },
+  'city-2': { file: 'building03_joined', bounds: [1, 1, 1], dir: 'env' },
   'city-3': { file: 'BlendBuilding', bounds: [1, 1, 1], dir: 'env' },
   'city-4': { file: 'building03_joined', bounds: [1, 1, 1], dir: 'env' },
 } satisfies Record<string, AssetSpec>;
@@ -89,7 +89,7 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
     const geometry = obj.geometry.clone().applyMatrix4(normalization.clone().multiply(obj.matrixWorld));
     geometry.computeBoundingSphere();
     geometry.computeBoundingBox();
-    if (id === 'env-planter-bench') {
+    if (id === 'env-planter-bench' || id === 'env-umbrella' || id === 'city-2') {
       obj.material = Array.isArray(obj.material) ? obj.material.map(m => m.clone()) : obj.material.clone();
     }
     const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
@@ -130,6 +130,14 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
         m.bumpScale = 0.022;
       }
       if (id.startsWith('city-') && /window/i.test(m.name)) { m.roughness = .32; m.metalness = .15; }
+      if (id === 'city-2' && /red_bricks/i.test(m.name)) {
+        // Warm architectural sandstone/limestone facade variant for city-2 buildings
+        m.map = null;
+        m.color.set('#d6cbbc');
+        m.roughness = 0.72;
+        m.metalness = 0.04;
+        m.needsUpdate = true;
+      }
       if (id === 'env-park-bench') {
         m.color.set('#b46a36'); // warm teak / cedar wood finish matching park bench reference
         m.roughness = 0.52;
@@ -161,7 +169,25 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
         }
       }
       if (id === 'env-umbrella') {
+        m.side = THREE.DoubleSide;
         m.depthWrite = true;
+        m.transparent = false;
+        if (m.name === 'Material41' || m.name === 'skp_front_default' || obj.name.startsWith('haste_ombrelone')) {
+          // Coastal resort navy-blue canopy & ribs for clear visual contrast against travertine plaza floor
+          m.color.set(obj.name.startsWith('haste_ombrelone') ? '#b46a36' : '#1e3a5f');
+          m.roughness = 0.52;
+          m.metalness = 0.08;
+        } else if (m.name === 'Color_008') {
+          // Warm bronze-slate table top & base
+          m.color.set('#334155');
+          m.roughness = 0.42;
+          m.metalness = 0.25;
+        } else if (m.name === 'Color_002') {
+          // Warm teak/champagne lounge chairs harmonizing with park benches
+          m.color.set('#c27d48');
+          m.roughness = 0.46;
+          m.metalness = 0.15;
+        }
       }
       if (id === 'booth-planter') {
         if (m.name === 'Kora1') {
@@ -172,26 +198,32 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
           m.roughness = 0.92;
         }
       }
+      if (/dead_branches/i.test(m.name)) {
+        m.color.set('#3b6e38');
+        m.roughness = 0.72;
+        m.metalness = 0.0;
+      }
       if (/leaf|leaves|twig|shrub|flower/i.test(m.name)) {
         m.side = THREE.DoubleSide; // double-sided rendering eliminates black unlit leaf backs
-        m.alphaTest = 0.32;
+        m.transparent = false; // crisp alpha-cutout eliminates pale/white semi-transparent halo fringes
+        m.alphaTest = 0.28;
         m.depthWrite = true;
-        m.roughness = 0.58;
+        m.roughness = 0.64;
         m.metalness = 0.0;
         if (m.map) {
-          m.color.setRGB(1.25, 1.32, 1.18); // natural foliage tone lift
-          m.emissive = new THREE.Color(0.06, 0.09, 0.04);
+          m.color.setRGB(0.68, 0.96, 0.62); // natural botanical green (prevents HDR >1.0 white blowout)
+          m.emissive = new THREE.Color(0.02, 0.05, 0.02);
         } else {
           // Foliage without diffuse texture (e.g. planter.glb Leaves): rich botanical park green
           m.color.set(id === 'booth-planter' ? '#386641' : '#2d6a4f');
           m.emissive = new THREE.Color(0.02, 0.05, 0.02);
         }
       }
-      if (/trunk|bark|branch/i.test(m.name)) {
-        m.roughness = 0.75;
-        m.metalness = 0.05;
-        m.color.setRGB(1.28, 1.22, 1.15); // lift dark shadows on tree bark to natural warm wood
-        m.emissive = new THREE.Color(0.08, 0.06, 0.04); // subtle warm wood bounce
+      if (/trunk|bark|branch/i.test(m.name) && !/dead_branches/i.test(m.name)) {
+        m.roughness = 0.78;
+        m.metalness = 0.04;
+        m.color.setRGB(0.92, 0.85, 0.78); // natural warm wood bark without over-brightening
+        m.emissive = new THREE.Color(0.03, 0.02, 0.01);
       }
       for (const value of Object.values(m)) if (value instanceof THREE.Texture) value.anisotropy = 4;
     });

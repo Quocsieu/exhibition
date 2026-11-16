@@ -86,16 +86,16 @@ export const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
 // and side gaps between booths — ZERO trees placed in front of the 6 booths so all facades,
 // entrance doors, signboards, and radial walkways remain 100% unobstructed.
 export const PERIMETER_TREES: [number, number, number][] = [
-  [-13.5, -16.2, 1.18],
-  [13.5, -16.2, 1.15],
-  [-13.5, 16.2, 1.12],
-  [13.5, 16.2, 1.16],
-  [-16.8, -7.2, 1.22],
-  [16.8, -7.2, 1.22],
-  [-7.2, -16.0, 1.05],
-  [7.2, -16.0, 1.05],
-  [-7.2, 16.0, 1.08],
-  [7.2, 16.0, 1.08],
+  [-16.6, -16.6, 0.64],
+  [16.6, -16.6, 0.64],
+  [-16.6, 16.6, 0.64],
+  [16.8, 14.2, 0.6],
+  [-17.0, -11.8, 0.64],
+  [17.0, -12.2, 0.6],
+  [-7.8, -16.8, 0.62],
+  [7.8, -16.8, 0.62],
+  [-17.0, 11.8, 0.62],
+  [8.2, 16.8, 0.58],
 ];
 
 export const ALL_TREES: {
@@ -118,13 +118,13 @@ export const ALL_TREES: {
           : 'env-tree-blossom'
     ) as GlbAssetId,
   })),
-  // Outer parkland trees framing the avenue outside the courtyard (zero collision)
-  { x: -26.5, z: -12, scale: 1.38, ry: 0.4, assetId: 'env-tree-pine' },
-  { x: 26.5, z: -12, scale: 1.38, ry: 1.8, assetId: 'env-tree-pine' },
-  { x: -26.5, z: 8, scale: 1.32, ry: 2.1, assetId: 'env-tree-oak' },
-  { x: 26.5, z: 8, scale: 1.32, ry: 0.9, assetId: 'env-tree-oak' },
-  { x: -27.2, z: -2.5, scale: 1.25, ry: 1.3, assetId: 'env-tree-blossom' },
-  { x: 27.2, z: 2.5, scale: 1.25, ry: 2.7, assetId: 'env-tree-blossom' },
+  // Outer urban terrace trees framing the perimeter city blocks (zero collision)
+  { x: -28.5, z: -13, scale: 1.45, ry: 0.4, assetId: 'env-tree-pine' },
+  { x: 28.5, z: -13, scale: 1.45, ry: 1.8, assetId: 'env-tree-pine' },
+  { x: -28.5, z: 12, scale: 1.42, ry: 2.1, assetId: 'env-tree-oak' },
+  { x: 28.5, z: 12, scale: 1.42, ry: 0.9, assetId: 'env-tree-oak' },
+  { x: -28.5, z: -1, scale: 1.38, ry: 1.3, assetId: 'env-tree-blossom' },
+  { x: 28.5, z: -1, scale: 1.38, ry: 2.7, assetId: 'env-tree-blossom' },
 ];
 
 export const PLANTER_URN_POSITIONS: [number, number][] = [
@@ -136,10 +136,10 @@ export const PLANTER_URN_POSITIONS: [number, number][] = [
   [17.2, -4.8],
 ];
 
-// 2 Umbrella Lounge Sets moved closer to the Central Plaza on the West & East paved wings (Task A)
+// 2 Umbrella Lounge Sets moved closer to the Central Plaza on the West & East paved wings (Task A & Phase 4)
 export const UMBRELLA_LOUNGE_POSITIONS: { x: number; z: number; rotationY: number }[] = [
-  { x: -5.4, z: 0, rotationY: 0 },
-  { x: 5.4, z: 0, rotationY: 0 },
+  { x: -5.3, z: 0, rotationY: Math.PI / 4 },
+  { x: 5.3, z: 0, rotationY: Math.PI / 4 },
 ];
 
 const ALL_BENCHES: { x: number; z: number; rotationY: number }[] = [
@@ -181,7 +181,7 @@ const BOOTH_CONNECTOR_PATHS: {
   { x: 0, z: 8.8, w: 3.3, d: 6.4, ry: Math.PI, accent: '#14b8a6' },
 ];
 
-// High-quality Stylized 3D City Background Skyline Architecture with Detailed Facades & Rotations
+// Cohesive Stylized 3D Urban Perimeter Architecture framing North, West, and East Boulevards (Phase 5)
 const STYLIZED_CITY_BUILDINGS: {
   x: number;
   z: number;
@@ -190,30 +190,26 @@ const STYLIZED_CITY_BUILDINGS: {
   sz: number;
   ry: number;
 }[] = [
-  // North Boulevard Skyline (Facing South towards Plaza, ry = 0)
-  { x: -32, z: -31, sx: 7.2, sy: 13.5, sz: 6.2, ry: 0 },
-  { x: -23, z: -33, sx: 6.8, sy: 16.5, sz: 6.2, ry: 0 },
-  { x: -13, z: -34, sx: 7.5, sy: 12.5, sz: 6.0, ry: 0 },
-  { x: 0, z: -35, sx: 8.2, sy: 18.2, sz: 6.5, ry: 0 },
-  { x: 13, z: -34, sx: 7.5, sy: 13.5, sz: 6.0, ry: 0 },
-  { x: 23, z: -33, sx: 6.8, sy: 15.8, sz: 6.2, ry: 0 },
-  { x: 32, z: -31, sx: 7.2, sy: 12.8, sz: 6.2, ry: 0 },
+  // North Boulevard Skyline (Aligned along outer urban terrace z = -31.5, facing South towards Plaza, ry = 0)
+  { x: -29.5, z: -31.5, sx: 7.4, sy: 13.8, sz: 6.4, ry: 0 },
+  { x: -19.8, z: -31.5, sx: 7.2, sy: 15.6, sz: 6.4, ry: 0 },
+  { x: -10.0, z: -31.5, sx: 7.4, sy: 12.8, sz: 6.2, ry: 0 },
+  { x: 0, z: -31.8, sx: 8.2, sy: 17.2, sz: 6.6, ry: 0 },
+  { x: 10.0, z: -31.5, sx: 7.4, sy: 13.4, sz: 6.2, ry: 0 },
+  { x: 19.8, z: -31.5, sx: 7.2, sy: 15.2, sz: 6.4, ry: 0 },
+  { x: 29.5, z: -31.5, sx: 7.4, sy: 13.2, sz: 6.4, ry: 0 },
 
-  // West Avenue Skyline (Facing East towards Plaza, ry = Math.PI / 2)
-  { x: -34, z: -18, sx: 6.5, sy: 14.5, sz: 7.0, ry: Math.PI / 2 },
-  { x: -35, z: -6, sx: 6.8, sy: 12.0, sz: 6.8, ry: Math.PI / 2 },
-  { x: -34, z: 7, sx: 6.5, sy: 13.5, sz: 6.8, ry: Math.PI / 2 },
-  { x: -33, z: 20, sx: 6.8, sy: 12.5, sz: 6.5, ry: Math.PI / 2 },
+  // West Avenue Skyline (Aligned along outer urban terrace x = -31.5, facing East towards Plaza, ry = Math.PI / 2)
+  { x: -31.5, z: -20.5, sx: 6.6, sy: 14.2, sz: 6.8, ry: Math.PI / 2 },
+  { x: -31.5, z: -9.5, sx: 6.8, sy: 12.4, sz: 6.8, ry: Math.PI / 2 },
+  { x: -31.5, z: 7.5, sx: 6.6, sy: 13.6, sz: 6.8, ry: Math.PI / 2 },
+  { x: -31.5, z: 18.5, sx: 6.8, sy: 12.6, sz: 6.6, ry: Math.PI / 2 },
 
-  // East Avenue Skyline (Facing West towards Plaza, ry = -Math.PI / 2)
-  { x: 34, z: -18, sx: 6.5, sy: 13.5, sz: 7.0, ry: -Math.PI / 2 },
-  { x: 35, z: -6, sx: 6.8, sy: 11.5, sz: 6.8, ry: -Math.PI / 2 },
-  { x: 34, z: 7, sx: 6.5, sy: 14.2, sz: 6.8, ry: -Math.PI / 2 },
-  { x: 33, z: 20, sx: 6.8, sy: 12.8, sz: 6.5, ry: -Math.PI / 2 },
-
-  // South Entrance Flanking Buildings (Facing North towards Plaza, ry = Math.PI)
-  { x: -22, z: 28, sx: 7.4, sy: 14.2, sz: 6.5, ry: Math.PI },
-  { x: 22, z: 28, sx: 7.4, sy: 14.2, sz: 6.5, ry: Math.PI },
+  // East Avenue Skyline (Aligned along outer urban terrace x = 31.5, facing West towards Plaza, ry = -Math.PI / 2)
+  { x: 31.5, z: -20.5, sx: 6.6, sy: 13.8, sz: 6.8, ry: -Math.PI / 2 },
+  { x: 31.5, z: -9.5, sx: 6.8, sy: 12.0, sz: 6.8, ry: -Math.PI / 2 },
+  { x: 31.5, z: 7.5, sx: 6.6, sy: 14.0, sz: 6.8, ry: -Math.PI / 2 },
+  { x: 31.5, z: 18.5, sx: 6.8, sy: 12.6, sz: 6.6, ry: -Math.PI / 2 },
 ];
 
 // Distant Low-Poly Parkland Hills around the outer horizon
@@ -285,8 +281,8 @@ const LAMP_POOL_MAT = new THREE.MeshBasicMaterial({
 // Stylized 3D City Horizon & Distant Hills Instanced Geometries & Materials
 const HORIZON_HILL_GEOM = new THREE.IcosahedronGeometry(1, 2);
 const HORIZON_HILL_MAT = new THREE.MeshStandardMaterial({
-  color: '#86efac',
-  roughness: 0.82,
+  color: '#6b9071',
+  roughness: 0.88,
 });
 
 
@@ -420,8 +416,8 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       () =>
         (['city-1', 'city-2', 'city-4'] as const).map((id, variant) => ({
           id,
-          placements: STYLIZED_CITY_BUILDINGS.filter((_, i) => i % 4 === (variant === 2 ? 3 : variant)).map(b => ({
-            position: [b.x, -0.65, b.z] as [number, number, number],
+          placements: STYLIZED_CITY_BUILDINGS.filter((_, i) => i % 3 === variant).map(b => ({
+            position: [b.x, -0.64, b.z] as [number, number, number],
             scale: [b.sx, b.sy, b.sz] as [number, number, number],
             rotation: b.ry,
           })),
@@ -476,7 +472,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
     const treeBatches = useMemo(() => (['env-tree-oak', 'env-tree-blossom', 'env-tree-pine'] as ExteriorAssetId[]).map(id => ({
       id,
       placements: ALL_TREES.filter(t => t.assetId === id && Math.abs(t.x) > 24).map(t => ({
-        position: [t.x, -0.75, t.z] as [number, number, number],
+        position: [t.x, -0.63, t.z] as [number, number, number],
         rotation: t.ry,
         scale: t.scale,
       })),
@@ -603,9 +599,19 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
           <meshBasicMaterial map={skyDomeTexture} side={THREE.BackSide} fog={false} />
         </mesh>
 
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.75, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.78, 0]}>
           <planeGeometry args={[156, 156]} />
-          <meshStandardMaterial color="#bbf7d0" roughness={0.92} />
+          <meshStandardMaterial color="#7fa682" roughness={0.92} />
+        </mesh>
+
+        {/* Outer Urban District Block Terrace framing the surrounding city buildings (Phase 5) */}
+        <mesh position={[0, -0.74, -2]} receiveShadow>
+          <boxGeometry args={[84, 0.08, 82]} />
+          <meshStandardMaterial color="#475569" roughness={0.78} />
+        </mesh>
+        <mesh position={[0, -0.68, -2]} receiveShadow>
+          <boxGeometry args={[82, 0.1, 80]} />
+          <meshStandardMaterial color="#94a3b8" roughness={0.72} />
         </mesh>
 
         {/* Instanced Distant Rolling Hills */}
@@ -656,8 +662,8 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
             bumpMap={sidewalkHeight}
             bumpScale={0.018}
             roughnessMap={sidewalkRoughness}
-            color="#ffffff"
-            roughness={1}
+            color="#d5dde6"
+            roughness={0.88}
             metalness={0}
           />
         </mesh>
@@ -771,8 +777,8 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
                 map={plazaTileTexture}
                 bumpMap={plazaTileBumpTexture}
                 bumpScale={0.03}
-                color="#ffffff"
-                roughness={0.78}
+                color="#dee6ee"
+                roughness={0.82}
                 metalness={0}
               />
             </mesh>

@@ -687,7 +687,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
           dpr={[1, 1.5]}
           gl={{
             toneMapping: THREE.ACESFilmicToneMapping,
-            toneMappingExposure: 1.06,
+            toneMappingExposure: 1.02,
             outputColorSpace: THREE.SRGBColorSpace,
           }}
           camera={{
@@ -738,12 +738,12 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             zoom={zoom}
           />
 
-          {/* Stylized 3D City Daylight & Golden-Hour Architectural Lighting */}
-          <ambientLight intensity={0.52} />
-          <hemisphereLight args={['#e0f2fe', '#475569', 0.68]} />
+          {/* Stylized 3D City Daylight & Balanced Architectural Fill Lighting (Phase 2) */}
+          <ambientLight intensity={0.72} />
+          <hemisphereLight args={['#f0f9ff', '#94a3b8', 0.82]} />
           <directionalLight
             position={[26, 42, 22]}
-            intensity={1.62}
+            intensity={1.38}
             color="#fffbeb"
             castShadow
             shadow-mapSize-width={1024}
@@ -754,10 +754,11 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             shadow-camera-bottom={-34}
             shadow-camera-near={1}
             shadow-camera-far={125}
-            shadow-bias={-0.0002}
-            shadow-radius={2}
+            shadow-bias={-0.00025}
+            shadow-radius={2.5}
           />
-          <directionalLight position={[-22, 26, -18]} intensity={0.48} color="#7dd3fc" />
+          <directionalLight position={[-22, 28, -18]} intensity={0.68} color="#bae6fd" />
+          <directionalLight position={[0, 26, 28]} intensity={0.38} color="#fff7ed" />
           <pointLight position={[0, 5.2, 0]} intensity={0.88} distance={22} color="#fde68a" />
 
           <Environment
