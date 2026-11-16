@@ -44,7 +44,7 @@ exhibition/
 │   │   └── __tests__/                # Integration tests cho REST API, Auth, SSRF & Socket.IO
 │   └── package.json
 │
-├── qa-reports/                       # Tài liệu đặc tả cảnh quan V4.1 & script kiểm thử hồi quy
+├── qa-reports/                       # Kịch bản kiểm thử hồi quy trình duyệt (final_regression_test.cjs)
 ├── .env.example                      # File mẫu cấu hình biến môi trường (không chứa khóa bí mật)
 ├── .gitignore
 ├── package.json                      # Cấu hình npm Workspaces gốc (FE, BE)

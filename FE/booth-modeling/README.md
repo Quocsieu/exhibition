@@ -1,83 +1,57 @@
-# Hệ Thống Thiết Kế Gian Hàng 3D Triển Lãm (Sand3D + Blender)
+# Hệ Thống Mô Hình Hóa 3D Gian Hàng & Cảnh Quan (Blender 4.2 LTS Pipeline)
 
-Hệ thống mô hình hóa thủ tục (Procedural 3D Modeling Pipeline) sử dụng **Sand3D** kết hợp **Blender 4.2 LTS** tự động tạo ra 6 gian hàng triển lãm theo phong cách kiến trúc **High-quality Classic Stylized Realistic Exhibition Pavilion**.
+Thư mục `FE/booth-modeling/` chứa bộ script Python chạy trên **Blender 4.2 LTS** (chế độ headless `--background`) để sinh và tối ưu hóa các model `.glb` đang hoạt động trong `FE/public/models/`.
 
 ---
 
-## 1. Cấu Trúc Thư Mục
+## 1. Cấu Trúc Thư Mục Hiện Hành
 
 ```text
 FE/booth-modeling/
-├── metadata/
-│   └── booths.json             # Dữ liệu phân tích kỹ thuật chi tiết của 6 gian hàng
-├── previews/                   # 18 ảnh render chất lượng cao (3 góc/gian hàng)
-│   ├── booth_01_front.png, booth_01_isometric.png, booth_01_interior.png
-│   ├── booth_02_front.png, booth_02_isometric.png, booth_02_interior.png
-│   ├── booth_03_front.png, booth_03_isometric.png, booth_03_interior.png
-│   ├── booth_04_front.png, booth_04_isometric.png, booth_04_interior.png
-│   ├── booth_05_front.png, booth_05_isometric.png, booth_05_interior.png
-│   └── booth_06_front.png, booth_06_isometric.png, booth_06_interior.png
-├── sand3d-repo/                # Mã nguồn thư viện Sand3D DSL
 ├── scripts/
-│   ├── generate_booths.py      # Script chính tạo hình 6 gian hàng bằng Sand3D
-│   ├── render_previews.py      # Script tự động render 18 ảnh preview bằng Blender EEVEE
-│   └── validate_models.py      # Script kiểm định mesh, vật liệu, polycount và CompanySignSurface
-└── tools/
-    └── blender-4.2.16-windows-x64/ # Blender 4.2 LTS Portable
-
-FE/public/models/booths/        # Thư mục đích chứa các file GLB sẵn sàng cho R3F
-├── booth_01.glb                # Classic Timber Pavilion
-├── booth_02.glb                # European Stone Arcade
-├── booth_03.glb                # Mediterranean Pavilion
-├── booth_04.glb                # Victorian Glass Pavilion
-├── booth_05.glb                # Traditional Courtyard Pavilion
-└── booth_06.glb                # Octagonal Heritage Pavilion
+│   ├── generate_five_booths_v2.py        # Sinh 5 gian hàng V2 (Aether, Nordic, EcoVita, Lumina, Solaris)
+│   ├── generate_kinetix_v2.py            # Sinh gian hàng V2 Kinetix Robotics (kinetix_booth_v2.glb)
+│   ├── generate_roofless_frames.py       # Sinh 6 khung gian hàng fallback V1 (booths/roofless-v1/*.glb)
+│   ├── optimize_env_4k_assets.py         # Hạ độ phân giải texture & decimate cho các model 4K
+│   ├── optimize_jacaranda.py             # Tối ưu hóa cây phượng tím (jacaranda_tree)
+│   ├── optimize_building03.py            # Tối ưu hóa tòa nhà ngoại vi (building03)
+│   ├── optimize_street_props.py          # Tối ưu hóa đạo cụ đường phố (trash_opt.glb, v.v.)
+│   ├── refine_opt_models.py              # Tinh chỉnh tỷ lệ decimate cho cây thông và bụi hoa
+│   ├── consolidate_and_export_glbs.py    # Gộp mesh thành single-draw-call (*_joined.glb, *_lod.glb)
+│   ├── fix_planter_leaves.py             # Chuẩn hóa vật liệu PBR cho lá chậu cây (planter.glb)
+│   └── verify_joined_glbs.py             # Kiểm tra số lượng mesh và triangle của các model đã gộp
+└── README.md
 ```
 
 ---
 
-## 2. Đặc Tả Kiến Trúc 6 Gian Hàng
+## 2. Đầu Ra Model 3D Trong `FE/public/models/`
 
-| Gian Hàng | Chủ Đề Kiến Trúc | Đặc Điểm Kết Cấu | Vật Liệu Chủ Đạo |
-| :--- | :--- | :--- | :--- |
-| **Booth 01** | Classic Timber Pavilion | Hệ khung gỗ sồi/óc chó tự nhiên, 6 cột gỗ chạm khắc chân đá hoa cương, vì kèo lộ thiên, mái dốc ván gỗ, lan can tiện song gỗ. | Gỗ sồi (`oak`), gỗ óc chó (`walnut`), đá (`marble`), đồng thau (`brass`). |
-| **Booth 02** | European Stone Arcade | Kiến trúc vòm đá cổ điển Châu Âu (Romanesque / Classical Tuscan), 6 cột trụ tròn với đầu và chân cột chỉ nổi, vòm tam cung, trán tường cổ điển và mái ngói đất nung. | Đá cẩm thạch trắng (`marble`), sa thạch / bê tông hoàn thiện mịn (`concrete`), ngói gốm sứ (`ceramic`). |
-| **Booth 03** | Mediterranean Pavilion | Biệt thự ven biển Địa Trung Hải, tường vữa stucco trắng kem, các ô vòm thoáng đãng, vì kèo gỗ tuyết tùng nhô ra mép mái, mái ngói máng âm dương terracotta đỏ ấm và bồn cây cảnh viền lan can. | Vữa stucco (`concrete`), ngói đất nung (`ceramic`), gỗ sồi (`oak`), cây lá (`fabric`). |
-| **Booth 04** | Victorian Glass Pavilion | Nhà kính bảo tồn phong cách Victoria (Victorian Conservatory / Orangery), hệ khung sắt đúc uốn lượn tinh tế màu đen kim loại, mái vòm kính lấy sáng, tháp thông gió trên đỉnh mái và chân tường gạch/đá sẫm màu. | Kim loại sơn đen (`painted_metal`), kính trong suốt (`glass`), đồng thau (`brass`), đá cẩm thạch nền (`marble`). |
-| **Booth 05** | Traditional Courtyard Pavilion | Lầu các đình viện truyền thống Á Đông, cột sơn son thếp vàng, cụm đấu củng (dougong) đỡ mái hiên vươn xa, các đầu đao cong vút duyên dáng, vách bình phong khắc hoa văn chữ Vạn. | Sơn mài bóng (`glossy_plastic`), ngói tráng men đen/than (`ceramic`), gỗ sồi (`oak`), đồng vàng kim (`brass`). |
-| **Booth 06** | Octagonal Heritage Pavilion | Đình vọng cảnh bát giác (Octagonal Gazebo/Rotunda), 8 cột trụ hoa cương bố trí đối xứng hướng tâm, mái chóp 8 cạnh vuốt nhọn bọc đồng xanh cổ (verdigris patina) đỉnh chóp có búp sen / hồ lô đồng. | Đồng oxy hóa (`copper`), đá hoa cương (`marble`), đồng thau vàng (`brass`), gỗ tiện lan can (`oak`). |
-
----
-
-## 3. Quy Chuẩn Kỹ Thuật (Specification Conformance)
-
-- **Bounding Box Envelope:**
-  - Chiều rộng: 5.2m – 5.6m (chuẩn không gian 4.8m – 5.4m).
-  - Chiều sâu: 4.2m – 4.9m (chuẩn không gian 3.8m – 4.4m).
-  - Chiều cao: 4.2m – 5.3m (chuẩn không gian 3.5m – 4.6m).
-- **Mặt Bảng Hiệu Doanh Nghiệp (`CompanySignSurface`):**
-  - Tất cả 6 mô hình đều có một mesh phẳng chuyên dụng mang tên chính xác: `CompanySignSurface`.
-  - Vị trí: Mặt trước gian hàng (trục Z trong GLTF, tương ứng -Y trong Blender), cao độ Y ~ 3.2m - 3.4m, kích thước chuẩn ~3.6m x 0.65m.
-  - Hoàn toàn không bị mái, cột hay xà che khuất tầm nhìn của khách tham quan, sẵn sàng nhận texture động từ React Three Fiber (`createBoothSignTexture`).
-- **Tối Ưu Hóa WebGL:**
-  - Dung lượng mỗi file: **57 KB – 135 KB** (vô cùng nhẹ, tải ngay lập tức trên cả mạng di động 4G).
-  - Triangle count: **576 – 4,068 tris** (đảm bảo giữ vững 60 FPS khi render đồng thời 6 gian hàng trên mọi thiết bị).
+1. **6 Gian hàng V2 Chính thức (`ACTIVE`):**
+   - `FE/public/models/booths/kinetix-v2/kinetix_booth_v2.glb`
+   - `FE/public/models/booths/v2/aether_tech_v2.glb`
+   - `FE/public/models/booths/v2/nordic_living_v2.glb`
+   - `FE/public/models/booths/v2/ecovita_coffee_v2.glb`
+   - `FE/public/models/booths/v2/lumina_design_v2.glb`
+   - `FE/public/models/booths/v2/solaris_energy_v2.glb`
+2. **6 Gian hàng V1 Không mái (`FALLBACK` khi `isV2 = false`):**
+   - `FE/public/models/booths/roofless-v1/{coffee,design,energy,living,robotics,tech}.glb`
+3. **12 Model Cảnh quan & Đô thị (`ACTIVE` trong `FE/public/models/env/`):**
+   - `fir_tree_01_joined.glb`, `jacaranda_tree_lod.glb`, `shrub_01_joined.glb`, `building03_joined.glb`, `tree-gian.glb`, `planter-near-ch.glb`, `water_manhole_cover_opt.glb`, `trash_opt.glb`, `umbrella.glb`, `bench.glb`, `planter.glb`, `Street_Lamp.glb`.
 
 ---
 
-## 4. Hướng Dẫn Tái Tạo & Mở Rộng
+## 3. Hướng Dẫn Chạy Lại Script Bằng Blender Headless
 
-### 4.1. Chạy sinh mô hình:
-```bash
-& "FE/booth-modeling/tools/blender-4.2.16-windows-x64/blender.exe" --background --python "FE/booth-modeling/scripts/generate_booths.py"
-```
+> **Lưu ý:** Toàn bộ các file `.glb` thành phẩm đã được commit sẵn trong `FE/public/models/`. Thành viên nhóm **không cần** cài đặt Blender để chạy, build hay kiểm thử ứng dụng web. Chỉ chạy các lệnh dưới đây khi muốn thiết kế lại hình học 3D.
 
-### 4.2. Kiểm tra chất lượng & xuất Metadata:
-```bash
-& "FE/booth-modeling/tools/blender-4.2.16-windows-x64/blender.exe" --background --python "FE/booth-modeling/scripts/validate_models.py"
-```
+```powershell
+# 1. Sinh lại 5 gian hàng V2
+blender --background --python "FE/booth-modeling/scripts/generate_five_booths_v2.py"
 
-### 4.3. Render lại 18 ảnh preview:
-```bash
-& "FE/booth-modeling/tools/blender-4.2.16-windows-x64/blender.exe" --background --python "FE/booth-modeling/scripts/render_previews.py"
+# 2. Sinh lại gian hàng V2 Kinetix Robotics
+blender --background --python "FE/booth-modeling/scripts/generate_kinetix_v2.py"
+
+# 3. Sinh lại 6 khung gian hàng fallback V1
+blender --background --python "FE/booth-modeling/scripts/generate_roofless_frames.py"
 ```
