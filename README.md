@@ -26,7 +26,6 @@ exhibition/
 │   │   ├── types/                    # Định nghĩa kiểu dữ liệu, va chạm & tìm đường A* (expo.ts)
 │   │   └── __tests__/                # Unit tests cho va chạm, tìm đường A*, camera, 36 slots & textures
 │   ├── booth-modeling/               # Pipeline script Python Blender tái tạo gian hàng V2 & tối ưu model
-│   ├── scripts/                      # Script hỗ trợ xuất GLB (generateGlbAssets.ts) & kiểm thử hồi quy (browserRegressionTest.cjs)
 │   ├── .env                          # Biến môi trường Frontend local (được .gitignore bảo vệ)
 │   ├── package.json
 │   └── vite.config.ts

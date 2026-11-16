@@ -18,8 +18,7 @@ FE/booth-modeling/
 │   ├── optimize_street_props.py          # Tối ưu hóa đạo cụ đường phố (trash_opt.glb, v.v.)
 │   ├── decimate_foliage_models.py        # Tinh chỉnh tỷ lệ decimate cho cây thông và bụi hoa
 │   ├── consolidate_and_export_glbs.py    # Gộp mesh thành single-draw-call (*_joined.glb, *_lod.glb)
-│   ├── fix_planter_leaves.py             # Chuẩn hóa vật liệu PBR cho lá chậu cây (planter.glb)
-│   └── verify_joined_glbs.py             # Kiểm tra số lượng mesh và triangle của các model đã gộp
+│   └── fix_planter_leaves.py             # Chuẩn hóa vật liệu PBR cho lá chậu cây (planter.glb)
 └── README.md
 ```
 
