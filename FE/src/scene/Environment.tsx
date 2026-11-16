@@ -136,12 +136,10 @@ export const PLANTER_URN_POSITIONS: [number, number][] = [
   [17.2, -4.8],
 ];
 
-// 4 Cozy Perimeter Rest Lounge Zones (located in protected pedestrian promenade pockets, safely clear of all roadways & sightlines)
-const REST_LOUNGE_ZONES: { x: number; z: number; color: string }[] = [
-  { x: -15.8, z: -14.2, color: '#0ea5e9' },
-  { x: 15.8, z: -14.2, color: '#f59e0b' },
-  { x: -15.8, z: 14.2, color: '#6366f1' },
-  { x: 15.8, z: 14.2, color: '#10b981' },
+// 2 Umbrella Lounge Sets moved closer to the Central Plaza on the West & East paved wings (Task A)
+export const UMBRELLA_LOUNGE_POSITIONS: { x: number; z: number; rotationY: number }[] = [
+  { x: -5.4, z: 0, rotationY: 0 },
+  { x: 5.4, z: 0, rotationY: 0 },
 ];
 
 const ALL_BENCHES: { x: number; z: number; rotationY: number }[] = [
@@ -154,11 +152,6 @@ const ALL_BENCHES: { x: number; z: number; rotationY: number }[] = [
     z: island.z + island.benchOffsetZ,
     rotationY: island.benchOffsetZ > 0 ? 0 : Math.PI,
   })),
-  // Companion park benches flanking each of the 4 parasol rest lounge tables
-  ...REST_LOUNGE_ZONES.flatMap((zone) => [
-    { x: zone.x - 1.25, z: zone.z, rotationY: Math.PI / 2 },
-    { x: zone.x + 1.25, z: zone.z, rotationY: -Math.PI / 2 },
-  ]),
 ];
 
 export const PERIMETER_LAMPS: [number, number][] = [
@@ -239,12 +232,6 @@ const HORIZON_HILLS: { x: number; z: number; sx: number; sy: number; sz: number 
 const FLOWER_CLUSTERS_PINK: [number, number, number][] = [];
 const FLOWER_CLUSTERS_GOLD: [number, number, number][] = [];
 
-// Shared module-level Geometries & Materials to minimize WebGL memory & state switches
-const PARASOL_POLE_GEOM = new THREE.CylinderGeometry(0.05, 0.06, 2.35, 10);
-const PARASOL_CANOPY_GEOM = new THREE.ConeGeometry(1.55, 0.58, 12);
-const LOUNGE_TABLE_TOP_GEOM = new THREE.CylinderGeometry(0.68, 0.68, 0.07, 16);
-const LOUNGE_TABLE_BASE_GEOM = new THREE.CylinderGeometry(0.12, 0.34, 0.72, 12);
-
 // Instanced Exhibition Street Furniture: Illuminated Bollards, Recycling Bins & Wayfinding Posts
 const BOLLARD_BODY_GEOM = new THREE.CylinderGeometry(0.11, 0.13, 0.78, 12);
 const BOLLARD_GLOW_GEOM = new THREE.CylinderGeometry(0.115, 0.115, 0.14, 12);
@@ -275,15 +262,6 @@ export const EXHIBITION_BIN_POSITIONS: [number, number][] = [
 ];
 
 const BOLLARD_GLOW_MAT = new THREE.MeshBasicMaterial({ color: '#38bdf8' });
-
-const PARASOL_CREAM_MAT = new THREE.MeshStandardMaterial({
-  color: '#fffbeb',
-  roughness: 0.45,
-});
-const TABLE_WHITE_MAT = new THREE.MeshStandardMaterial({
-  color: '#f8fafc',
-  roughness: 0.3,
-});
 
 const BENCH_IRON_MAT = new THREE.MeshStandardMaterial({
   color: '#1e293b',
@@ -504,6 +482,7 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
       })),
     })), []);
     const benchPlacements = useMemo<ExteriorPlacement[]>(() => ALL_BENCHES.map(b => ({ position: [b.x, .02, b.z], rotation: b.rotationY })), []);
+    const umbrellaPlacements = useMemo<ExteriorPlacement[]>(() => UMBRELLA_LOUNGE_POSITIONS.map(u => ({ position: [u.x, 0.02, u.z], rotation: u.rotationY })), []);
     const planterBenchPlacements = useMemo<ExteriorPlacement[]>(() => {
       const rowOffsetZ = 0.3155;
       const colOffsetX = 0.60;
@@ -994,27 +973,8 @@ export const Environment: React.FC<EnvironmentProps> = React.memo(
 
         <ExteriorAssets id="flowers" placements={flowerPlacements} shadows={false} />
 
-        {/* 4 Instanced Perimeter Rest Lounge Pavilions (Tables & Parasol Umbrellas) */}
-        <Instances geometry={LOUNGE_TABLE_BASE_GEOM} material={BENCH_IRON_MAT}>
-          {REST_LOUNGE_ZONES.map((z, i) => (
-            <Instance key={`ltbase-${i}`} position={[z.x, 0.36, z.z]} />
-          ))}
-        </Instances>
-        <Instances geometry={LOUNGE_TABLE_TOP_GEOM} material={TABLE_WHITE_MAT}>
-          {REST_LOUNGE_ZONES.map((z, i) => (
-            <Instance key={`lttop-${i}`} position={[z.x, 0.74, z.z]} />
-          ))}
-        </Instances>
-        <Instances geometry={PARASOL_POLE_GEOM} material={LAMP_POLE_MAT}>
-          {REST_LOUNGE_ZONES.map((z, i) => (
-            <Instance key={`ppole-${i}`} position={[z.x, 1.18, z.z]} />
-          ))}
-        </Instances>
-        <Instances geometry={PARASOL_CANOPY_GEOM} material={PARASOL_CREAM_MAT}>
-          {REST_LOUNGE_ZONES.map((z, i) => (
-            <Instance key={`pcanopy-${i}`} position={[z.x, 2.38, z.z]} />
-          ))}
-        </Instances>
+        {/* 2 Umbrella Lounge Sets (`umbrella.glb`) positioned near Central Plaza */}
+        <ExteriorAssets id="env-umbrella" placements={umbrellaPlacements} />
 
         {/* Imported wood and iron park benches */}
         <ExteriorAssets id="env-park-bench" placements={benchPlacements} />

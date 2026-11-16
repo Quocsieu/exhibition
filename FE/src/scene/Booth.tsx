@@ -594,10 +594,10 @@ export const Booth: React.FC<BoothProps> = React.memo(
     });
 
     const boothDecorPlacements = useMemo<ExteriorPlacement[]>(() => {
-      // Position planters cleanly outside the V2 booth plinth (X: ±3.62, Z: 2.72) and front steps (X: ±2.82, Z: 3.17)
-      // in front of the front facade corners (Task B)
-      const cornerX = 3.48;
-      const frontZ = 3.55;
+      // Position front-booth trees (`tree-gian.glb`) cleanly outside the V2 booth plinth (X: ±3.62, Z: 2.72)
+      // and front steps (X: ±2.82, Z: 3.17) in front of the front facade corners (Task B)
+      const cornerX = 3.65;
+      const frontZ = 3.68;
       switch (theme) {
         case 'tech':
           return [{ position: [-cornerX, 0.02, frontZ], rotation: 0.2 }];

@@ -25,9 +25,10 @@ const specs = {
   flowers: { file: 'shrub_01_joined', bounds: [.65, .55, .65], dir: 'env' },
   'water-manhole': { file: 'water_manhole_cover_opt', bounds: [.72, .08, .72], dir: 'env' },
   'env-planter-urn': { file: 'planter', bounds: [1.18, 1.02, 1.18], dir: 'env' },
+  'env-umbrella': { file: 'umbrella', bounds: [2.25, 2.5, 2.25], dir: 'env' },
   'recycling-bin': { file: 'trash_opt', bounds: [.52, 1.05, .52], dir: 'env' },
   'plaza-ground-slab': { file: 'roof_opt', bounds: [8.19, 0.08, 7.13], dir: 'env' },
-  'booth-planter': { file: 'planter', bounds: [0.65, 0.58, 0.65], dir: 'env' },
+  'booth-planter': { file: 'tree-gian', bounds: [1.28, 2.08, 1.36], dir: 'env' },
   'city-a': { file: 'ppwtREejXg', bounds: [1, 1, 1] },
   'city-b': { file: 'yKo7F36Qk2', bounds: [1, 1, 1] },
   'city-1': { file: 'building03_joined', bounds: [1, 1, 1], dir: 'env' },
@@ -148,7 +149,7 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
           m.metalness = 0.72; // subtle metallic reflection
         }
       }
-      if (id === 'env-planter-urn' || id === 'booth-planter') {
+      if (id === 'env-planter-urn') {
         if (/concret/i.test(m.name)) {
           m.color.set('#d8dcd6'); // bright natural limestone / terrazzo
           m.roughness = 0.65;
@@ -157,6 +158,18 @@ async function loadAsset(id: ExteriorAssetId, low = false): Promise<Asset> {
           m.color.set('#334155'); // anodized dark slate metal trim
           m.roughness = 0.35;
           m.metalness = 0.75;
+        }
+      }
+      if (id === 'env-umbrella') {
+        m.depthWrite = true;
+      }
+      if (id === 'booth-planter') {
+        if (m.name === 'Kora1') {
+          m.color.set('#7c5c3e');
+          m.roughness = 0.78;
+        } else if (m.name === 'Groundcover_Cedar') {
+          m.color.set('#3b2f24');
+          m.roughness = 0.92;
         }
       }
       if (/leaf|leaves|twig|shrub|flower/i.test(m.name)) {
@@ -262,20 +275,21 @@ function AssetPart({ part, placements, shadows, level = 'all' }: { part: Part; p
 function Fallback({ id, placements }: { id: ExteriorAssetId; placements: ExteriorPlacement[] }) {
   const objects = useMemo(() => placements.map(() => {
     if (id === 'fountain') return buildCentralPlazaFountainModel();
-    if (id.startsWith('env-')) return cloneCachedAsset(id as GlbAssetId);
+    if (id.startsWith('env-') && id !== 'env-umbrella') return cloneCachedAsset(id as GlbAssetId);
     const group = new THREE.Group();
     const geometry = id === 'flowers' ? new THREE.SphereGeometry(.16, 8, 6)
       : id === 'recycling-bin' ? new THREE.CylinderGeometry(.2, .17, .64, 12)
       : id === 'jacaranda-tree' ? new THREE.CylinderGeometry(0.2, 0.4, 5, 8)
-      : id === 'booth-planter' ? new THREE.BoxGeometry(0.65, 0.58, 0.65)
+      : id === 'booth-planter' ? new THREE.CylinderGeometry(0.32, 0.24, 1.85, 10)
+      : id === 'env-umbrella' ? new THREE.CylinderGeometry(1.1, 1.1, 2.24, 12)
       : id === 'plaza-ground-slab' ? new THREE.BoxGeometry(8.19, 0.08, 7.13)
       : new THREE.BoxGeometry(1, 1, 1);
-    geometry.translate(0, id === 'flowers' ? .1 : id === 'recycling-bin' ? .32 : id === 'jacaranda-tree' ? 2.5 : id === 'booth-planter' ? 0.29 : .5, 0);
+    geometry.translate(0, id === 'flowers' ? .1 : id === 'recycling-bin' ? .32 : id === 'jacaranda-tree' ? 2.5 : id === 'booth-planter' ? 0.925 : id === 'env-umbrella' ? 1.12 : .5, 0);
     group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: id === 'flowers' || id === 'booth-planter' ? '#7f9962' : id === 'jacaranda-tree' ? '#4d7c0f' : '#a6aaa8', roughness: .9 })));
     return group;
   }), [id, placements]);
   useEffect(() => () => {
-    if (!id.startsWith('env-')) objects.forEach(source => { if (source) releaseAsset({ source, parts: [] }); });
+    if (!id.startsWith('env-') || id === 'env-umbrella') objects.forEach(source => { if (source) releaseAsset({ source, parts: [] }); });
   }, [id, objects]);
   return <group dispose={null}>{objects.map((object, i) => object && <primitive key={i} object={object} position={placements[i].position} rotation={[0, placements[i].rotation || 0, 0]} scale={placements[i].scale ?? 1} />)}</group>;
 }
