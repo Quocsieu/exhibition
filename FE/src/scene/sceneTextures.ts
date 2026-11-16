@@ -334,13 +334,13 @@ export function createBoothSignTexture(options: {
 
     // Center Full Enterprise Name (100% complete — never truncated with `...`)
     const fullEnterpriseTitle = options.name.toUpperCase();
-    const fittedTitle = fitEnterpriseTitleLines(ctx, fullEnterpriseTitle, 980, 58, 32);
+    const fittedTitle = fitEnterpriseTitleLines(ctx, fullEnterpriseTitle, 980, 62, 36);
     ctx.save();
     ctx.font = `900 ${fittedTitle.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
     ctx.textAlign = 'left';
     ctx.fillStyle = pal.textMain;
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
-    ctx.shadowBlur = 8;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.65)';
+    ctx.shadowBlur = 10;
     ctx.shadowOffsetY = 2;
 
     if (fittedTitle.lines.length === 1) {
@@ -353,7 +353,7 @@ export function createBoothSignTexture(options: {
 
     // Subtitle: Booth Name & Category
     const categoryHeader = `★ ${options.category.toUpperCase()} ★`;
-    const fittedSub = fitEnterpriseTitleLines(ctx, categoryHeader, 980, 28, 20);
+    const fittedSub = fitEnterpriseTitleLines(ctx, categoryHeader, 980, 30, 22);
     ctx.font = `800 ${fittedSub.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
     ctx.textAlign = 'left';
     ctx.fillStyle = pal.textSub;

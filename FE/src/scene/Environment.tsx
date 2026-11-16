@@ -86,16 +86,16 @@ export const CENTRAL_PLANTER_ISLANDS: PlanterIslandConfig[] = [
 // and side gaps between booths — ZERO trees placed in front of the 6 booths so all facades,
 // entrance doors, signboards, and radial walkways remain 100% unobstructed.
 export const PERIMETER_TREES: [number, number, number][] = [
-  [-16.6, -16.6, 0.64],
-  [16.6, -16.6, 0.64],
-  [-16.6, 16.6, 0.64],
-  [16.8, 14.2, 0.6],
-  [-17.0, -11.8, 0.64],
-  [17.0, -12.2, 0.6],
-  [-7.8, -16.8, 0.62],
-  [7.8, -16.8, 0.62],
-  [-17.0, 11.8, 0.62],
-  [8.2, 16.8, 0.58],
+  [-16.6, -16.6, 0.78],
+  [16.6, -16.6, 0.76],
+  [-16.6, 16.6, 0.8],
+  [16.8, 16.2, 0.74],
+  [-17.2, -11.8, 0.76],
+  [17.2, -12.2, 0.74],
+  [-7.8, -17.0, 0.76],
+  [7.8, -17.0, 0.76],
+  [-17.2, 11.8, 0.78],
+  [8.4, 17.0, 0.74],
 ];
 
 export const ALL_TREES: {
@@ -181,7 +181,7 @@ const BOOTH_CONNECTOR_PATHS: {
   { x: 0, z: 8.8, w: 3.3, d: 6.4, ry: Math.PI, accent: '#14b8a6' },
 ];
 
-// Cohesive Stylized 3D Urban Perimeter Architecture framing North, West, and East Boulevards (Phase 5)
+// Cohesive Stylized 3D Urban Perimeter Architecture framing North, West, and East Boulevards (Phase 5 & V4.1 Task C)
 const STYLIZED_CITY_BUILDINGS: {
   x: number;
   z: number;
@@ -190,36 +190,36 @@ const STYLIZED_CITY_BUILDINGS: {
   sz: number;
   ry: number;
 }[] = [
-  // North Boulevard Skyline (Aligned along outer urban terrace z = -31.5, facing South towards Plaza, ry = 0)
-  { x: -29.5, z: -31.5, sx: 7.4, sy: 13.8, sz: 6.4, ry: 0 },
-  { x: -19.8, z: -31.5, sx: 7.2, sy: 15.6, sz: 6.4, ry: 0 },
-  { x: -10.0, z: -31.5, sx: 7.4, sy: 12.8, sz: 6.2, ry: 0 },
-  { x: 0, z: -31.8, sx: 8.2, sy: 17.2, sz: 6.6, ry: 0 },
-  { x: 10.0, z: -31.5, sx: 7.4, sy: 13.4, sz: 6.2, ry: 0 },
-  { x: 19.8, z: -31.5, sx: 7.2, sy: 15.2, sz: 6.4, ry: 0 },
-  { x: 29.5, z: -31.5, sx: 7.4, sy: 13.2, sz: 6.4, ry: 0 },
+  // North Boulevard Skyline (Aligned along outer urban terrace z = -31.8, facing South towards Plaza, ry = 0)
+  { x: -29.5, z: -31.8, sx: 6.4, sy: 9.8, sz: 5.6, ry: 0 },
+  { x: -19.8, z: -31.8, sx: 6.4, sy: 10.8, sz: 5.6, ry: 0 },
+  { x: -10.0, z: -31.8, sx: 6.4, sy: 9.6, sz: 5.6, ry: 0 },
+  { x: 0, z: -32.0, sx: 6.8, sy: 11.4, sz: 5.8, ry: 0 },
+  { x: 10.0, z: -31.8, sx: 6.4, sy: 9.8, sz: 5.6, ry: 0 },
+  { x: 19.8, z: -31.8, sx: 6.4, sy: 10.6, sz: 5.6, ry: 0 },
+  { x: 29.5, z: -31.8, sx: 6.4, sy: 9.6, sz: 5.6, ry: 0 },
 
-  // West Avenue Skyline (Aligned along outer urban terrace x = -31.5, facing East towards Plaza, ry = Math.PI / 2)
-  { x: -31.5, z: -20.5, sx: 6.6, sy: 14.2, sz: 6.8, ry: Math.PI / 2 },
-  { x: -31.5, z: -9.5, sx: 6.8, sy: 12.4, sz: 6.8, ry: Math.PI / 2 },
-  { x: -31.5, z: 7.5, sx: 6.6, sy: 13.6, sz: 6.8, ry: Math.PI / 2 },
-  { x: -31.5, z: 18.5, sx: 6.8, sy: 12.6, sz: 6.6, ry: Math.PI / 2 },
+  // West Avenue Skyline (Aligned along outer urban terrace x = -31.8, facing East towards Plaza, ry = Math.PI / 2)
+  { x: -31.8, z: -20.5, sx: 5.8, sy: 10.2, sz: 5.8, ry: Math.PI / 2 },
+  { x: -31.8, z: -9.5, sx: 5.8, sy: 9.2, sz: 5.8, ry: Math.PI / 2 },
+  { x: -31.8, z: 7.5, sx: 5.8, sy: 9.8, sz: 5.8, ry: Math.PI / 2 },
+  { x: -31.8, z: 18.5, sx: 5.8, sy: 9.0, sz: 5.6, ry: Math.PI / 2 },
 
-  // East Avenue Skyline (Aligned along outer urban terrace x = 31.5, facing West towards Plaza, ry = -Math.PI / 2)
-  { x: 31.5, z: -20.5, sx: 6.6, sy: 13.8, sz: 6.8, ry: -Math.PI / 2 },
-  { x: 31.5, z: -9.5, sx: 6.8, sy: 12.0, sz: 6.8, ry: -Math.PI / 2 },
-  { x: 31.5, z: 7.5, sx: 6.6, sy: 14.0, sz: 6.8, ry: -Math.PI / 2 },
-  { x: 31.5, z: 18.5, sx: 6.8, sy: 12.6, sz: 6.6, ry: -Math.PI / 2 },
+  // East Avenue Skyline (Aligned along outer urban terrace x = 31.8, facing West towards Plaza, ry = -Math.PI / 2)
+  { x: 31.8, z: -20.5, sx: 5.8, sy: 10.0, sz: 5.8, ry: -Math.PI / 2 },
+  { x: 31.8, z: -9.5, sx: 5.8, sy: 9.2, sz: 5.8, ry: -Math.PI / 2 },
+  { x: 31.8, z: 7.5, sx: 5.8, sy: 9.8, sz: 5.8, ry: -Math.PI / 2 },
+  { x: 31.8, z: 18.5, sx: 5.8, sy: 9.0, sz: 5.6, ry: -Math.PI / 2 },
 ];
 
 // Distant Low-Poly Parkland Hills around the outer horizon
 const HORIZON_HILLS: { x: number; z: number; sx: number; sy: number; sz: number }[] = [
-  { x: -42, z: -40, sx: 16, sy: 5.2, sz: 12 },
-  { x: -16, z: -44, sx: 18, sy: 6.4, sz: 14 },
-  { x: 16, z: -44, sx: 18, sy: 5.8, sz: 14 },
-  { x: 42, z: -40, sx: 16, sy: 4.8, sz: 12 },
-  { x: -44, z: -14, sx: 12, sy: 4.6, sz: 16 },
-  { x: -44, z: 14, sx: 12, sy: 4.2, sz: 15 },
+  { x: -46, z: -48, sx: 16, sy: 5.2, sz: 11 },
+  { x: -16, z: -50, sx: 18, sy: 6.4, sz: 12 },
+  { x: 16, z: -50, sx: 18, sy: 5.8, sz: 12 },
+  { x: 46, z: -48, sx: 16, sy: 4.8, sz: 11 },
+  { x: -48, z: -14, sx: 11, sy: 4.6, sz: 16 },
+  { x: -48, z: 14, sx: 11, sy: 4.2, sz: 15 },
 ];
 
 // 8 Perimeter Festival Flag Totems along outer balustrade removed per exterior visual fix request

@@ -657,11 +657,11 @@ export const Booth: React.FC<BoothProps> = React.memo(
 
         {/* Active Selection Glow Trim & Interactive Entrance Beacon */}
         <mesh position={[0, 0.03, 0]}>
-          <boxGeometry args={[vw + 1.35, 0.04, vd + 1.15]} />
+          <boxGeometry args={[vw + 1.38, 0.05, vd + 1.18]} />
           <meshBasicMaterial
             color={booth.color}
             transparent
-            opacity={active ? 0.95 : 0.45}
+            opacity={active ? 0.98 : 0.72}
           />
         </mesh>
 
