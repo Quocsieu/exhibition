@@ -93,16 +93,97 @@ const STEPPED_RACK_BACKBOARD_GEOM = new THREE.BoxGeometry(1.28, 1.18, 0.05);
 const SHELF_STRUT_ROD_GEOM = new THREE.CylinderGeometry(0.018, 0.018, 1.22, 8);
 const SHELF_CORNER_BRACKET_GEOM = new THREE.BoxGeometry(0.08, 0.12, 0.08);
 
-// Portrait Showroom Product Display Panel Geometries (1 : 1.21 aspect ratio matching 1024 × 1240 texture)
-const SLOT_EMPTY_BEVEL_GEOM = new THREE.BoxGeometry(1.08, 0.014, 0.58);
-const SLOT_EMPTY_INLAY_GEOM = new THREE.BoxGeometry(1.02, 0.016, 0.52);
-const SLOT_EMPTY_CORNER_GEOM = new THREE.BoxGeometry(0.06, 0.018, 0.06);
+// Portrait Showroom Product Display Panel Geometries
 const SLOT_STAND_BASE_GEOM = new THREE.BoxGeometry(1.08, 0.036, 0.36);
 const SLOT_STAND_LED_TRIM_GEOM = new THREE.BoxGeometry(1.11, 0.012, 0.38);
 const SLOT_STAND_STRUT_GEOM = new THREE.BoxGeometry(0.26, 0.48, 0.05);
 const SLOT_CARD_FRAME_GEOM = new THREE.BoxGeometry(1.14, 1.38, 0.046);
 const SLOT_CARD_BEZEL_GEOM = new THREE.BoxGeometry(1.18, 1.42, 0.03);
 const SLOT_CARD_PLANE_GEOM = new THREE.PlaneGeometry(1.1, 1.33);
+
+// Flush Backdrop Recessed Display Bay Geometries (Fits cleanly inside the two 1.61m × 1.75m backdrop bays)
+export const BACKDROP_LEFT_BAY_LOCAL_POS: readonly [number, number, number] = [-0.882, 1.674, -1.842];
+export const BACKDROP_RIGHT_BAY_LOCAL_POS: readonly [number, number, number] = [0.882, 1.674, -1.842];
+const BACKDROP_BAY_BEZEL_GEOM = new THREE.BoxGeometry(1.5, 1.64, 0.012);
+const BACKDROP_BAY_FRAME_GEOM = new THREE.BoxGeometry(1.46, 1.6, 0.014);
+const BACKDROP_BAY_PLANE_GEOM = new THREE.PlaneGeometry(1.42, 1.56);
+
+export interface ResolvedBoothDisplaySlots {
+  leftBackdropSlot: BoothSlotView | null;
+  rightBackdropSlot: BoothSlotView | null;
+  remainingShelfSlots: BoothSlotView[];
+}
+
+/**
+ * Deterministically maps a booth's 6 `BoothSlotView` records (`slot_01..slot_06`) into the two
+ * built-in Backdrop Display Bays (`leftBackdropSlot`, `rightBackdropSlot`) and any overflow
+ * secondary shelf slots (`remainingShelfSlots`), without altering `slotId`, `productId`, or Admin data:
+ * - Removes all protruding standing panels from the front center counter (`slot_01`, `slot_02`).
+ * - Places up to 2 primary occupied products into the Left & Right Backdrop Bays (`0` -> both empty,
+ *   `1` -> single bay occupied & other empty, `2` -> both bays occupied, `>2` -> 2 bays occupied + remaining on shelves).
+ */
+export function resolveBoothBackdropAndShelfSlots(
+  resolvedSlots: BoothSlotView[]
+): ResolvedBoothDisplaySlots {
+  const byId = new Map<string, BoothSlotView>();
+  for (const sv of resolvedSlots) {
+    byId.set(sv.slot.slotId, sv);
+  }
+
+  const occupied = resolvedSlots.filter((sv) => Boolean(sv.product));
+  let leftBackdropSlot: BoothSlotView | null = null;
+  let rightBackdropSlot: BoothSlotView | null = null;
+
+  const slot01 = byId.get('slot_01');
+  const slot02 = byId.get('slot_02');
+
+  if (slot01?.product) {
+    leftBackdropSlot = slot01;
+  }
+  if (slot02?.product) {
+    rightBackdropSlot = slot02;
+  }
+
+  const unassignedShelfOccupied = occupied.filter(
+    (sv) => sv !== leftBackdropSlot && sv !== rightBackdropSlot && sv.slot.zone !== 'counter'
+  );
+
+  if (occupied.length === 1 && !leftBackdropSlot && !rightBackdropSlot && unassignedShelfOccupied.length === 1) {
+    const only = unassignedShelfOccupied[0];
+    if (only.slot.zone === 'right-shelf') {
+      rightBackdropSlot = only;
+    } else {
+      leftBackdropSlot = only;
+    }
+  } else {
+    if (!leftBackdropSlot && unassignedShelfOccupied.length > 0) {
+      const preferredLeft =
+        unassignedShelfOccupied.find((sv) => sv.slot.zone === 'left-shelf') ||
+        unassignedShelfOccupied[0];
+      leftBackdropSlot = preferredLeft;
+    }
+
+    const afterLeft = unassignedShelfOccupied.filter((sv) => sv !== leftBackdropSlot);
+    if (!rightBackdropSlot && afterLeft.length > 0) {
+      const preferredRight =
+        afterLeft.find((sv) => sv.slot.zone === 'right-shelf') || afterLeft[0];
+      rightBackdropSlot = preferredRight;
+    }
+  }
+
+  const remainingShelfSlots = occupied.filter(
+    (sv) =>
+      sv !== leftBackdropSlot &&
+      sv !== rightBackdropSlot &&
+      sv.slot.zone !== 'counter'
+  );
+
+  return {
+    leftBackdropSlot,
+    rightBackdropSlot,
+    remainingShelfSlots,
+  };
+}
 
 const SIGN_HOOD_VISOR_GEOM = new THREE.BoxGeometry(1, 0.06, 0.44);
 const SIGN_BRACKET_GEOM = new THREE.BoxGeometry(0.12, 0.42, 0.22);
@@ -177,11 +258,6 @@ const ANODIZED_TITANIUM_MAT = new THREE.MeshStandardMaterial({
   roughness: 0.28,
   metalness: 0.75,
 });
-const GALLERY_FELT_MAT = new THREE.MeshStandardMaterial({
-  color: '#475569',
-  roughness: 0.85,
-  metalness: 0.02,
-});
 const BRASS_ACCENT_MAT = new THREE.MeshStandardMaterial({
   color: '#d97706',
   metalness: 0.78,
@@ -242,6 +318,8 @@ interface SlotProductDisplayProps {
   isSelected: boolean;
   brandMat: THREE.Material;
   onSelectProduct?: (product: Product) => void;
+  placementMode?: 'backdrop' | 'shelf';
+  backdropLocalPos?: readonly [number, number, number];
 }
 
 const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
@@ -251,6 +329,8 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
     isSelected,
     brandMat,
     onSelectProduct,
+    placementMode = 'shelf',
+    backdropLocalPos,
   }) => {
     const [hovered, setHovered] = useState(false);
     const { slot, product } = slotView;
@@ -291,13 +371,59 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
       };
     }, [cardTexture]);
 
-    // Product-First 3-Zone Display Scale:
-    // - KHU B Main Hero Slots (slot_01, slot_02 on center podium): [1.36, 1.44, 1.15] -> 1.60m wide × 2.04m tall
-    // - KHU C Secondary Shelf Slots (slot_03..06 on left/right 2-tier shelves): [0.98, 0.85, 1.0] -> 1.16m wide × 1.21m tall
-    const isHeroCounterSlot = slot.zone === 'counter';
-    const baseScale: [number, number, number] = isHeroCounterSlot
-      ? [1.36, 1.44, 1.15]
-      : [0.98, 0.85, 1.0];
+    if (!product) {
+      return null;
+    }
+
+    // Mode 1: Flush Backdrop Display Bay Integration (Zero protruding stand, mounted inside backdrop recess)
+    if (placementMode === 'backdrop' && backdropLocalPos) {
+      const bayScale: [number, number, number] = highlighted ? [1.018, 1.018, 1] : [1, 1, 1];
+      return (
+        <group
+          position={[backdropLocalPos[0], backdropLocalPos[1], backdropLocalPos[2]]}
+          scale={bayScale}
+          onClick={
+            onSelectProduct
+              ? (e) => {
+                  e.stopPropagation();
+                  onSelectProduct(product);
+                }
+              : undefined
+          }
+          onPointerOver={(e) => {
+            e.stopPropagation();
+            setHovered(true);
+            document.body.style.cursor = 'pointer';
+          }}
+          onPointerOut={(e) => {
+            e.stopPropagation();
+            setHovered(false);
+            document.body.style.cursor = 'auto';
+          }}
+        >
+          {/* Flush recessed outer highlight trim */}
+          <mesh
+            position={[0, 0, -0.004]}
+            geometry={BACKDROP_BAY_BEZEL_GEOM}
+            material={highlighted ? GOLD_BASIC_MAT : brandMat}
+          />
+          {/* Thin architectural display backing */}
+          <mesh
+            geometry={BACKDROP_BAY_FRAME_GEOM}
+            material={highlighted ? GOLD_SHOWCASE_MAT : DARK_NAVY_MAT}
+          />
+          {/* Crisp Product Photo, Name, Price & Detail CTA Surface */}
+          {cardTexture && (
+            <mesh position={[0, 0, 0.009]} geometry={BACKDROP_BAY_PLANE_GEOM}>
+              <meshBasicMaterial map={cardTexture} toneMapped={false} />
+            </mesh>
+          )}
+        </group>
+      );
+    }
+
+    // Mode 2: Overflow Secondary Shelf Slots (>2 products on booth, e.g. slot_03..slot_06)
+    const baseScale: [number, number, number] = [0.98, 0.85, 1.0];
     const displayScale: [number, number, number] = highlighted
       ? [baseScale[0] * 1.03, baseScale[1] * 1.03, baseScale[2] * 1.03]
       : baseScale;
@@ -305,25 +431,22 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
       slot.zone === 'left-shelf' ? -0.06 : slot.zone === 'right-shelf' ? 0.06 : 0;
 
     const hasValidModelUrl = Boolean(
-      product?.modelUrl && /\.(glb|gltf)(\?.*)?$/i.test(product.modelUrl.trim())
+      product.modelUrl && /\.(glb|gltf)(\?.*)?$/i.test(product.modelUrl.trim())
     );
 
     const renderFramedPhotoStand = () => (
       <group position={[0, 0.725, 0.026]} rotation={[-0.02, 0, 0]}>
-        {/* Outer highlight bezel */}
         <mesh
           position={[0, 0, -0.005]}
           geometry={SLOT_CARD_BEZEL_GEOM}
           material={highlighted ? GOLD_BASIC_MAT : brandMat}
         />
-        {/* 3D Display Board Body with physical depth */}
         <mesh
           castShadow
           receiveShadow
           geometry={SLOT_CARD_FRAME_GEOM}
           material={highlighted ? GOLD_SHOWCASE_MAT : DARK_NAVY_MAT}
         />
-        {/* Crisp Front Product Photo Display Surface */}
         {cardTexture && (
           <mesh position={[0, 0, 0.025]} geometry={SLOT_CARD_PLANE_GEOM}>
             <meshBasicMaterial map={cardTexture} toneMapped={false} />
@@ -337,89 +460,55 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
         position={slot.position}
         rotation={[slot.rotation[0], slot.rotation[1] + facingYawOffset, slot.rotation[2]]}
         onClick={
-          product && onSelectProduct
+          onSelectProduct
             ? (e) => {
                 e.stopPropagation();
                 onSelectProduct(product);
               }
             : undefined
         }
-        onPointerOver={
-          product
-            ? (e) => {
-                e.stopPropagation();
-                setHovered(true);
-                document.body.style.cursor = 'pointer';
-              }
-            : undefined
-        }
-        onPointerOut={
-          product
-            ? () => {
-                setHovered(false);
-                document.body.style.cursor = 'auto';
-              }
-            : undefined
-        }
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          setHovered(true);
+          document.body.style.cursor = 'pointer';
+        }}
+        onPointerOut={(e) => {
+          e.stopPropagation();
+          setHovered(false);
+          document.body.style.cursor = 'auto';
+        }}
       >
-        {!product ? (
-          /* Empty Slot: Clean, refined architectural exhibition presentation plinth pad */
-          <group position={[0, 0, 0]}>
-            <mesh position={[0, 0.007, 0]} geometry={SLOT_EMPTY_BEVEL_GEOM} material={brandMat} />
-            <mesh
-              position={[0, 0.01, 0]}
-              geometry={SLOT_EMPTY_INLAY_GEOM}
-              material={GALLERY_FELT_MAT}
-            />
-            {/* Elegant brass corner alignment brackets */}
-            {[-0.48, 0.48].map((cx) =>
-              [-0.23, 0.23].map((cz) => (
-                <mesh
-                  key={`corner-${cx}-${cz}`}
-                  position={[cx, 0.012, cz]}
-                  geometry={SLOT_EMPTY_CORNER_GEOM}
-                  material={BRASS_ACCENT_MAT}
-                />
-              ))
-            )}
-          </group>
-        ) : (
-          /* Occupied Slot: Flush 3D Display Stand sitting directly on the shelf/podium at y = 0 */
-          <group scale={displayScale}>
-            {/* Flush Display Plinth Base sitting at y = 0..0.038 */}
-            <mesh
-              position={[0, 0.019, 0]}
-              castShadow
-              receiveShadow
-              geometry={SLOT_STAND_BASE_GEOM}
-              material={DARK_NAVY_MAT}
-            />
-            <mesh
-              position={[0, 0.04, 0]}
-              geometry={SLOT_STAND_LED_TRIM_GEOM}
-              material={highlighted ? GOLD_BASIC_MAT : brandMat}
-            />
-            {/* Rear 3D Easel Support Strut */}
-            <mesh
-              position={[0, 0.19, -0.075]}
-              rotation={[0.22, 0, 0]}
-              castShadow
-              geometry={SLOT_STAND_STRUT_GEOM}
-              material={SLATE_DARK_MAT}
-            />
+        <group scale={displayScale}>
+          <mesh
+            position={[0, 0.019, 0]}
+            castShadow
+            receiveShadow
+            geometry={SLOT_STAND_BASE_GEOM}
+            material={DARK_NAVY_MAT}
+          />
+          <mesh
+            position={[0, 0.04, 0]}
+            geometry={SLOT_STAND_LED_TRIM_GEOM}
+            material={highlighted ? GOLD_BASIC_MAT : brandMat}
+          />
+          <mesh
+            position={[0, 0.19, -0.075]}
+            rotation={[0.22, 0, 0]}
+            castShadow
+            geometry={SLOT_STAND_STRUT_GEOM}
+            material={SLATE_DARK_MAT}
+          />
 
-            {/* Priority 1: 3D GLB/GLTF Model if valid modelUrl exists; Priority 2: 3D Product Photo Display Stand */}
-            {hasValidModelUrl && product.modelUrl ? (
-              <SlotModelErrorBoundary fallback={renderFramedPhotoStand()}>
-                <Suspense fallback={renderFramedPhotoStand()}>
-                  <SlotGlbModel url={product.modelUrl.trim()} />
-                </Suspense>
-              </SlotModelErrorBoundary>
-            ) : (
-              renderFramedPhotoStand()
-            )}
-          </group>
-        )}
+          {hasValidModelUrl && product.modelUrl ? (
+            <SlotModelErrorBoundary fallback={renderFramedPhotoStand()}>
+              <Suspense fallback={renderFramedPhotoStand()}>
+                <SlotGlbModel url={product.modelUrl.trim()} />
+              </Suspense>
+            </SlotModelErrorBoundary>
+          ) : (
+            renderFramedPhotoStand()
+          )}
+        </group>
       </group>
     );
   }
@@ -471,6 +560,27 @@ export const Booth: React.FC<BoothProps> = React.memo(
     const occupiedSlotCount = useMemo(
       () => resolvedSlots.filter((s) => Boolean(s.product)).length,
       [resolvedSlots]
+    );
+
+    const { leftBackdropSlot, rightBackdropSlot, remainingShelfSlots } = useMemo(
+      () => resolveBoothBackdropAndShelfSlots(resolvedSlots),
+      [resolvedSlots]
+    );
+
+    const leftBayPos = useMemo<readonly [number, number, number]>(
+      () =>
+        isBoothV2
+          ? BACKDROP_LEFT_BAY_LOCAL_POS
+          : [-0.882, 1.674, -vd / 2 + 0.263],
+      [isBoothV2, vd]
+    );
+
+    const rightBayPos = useMemo<readonly [number, number, number]>(
+      () =>
+        isBoothV2
+          ? BACKDROP_RIGHT_BAY_LOCAL_POS
+          : [0.882, 1.674, -vd / 2 + 0.263],
+      [isBoothV2, vd]
     );
 
     const brandStandardMat = useMemo(
@@ -924,9 +1034,43 @@ export const Booth: React.FC<BoothProps> = React.memo(
         )}
 
         {/* ================================================================
-            3. DETERMINISTIC 3D SLOT PRODUCT RENDERING (`slot_01` .. `slot_06`)
+            3. BACKDROP-INTEGRATED PRODUCT DISPLAYS + OVERFLOW SECONDARY SHELVES
            ================================================================ */}
-        {resolvedSlots.map((slotView) => (
+        {leftBackdropSlot && (
+          <SlotProductDisplay
+            key={`backdrop-left-${leftBackdropSlot.slot.slotId}`}
+            slotView={leftBackdropSlot}
+            accentColor={booth.color}
+            isSelected={Boolean(
+              leftBackdropSlot.product &&
+                (selectedProductId === leftBackdropSlot.product.id ||
+                  npcHighlightedProductId === leftBackdropSlot.product.id)
+            )}
+            brandMat={brandFlatMat}
+            onSelectProduct={onSelectProduct}
+            placementMode="backdrop"
+            backdropLocalPos={leftBayPos}
+          />
+        )}
+
+        {rightBackdropSlot && (
+          <SlotProductDisplay
+            key={`backdrop-right-${rightBackdropSlot.slot.slotId}`}
+            slotView={rightBackdropSlot}
+            accentColor={booth.color}
+            isSelected={Boolean(
+              rightBackdropSlot.product &&
+                (selectedProductId === rightBackdropSlot.product.id ||
+                  npcHighlightedProductId === rightBackdropSlot.product.id)
+            )}
+            brandMat={brandFlatMat}
+            onSelectProduct={onSelectProduct}
+            placementMode="backdrop"
+            backdropLocalPos={rightBayPos}
+          />
+        )}
+
+        {remainingShelfSlots.map((slotView) => (
           <SlotProductDisplay
             key={slotView.slot.slotId}
             slotView={slotView}
@@ -938,6 +1082,7 @@ export const Booth: React.FC<BoothProps> = React.memo(
             )}
             brandMat={brandFlatMat}
             onSelectProduct={onSelectProduct}
+            placementMode="shelf"
           />
         ))}
 

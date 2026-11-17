@@ -980,22 +980,41 @@ export function createEnterpriseBackdropTexture(options: {
     }
     ctx.restore();
 
-    // Dual soft showroom spotlight halos behind Left Hero Bay (slot_01) & Right Hero Bay (slot_02)
-    for (const bayCenterX of [284, 740]) {
-      const radial = ctx.createRadialGradient(bayCenterX, 330, 24, bayCenterX, 330, 220);
-      radial.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
-      radial.addColorStop(0.55, 'rgba(56, 189, 248, 0.04)');
+    // Dual showroom display bays on Left (x = 76..492, center 284) & Right (x = 532..948, center 740)
+    for (const [bayIdx, bayCenterX] of [284, 740].entries()) {
+      const bayX = bayCenterX - 208;
+      const bayY = 104;
+      const bayW = 416;
+      const bayH = 442;
+
+      const radial = ctx.createRadialGradient(bayCenterX, 325, 24, bayCenterX, 325, 224);
+      radial.addColorStop(0, 'rgba(255, 255, 255, 0.10)');
+      radial.addColorStop(0.6, 'rgba(56, 189, 248, 0.03)');
       radial.addColorStop(1, 'rgba(15, 23, 42, 0)');
       ctx.fillStyle = radial;
-      ctx.fillRect(bayCenterX - 230, 96, 460, 450);
+      ctx.fillRect(bayCenterX - 224, 96, 448, 456);
 
-      // Subtle architectural recessed bay frame behind each main product
+      // Recessed architectural display bay frame (visible around product card or as clean empty bay)
       ctx.save();
-      createRoundRectPath(ctx, bayCenterX - 208, 108, 416, 434, 24);
+      createRoundRectPath(ctx, bayX, bayY, bayW, bayH, 22);
+      ctx.fillStyle = 'rgba(9, 14, 26, 0.58)';
+      ctx.fill();
       ctx.strokeStyle = pal.border;
-      ctx.globalAlpha = 0.28;
-      ctx.lineWidth = 3;
+      ctx.globalAlpha = 0.42;
+      ctx.lineWidth = 3.5;
       ctx.stroke();
+      ctx.restore();
+
+      // Subtle empty-bay watermark (covered completely when a product card is mounted in this bay)
+      ctx.save();
+      ctx.globalAlpha = 0.26;
+      ctx.font = '700 18px Inter, Segoe UI, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = pal.textSub;
+      ctx.fillText(`Ô TRƯNG BÀY 0${bayIdx + 1}`, bayCenterX, 318);
+      ctx.font = '600 14px Inter, Segoe UI, Arial, sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('Chưa gán sản phẩm', bayCenterX, 344);
       ctx.restore();
     }
 
@@ -1290,25 +1309,40 @@ export function createProductDisplayCardTexture(options: {
     ctx.fillStyle = options.selected ? '#fbbf24' : options.accentColor || '#38bdf8';
     ctx.fillRect(infoX + 28, infoY, infoW - 56, 6);
 
-    // Product Name: up to 3 full-width lines in huge high-contrast white typography
-    const titleLines = wrapProductTitleLines(ctx, options.name, 932, 44, undefined, 3);
+    // Product Name: up to 3 full-width lines in huge high-contrast white typography (strictly width-fitted)
+    const fontFamily = 'Inter, Segoe UI, Arial, sans-serif';
+    const maxTitleWidth = 912;
+    let titleFontPx = 48;
+    let titleLines = wrapProductTitleLines(ctx, options.name, maxTitleWidth, 48, fontFamily, 1);
+    if (
+      titleLines.length > 1 ||
+      titleLines[0]?.endsWith('…') ||
+      measureCanvasTextWidth(ctx, titleLines[0] || '', 48, '900', fontFamily) > maxTitleWidth
+    ) {
+      const twoLineCheck = wrapProductTitleLines(ctx, options.name, maxTitleWidth, 44, fontFamily, 3);
+      if (twoLineCheck.length <= 2) {
+        titleFontPx = 44;
+        titleLines = twoLineCheck;
+      } else {
+        titleFontPx = 39;
+        titleLines = wrapProductTitleLines(ctx, options.name, maxTitleWidth, 39, fontFamily, 3);
+      }
+    }
     ctx.textAlign = 'left';
     ctx.fillStyle = '#ffffff';
+    ctx.font = `900 ${titleFontPx}px ${fontFamily}`;
     if (titleLines.length === 1) {
-      ctx.font = '900 52px Inter, Segoe UI, Arial, sans-serif';
-      ctx.fillText(titleLines[0], 46, 946);
+      ctx.fillText(titleLines[0], 46, 944, maxTitleWidth);
     } else if (titleLines.length === 2) {
-      ctx.font = '900 46px Inter, Segoe UI, Arial, sans-serif';
-      ctx.fillText(titleLines[0], 46, 912);
-      ctx.fillText(titleLines[1], 46, 974);
+      ctx.fillText(titleLines[0], 46, 912, maxTitleWidth);
+      ctx.fillText(titleLines[1], 46, 972, maxTitleWidth);
     } else {
-      ctx.font = '900 40px Inter, Segoe UI, Arial, sans-serif';
-      ctx.fillText(titleLines[0], 46, 892);
-      ctx.fillText(titleLines[1], 46, 944);
-      ctx.fillText(titleLines[2], 46, 996);
+      ctx.fillText(titleLines[0], 46, 892, maxTitleWidth);
+      ctx.fillText(titleLines[1], 46, 942, maxTitleWidth);
+      ctx.fillText(titleLines[2], 46, 992, maxTitleWidth);
     }
 
-    // Prominent Price Banner right below Product Name (e.g., `6.850.000 ₫`)
+    // Prominent Price Banner right below Product Name (auto-fitted for long prices)
     ctx.save();
     createRoundRectPath(ctx, 42, 1054, 728, 140, 20);
     ctx.fillStyle = 'rgba(251, 191, 36, 0.16)';
@@ -1318,10 +1352,19 @@ export function createProductDisplayCardTexture(options: {
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '900 62px Inter, Segoe UI, Arial, sans-serif';
+    const priceDisplay = truncateText(options.priceText, 22);
+    const maxPriceWidth = 680;
+    let priceFontPx = 60;
+    while (
+      priceFontPx > 36 &&
+      measureCanvasTextWidth(ctx, priceDisplay, priceFontPx, '900', fontFamily) > maxPriceWidth
+    ) {
+      priceFontPx -= 2;
+    }
+    ctx.font = `900 ${priceFontPx}px ${fontFamily}`;
     ctx.textAlign = 'left';
     ctx.fillStyle = '#fbbf24';
-    ctx.fillText(truncateText(options.priceText, 20), 66, 1146);
+    ctx.fillText(priceDisplay, 66, 1144, maxPriceWidth);
 
     // Interactive Action Pill on bottom-right of Price Row
     ctx.save();

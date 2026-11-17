@@ -696,10 +696,13 @@ function loadSharedNpcMaster(): Promise<CachedNpcMaster> {
   return loadingPromise;
 }
 
+export const NPC_NAMEPLATE_SIZE: readonly [number, number] = [0.68, 0.23];
+export const NPC_NAMEPLATE_OFFSET: readonly [number, number, number] = [0.16, 1.83, 0.06];
+
 const NPC_SHADOW_GEOM = new THREE.CircleGeometry(0.36, 24);
 const NPC_RING_GEOM = new THREE.RingGeometry(0.38, 0.48, 28);
 const NPC_HITBOX_GEOM = new THREE.CylinderGeometry(0.4, 0.4, 1.76, 12);
-const NPC_BADGE_PLANE_GEOM = new THREE.PlaneGeometry(1.72, 0.46);
+const NPC_BADGE_PLANE_GEOM = new THREE.PlaneGeometry(NPC_NAMEPLATE_SIZE[0], NPC_NAMEPLATE_SIZE[1]);
 
 const NPC_SHADOW_MAT = new THREE.MeshBasicMaterial({
   color: '#0f172a',
@@ -721,18 +724,18 @@ function createNpcBadgeTexture(opts: {
   isHovered: boolean;
 }): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 136;
+  canvas.width = 272;
+  canvas.height = 92;
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const x = 8;
-    const y = 8;
-    const w = canvas.width - 16;
-    const h = canvas.height - 16;
-    const r = 26;
+    const x = 5;
+    const y = 5;
+    const w = canvas.width - 10;
+    const h = canvas.height - 10;
+    const r = 20;
 
     ctx.save();
     ctx.beginPath();
@@ -747,29 +750,30 @@ function createNpcBadgeTexture(opts: {
     ctx.quadraticCurveTo(x, y, x + r, y);
     ctx.closePath();
 
-    ctx.fillStyle = opts.isActive ? 'rgba(15, 23, 42, 0.96)' : 'rgba(15, 23, 42, 0.88)';
+    ctx.fillStyle = opts.isActive ? 'rgba(15, 23, 42, 0.95)' : 'rgba(15, 23, 42, 0.88)';
     ctx.fill();
 
-    ctx.lineWidth = opts.isActive || opts.isHovered ? 5 : 3.5;
+    ctx.lineWidth = opts.isActive || opts.isHovered ? 4 : 2.8;
     ctx.strokeStyle = opts.isActive ? '#fbbf24' : opts.accentColor;
     ctx.stroke();
 
+    // Compact status indicator dot on left
     ctx.beginPath();
-    ctx.arc(46, canvas.height / 2, 14, 0, Math.PI * 2);
-    ctx.fillStyle = opts.isActive ? '#fbbf24' : opts.accentColor;
+    ctx.arc(28, 32, 7.5, 0, Math.PI * 2);
+    ctx.fillStyle = opts.isActive ? '#fbbf24' : '#10b981';
     ctx.fill();
 
+    // Line 1: Clear NPC Name (dynamic per booth)
     ctx.fillStyle = '#ffffff';
-    ctx.font = '700 28px Inter, Segoe UI, sans-serif';
+    ctx.font = '700 23px Inter, Segoe UI, sans-serif';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`Chuyên viên ${opts.assistantName}`, 76, 48);
+    ctx.fillText(opts.assistantName, 44, 32, w - 52);
 
+    // Line 2: Concise instruction ("🔊 Bấm để nghe")
     ctx.fillStyle = opts.isActive ? '#fde68a' : '#bae6fd';
-    ctx.font = '600 21px Inter, Segoe UI, sans-serif';
-    const subText = opts.isActive
-      ? '🔊 Đang giới thiệu sản phẩm...'
-      : '💬 Bấm để nghe giới thiệu SP';
-    ctx.fillText(subText, 76, 90);
+    ctx.font = '600 17px Inter, Segoe UI, sans-serif';
+    const subText = opts.isActive ? '🔊 Đang tư vấn' : '🔊 Bấm để nghe';
+    ctx.fillText(subText, 22, 64, w - 30);
     ctx.restore();
   }
 
@@ -1141,10 +1145,31 @@ export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
         {/* Cloned 3D Vietnamese Female Sales Assistant Character Rig */}
         {clonedCharacter && <primitive object={clonedCharacter} dispose={null} />}
 
-        {/* Floating Interactive Callout Badge above NPC */}
-        <Billboard position={[0, 1.94, 0]} follow>
-          <mesh geometry={NPC_BADGE_PLANE_GEOM}>
-            <meshBasicMaterial map={badgeTexture} transparent toneMapped={false} />
+        {/* Compact Floating Interactive Nameplate above NPC (Non-obstructive) */}
+        <Billboard
+          position={[NPC_NAMEPLATE_OFFSET[0], NPC_NAMEPLATE_OFFSET[1], NPC_NAMEPLATE_OFFSET[2]]}
+          follow
+        >
+          <mesh
+            geometry={NPC_BADGE_PLANE_GEOM}
+            onClick={handleTrigger}
+            onPointerOver={(e) => {
+              e.stopPropagation();
+              setHovered(true);
+              document.body.style.cursor = 'pointer';
+            }}
+            onPointerOut={(e) => {
+              e.stopPropagation();
+              setHovered(false);
+              document.body.style.cursor = 'auto';
+            }}
+          >
+            <meshBasicMaterial
+              map={badgeTexture}
+              transparent
+              side={THREE.DoubleSide}
+              toneMapped={false}
+            />
           </mesh>
         </Billboard>
       </group>

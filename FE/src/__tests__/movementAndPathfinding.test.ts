@@ -46,7 +46,16 @@ import {
   getBoothGlbAssetId,
   getCachedAssetStats,
 } from '../scene/assetLoader';
-import { resolveBoothTheme } from '../scene/Booth';
+import {
+  BACKDROP_LEFT_BAY_LOCAL_POS,
+  BACKDROP_RIGHT_BAY_LOCAL_POS,
+  resolveBoothBackdropAndShelfSlots,
+  resolveBoothTheme,
+} from '../scene/Booth';
+import {
+  NPC_NAMEPLATE_OFFSET,
+  NPC_NAMEPLATE_SIZE,
+} from '../scene/SalesAssistantNpc';
 import {
   MIN_CAMERA_PITCH,
   MAX_CAMERA_PITCH,
@@ -1059,5 +1068,85 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     expect(panelRuleMatch).not.toBeNull();
     expect(panelRuleMatch?.[1]).toContain('right: 16px;');
     expect(panelRuleMatch?.[1]).toContain('left: auto;');
+  });
+
+  it('integrates booth products into the two Backdrop Bays across 0/1/2/>2 product states, syncs Admin edits, and keeps the compact NPC nameplate non-obstructive', () => {
+    // 1. All 6 default booths (each with 2 assigned products) map into Left & Right Backdrop Bays with 0 protruding front panels
+    for (const booth of DEFAULT_BOOTHS) {
+      const slotViews = buildBoothSlotViews(booth.id, DEFAULT_PRODUCTS, FALLBACK_SLOT_ASSIGNMENTS);
+      const resolved = resolveBoothBackdropAndShelfSlots(slotViews);
+      expect(resolved.leftBackdropSlot?.product?.boothId).toBe(booth.id);
+      expect(resolved.rightBackdropSlot?.product?.boothId).toBe(booth.id);
+      expect(resolved.leftBackdropSlot?.product?.id).not.toBe(
+        resolved.rightBackdropSlot?.product?.id
+      );
+      expect(resolved.remainingShelfSlots).toHaveLength(0);
+    }
+
+    // 2. 0 products -> both Backdrop Bays empty, 0 shelf panels
+    const solaris = DEFAULT_BOOTHS.find((b) => b.id === 'booth-solaris-energy')!;
+    const emptyViews = buildBoothSlotViews(solaris.id, DEFAULT_PRODUCTS, []);
+    const emptyResolved = resolveBoothBackdropAndShelfSlots(emptyViews);
+    expect(emptyResolved.leftBackdropSlot).toBeNull();
+    expect(emptyResolved.rightBackdropSlot).toBeNull();
+    expect(emptyResolved.remainingShelfSlots).toHaveLength(0);
+
+    // 3. 1 product (left slot vs right slot) -> only 1 Backdrop Bay occupied, never duplicated!
+    const solarisProds = DEFAULT_PRODUCTS.filter((p) => p.boothId === solaris.id);
+    const singleLeftViews = buildBoothSlotViews(solaris.id, DEFAULT_PRODUCTS, [
+      { boothId: solaris.id, slotId: 'slot_03', productId: solarisProds[0].id },
+    ]);
+    const singleLeftResolved = resolveBoothBackdropAndShelfSlots(singleLeftViews);
+    expect(singleLeftResolved.leftBackdropSlot?.product?.id).toBe(solarisProds[0].id);
+    expect(singleLeftResolved.rightBackdropSlot).toBeNull();
+    expect(singleLeftResolved.remainingShelfSlots).toHaveLength(0);
+
+    const singleRightViews = buildBoothSlotViews(solaris.id, DEFAULT_PRODUCTS, [
+      { boothId: solaris.id, slotId: 'slot_05', productId: solarisProds[1].id },
+    ]);
+    const singleRightResolved = resolveBoothBackdropAndShelfSlots(singleRightViews);
+    expect(singleRightResolved.leftBackdropSlot).toBeNull();
+    expect(singleRightResolved.rightBackdropSlot?.product?.id).toBe(solarisProds[1].id);
+    expect(singleRightResolved.remainingShelfSlots).toHaveLength(0);
+
+    // 4. >2 products (e.g. 4 products assigned by Admin) -> 2 in Backdrop Bays + 2 preserved on Secondary Shelves
+    const extraProd3 = { ...solarisProds[0], id: 'prod-solaris-extra-3', name: 'Biến tần Hybrid Solaris 8kW' };
+    const extraProd4 = { ...solarisProds[1], id: 'prod-solaris-extra-4', name: 'Tấm Pin Hai Mặt Kính Solaris 580W' };
+    const fourProdList = [...DEFAULT_PRODUCTS, extraProd3, extraProd4];
+    const fourSlotViews = buildBoothSlotViews(solaris.id, fourProdList, [
+      { boothId: solaris.id, slotId: 'slot_01', productId: solarisProds[0].id },
+      { boothId: solaris.id, slotId: 'slot_02', productId: solarisProds[1].id },
+      { boothId: solaris.id, slotId: 'slot_03', productId: extraProd3.id },
+      { boothId: solaris.id, slotId: 'slot_05', productId: extraProd4.id },
+    ]);
+    const fourResolved = resolveBoothBackdropAndShelfSlots(fourSlotViews);
+    expect(fourResolved.leftBackdropSlot?.slot.slotId).toBe('slot_01');
+    expect(fourResolved.rightBackdropSlot?.slot.slotId).toBe('slot_02');
+    expect(fourResolved.remainingShelfSlots.map((s) => s.slot.slotId)).toEqual([
+      'slot_03',
+      'slot_05',
+    ]);
+
+    // 5. Verify Backdrop Bay coordinates fit inside the 3.96m × 2.28m backdrop plane and clear of Top Brand Header
+    expect(BACKDROP_LEFT_BAY_LOCAL_POS[0]).toBeCloseTo(-0.882, 2);
+    expect(BACKDROP_RIGHT_BAY_LOCAL_POS[0]).toBeCloseTo(0.882, 2);
+    expect(BACKDROP_LEFT_BAY_LOCAL_POS[1]).toBeGreaterThan(1.5);
+    expect(BACKDROP_LEFT_BAY_LOCAL_POS[1]).toBeLessThan(1.85);
+    expect(BACKDROP_LEFT_BAY_LOCAL_POS[2]).toBeCloseTo(-1.842, 2);
+
+    // 6. Verify Compact NPC Nameplate dimensions & zero occlusion of NPC face or Backdrop Product Bays
+    expect(NPC_NAMEPLATE_SIZE[0]).toBeLessThanOrEqual(0.95);
+    expect(NPC_NAMEPLATE_SIZE[1]).toBeLessThanOrEqual(0.32);
+    const badgeBottomY = NPC_NAMEPLATE_OFFSET[1] - NPC_NAMEPLATE_SIZE[1] / 2;
+    expect(badgeBottomY).toBeGreaterThan(TARGET_NPC_HEIGHT_METERS); // Above 1.70m head -> zero face occlusion
+
+    for (const booth of DEFAULT_BOOTHS) {
+      const npcPlacement = computeNpcPlacement(booth);
+      const badgeLeftEdgeLocalX =
+        npcPlacement.localX + NPC_NAMEPLATE_OFFSET[0] - NPC_NAMEPLATE_SIZE[0] / 2;
+      const rightBayRightEdgeLocalX = BACKDROP_RIGHT_BAY_LOCAL_POS[0] + 0.75;
+      // Nameplate sits well to the right of the Right Backdrop Bay in booth local space
+      expect(badgeLeftEdgeLocalX).toBeGreaterThan(rightBayRightEdgeLocalX + 0.25);
+    }
   });
 });
