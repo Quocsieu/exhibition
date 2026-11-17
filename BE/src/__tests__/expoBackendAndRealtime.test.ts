@@ -17,9 +17,14 @@ import {
   parseBatchProducts,
 } from '../integrations/productAdapter.js';
 import {
+  AZURE_DEFAULT_OUTPUT_FORMAT,
+  AZURE_DEFAULT_VOICE,
+  buildAzureVietnameseSsml,
   computeTtsCacheKey,
+  escapeSsmlXml,
   normalizeTextForVietnameseTts,
   numberToVietnameseWords,
+  resolveBackendTtsConfig,
   splitVietnameseSpeechIntoChunks,
 } from '../services/expoService.js';
 
@@ -701,7 +706,7 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
-  it('synthesizes Vietnamese Female NPC audio via POST /api/npc/tts with booth/product verification, SHA-256 caching, rate limiting, timeout, and zero secret leakage', async () => {
+  it('synthesizes Vietnamese Female NPC audio via Azure AI Speech (vi-VN-HoaiMyNeural) with booth/product verification, SSML escaping, SHA-256 cache isolation, rate limiting, timeout, and zero secret leakage', async () => {
     const savedEnv = {
       TTS_PROVIDER: process.env.TTS_PROVIDER,
       TTS_API_KEY: process.env.TTS_API_KEY,
@@ -709,24 +714,26 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       TTS_API_ENDPOINT: process.env.TTS_API_ENDPOINT,
       TTS_TIMEOUT_MS: process.env.TTS_TIMEOUT_MS,
       TTS_RATE_LIMIT_PER_MIN: process.env.TTS_RATE_LIMIT_PER_MIN,
+      AZURE_SPEECH_KEY: process.env.AZURE_SPEECH_KEY,
+      AZURE_SPEECH_REGION: process.env.AZURE_SPEECH_REGION,
+      AZURE_SPEECH_VOICE: process.env.AZURE_SPEECH_VOICE,
+      AZURE_SPEECH_ENDPOINT: process.env.AZURE_SPEECH_ENDPOINT,
+      AZURE_SPEECH_OUTPUT_FORMAT: process.env.AZURE_SPEECH_OUTPUT_FORMAT,
     };
 
-    let mockMode: 'ok' | '429' | '500' | '401' | 'timeout' = 'ok';
+    let mockMode: 'ok' | '429' | '500' | '401' | '403' | 'timeout' = 'ok';
     let providerCallCount = 0;
-    let lastReceivedBody: Record<string, unknown> = {};
+    let lastRawBody = '';
+    let lastHeaders: http.IncomingHttpHeaders = {};
 
     const mockProviderServer = http.createServer(async (req, res) => {
       providerCallCount += 1;
+      lastHeaders = req.headers;
       const chunks: Buffer[] = [];
       for await (const chunk of req) {
         chunks.push(Buffer.from(chunk));
       }
-      const rawBody = Buffer.concat(chunks).toString('utf8');
-      try {
-        lastReceivedBody = JSON.parse(rawBody);
-      } catch {
-        lastReceivedBody = { rawBody };
-      }
+      lastRawBody = Buffer.concat(chunks).toString('utf8');
 
       if (mockMode === '429') {
         res.writeHead(429, { 'Content-Type': 'application/json' });
@@ -740,7 +747,12 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       }
       if (mockMode === '401') {
         res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid secret token' }));
+        res.end(JSON.stringify({ error: 'PermissionDenied: Invalid subscription key' }));
+        return;
+      }
+      if (mockMode === '403') {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Forbidden region or disabled resource' }));
         return;
       }
       if (mockMode === 'timeout') {
@@ -751,7 +763,7 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       }
 
       // Valid synthetic MP3 frame buffer (>= 64 bytes)
-      const mp3Buffer = Buffer.alloc(512, 0x49);
+      const mp3Buffer = Buffer.alloc(640, 0x49);
       res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
       res.end(mp3Buffer);
     });
@@ -786,83 +798,183 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       });
       expect(foreignProductRes.status).toBe(400);
 
-      // 1b. Zero-key default provider ('gtts'): works out-of-the-box without TTS_API_KEY!
+      // 2. Default provider is strictly 'azure' + 'vi-VN-HoaiMyNeural':
+      //    When AZURE_SPEECH_KEY / AZURE_SPEECH_REGION are missing, returns 503 TTS_NOT_CONFIGURED
+      //    and NEVER silently falls back to 'gtts' or makes external calls!
       delete process.env.TTS_PROVIDER;
       delete process.env.TTS_API_KEY;
       delete process.env.TTS_VOICE;
-      process.env.TTS_API_ENDPOINT = `http://127.0.0.1:${providerPort}/translate_tts`;
+      delete process.env.TTS_API_ENDPOINT;
+      delete process.env.AZURE_SPEECH_KEY;
+      delete process.env.AZURE_SPEECH_REGION;
+      delete process.env.AZURE_SPEECH_VOICE;
+      delete process.env.AZURE_SPEECH_ENDPOINT;
+      process.env.TTS_RATE_LIMIT_PER_MIN = '60';
 
-      const gttsMissRes = await fetch(`${baseUrl}/api/npc/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boothId: 'booth-ecovita-craft', stepType: 'CLOSING' }),
-      });
-      expect(gttsMissRes.status).toBe(200);
-      expect(gttsMissRes.headers.get('content-type')).toContain('audio/mpeg');
-      expect(gttsMissRes.headers.get('x-tts-provider')).toBe('gtts');
-      expect(gttsMissRes.headers.get('x-tts-voice')).toBe('vi-VN-Standard-A');
-      expect(gttsMissRes.headers.get('x-tts-cache')).toBe('MISS');
-      const gttsBuf = await gttsMissRes.arrayBuffer();
-      expect(gttsBuf.byteLength).toBeGreaterThanOrEqual(512);
+      const defaultCfg = resolveBackendTtsConfig();
+      expect(defaultCfg.provider).toBe('azure');
+      expect(defaultCfg.voice).toBe(AZURE_DEFAULT_VOICE);
+      expect(defaultCfg.outputFormat).toBe(AZURE_DEFAULT_OUTPUT_FORMAT);
 
-      const gttsHitRes = await fetch(`${baseUrl}/api/npc/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boothId: 'booth-ecovita-craft', stepType: 'CLOSING' }),
-      });
-      expect(gttsHitRes.status).toBe(200);
-      expect(gttsHitRes.headers.get('x-tts-cache')).toBe('HIT');
-
-      providerCallCount = 0;
-
-      // 2. Explicit keyed provider ('viettel') with missing API Key -> returns 503 TTS_NOT_CONFIGURED without calling provider
-      process.env.TTS_PROVIDER = 'viettel';
-      process.env.TTS_API_KEY = '';
-      process.env.TTS_API_ENDPOINT = `http://127.0.0.1:${providerPort}/tts`;
-
-      const noKeyRes = await fetch(`${baseUrl}/api/npc/tts`, {
+      const missingCredsRes = await fetch(`${baseUrl}/api/npc/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ boothId: 'booth-nordic-living', stepType: 'GREETING' }),
       });
-      expect(noKeyRes.status).toBe(503);
-      const noKeyJson = (await noKeyRes.json()) as { code: string; error: string };
-      expect(noKeyJson.code).toBe('TTS_NOT_CONFIGURED');
+      expect(missingCredsRes.status).toBe(503);
+      const missingCredsJson = (await missingCredsRes.json()) as { code: string; error: string };
+      expect(missingCredsJson.code).toBe('TTS_NOT_CONFIGURED');
+      expect(missingCredsJson.error).toContain('AZURE_SPEECH_KEY');
       expect(providerCallCount).toBe(0);
 
-      // 3. Valid API Key -> Cache MISS on 1st call, Cache HIT on 2nd call (0 duplicate provider calls)
-      const secretKey = 'SECRET_TTS_TOKEN_999888777';
-      process.env.TTS_API_KEY = secretKey;
-      process.env.TTS_VOICE = 'hn-quynhanh';
+      // Missing AZURE_SPEECH_REGION (key set, region empty, no endpoint override) -> 503 TTS_NOT_CONFIGURED
+      process.env.AZURE_SPEECH_KEY = 'MOCK_AZURE_KEY_ONLY';
+      process.env.AZURE_SPEECH_REGION = '';
+      const missingRegionRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-nordic-living', stepType: 'GREETING' }),
+      });
+      expect(missingRegionRes.status).toBe(503);
+      expect(providerCallCount).toBe(0);
+
+      // 3. Cache isolation: Populate an explicit 'gtts' entry for EcoVita CLOSING, then switch back to default 'azure'
+      //    and prove Azure NEVER serves the cached 'gtts' buffer!
+      process.env.TTS_PROVIDER = 'gtts';
+      process.env.TTS_API_ENDPOINT = `http://127.0.0.1:${providerPort}/translate_tts`;
+      const gttsSeedRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-ecovita-craft', stepType: 'CLOSING' }),
+      });
+      expect(gttsSeedRes.status).toBe(200);
+      expect(gttsSeedRes.headers.get('x-tts-provider')).toBe('gtts');
+      expect(gttsSeedRes.headers.get('x-tts-cache')).toBe('MISS');
+
+      // Switch to default Azure AI Speech (`vi-VN-HoaiMyNeural`)
+      delete process.env.TTS_PROVIDER;
+      delete process.env.TTS_API_ENDPOINT;
+      const azureSecretKey = 'AZURE_SUPER_SECRET_KEY_888999000';
+      process.env.AZURE_SPEECH_KEY = azureSecretKey;
+      process.env.AZURE_SPEECH_REGION = 'southeastasia';
+      process.env.AZURE_SPEECH_ENDPOINT = `http://127.0.0.1:${providerPort}/cognitiveservices/v1`;
       process.env.TTS_TIMEOUT_MS = '1200';
-      process.env.TTS_RATE_LIMIT_PER_MIN = '30';
+      providerCallCount = 0;
 
-      const missRes = await fetch(`${baseUrl}/api/npc/tts`, {
+      // Request the EXACT same booth + step ('booth-ecovita-craft', 'CLOSING') -> MUST be Cache MISS on Azure!
+      const azureIsolatedRes = await fetch(`${baseUrl}/api/npc/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boothId: 'booth-nordic-living', stepType: 'GREETING' }),
+        body: JSON.stringify({ boothId: 'booth-ecovita-craft', stepType: 'CLOSING' }),
       });
-      expect(missRes.status).toBe(200);
-      expect(missRes.headers.get('content-type')).toContain('audio/mpeg');
-      expect(missRes.headers.get('x-tts-cache')).toBe('MISS');
-      expect(missRes.headers.get('x-tts-provider')).toBe('viettel');
-      expect(missRes.headers.get('x-tts-voice')).toBe('hn-quynhanh');
-      const missBuf = await missRes.arrayBuffer();
-      expect(missBuf.byteLength).toBe(512);
+      expect(azureIsolatedRes.status).toBe(200);
+      expect(azureIsolatedRes.headers.get('x-tts-provider')).toBe('azure');
+      expect(azureIsolatedRes.headers.get('x-tts-voice')).toBe('vi-VN-HoaiMyNeural');
+      expect(azureIsolatedRes.headers.get('x-tts-cache')).toBe('MISS');
       expect(providerCallCount).toBe(1);
-      expect(String(lastReceivedBody.text)).toContain('Minh Châu');
-      expect(String(lastReceivedBody.text)).toContain('Nordic Living Studio');
 
-      const hitRes = await fetch(`${baseUrl}/api/npc/tts`, {
+      // 4. Verify official Microsoft Azure REST headers, SSML payload, sequential multi-product steps, & cache HIT
+      providerCallCount = 0;
+      const greetMissRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-solaris-energy', stepType: 'GREETING' }),
+      });
+      expect(greetMissRes.status).toBe(200);
+      expect(greetMissRes.headers.get('content-type')).toContain('audio/mpeg');
+      expect(greetMissRes.headers.get('x-tts-provider')).toBe('azure');
+      expect(greetMissRes.headers.get('x-tts-voice')).toBe('vi-VN-HoaiMyNeural');
+      expect(greetMissRes.headers.get('x-tts-cache')).toBe('MISS');
+      // Never expose API key in response headers
+      expect(JSON.stringify(Object.fromEntries(greetMissRes.headers.entries()))).not.toContain(
+        azureSecretKey
+      );
+      const greetBuf = await greetMissRes.arrayBuffer();
+      expect(greetBuf.byteLength).toBe(640);
+      expect(providerCallCount).toBe(1);
+
+      // Verify exact Microsoft REST headers & SSML XML body sent to Azure
+      expect(lastHeaders['ocp-apim-subscription-key']).toBe(azureSecretKey);
+      expect(String(lastHeaders['content-type'])).toContain('application/ssml+xml');
+      expect(lastHeaders['x-microsoft-outputformat']).toBe('audio-24khz-96kbitrate-mono-mp3');
+      expect(String(lastHeaders['user-agent'])).toContain('VirtualExpoPlaza3D-Backend');
+      expect(lastRawBody).toContain('xml:lang="vi-VN"');
+      expect(lastRawBody).toContain('<voice name="vi-VN-HoaiMyNeural">');
+      expect(lastRawBody).toContain('<prosody rate="0%" pitch="0%">');
+      expect(lastRawBody).toContain('Bảo Trân');
+      expect(lastRawBody).toContain('Solaris Clean Energy');
+
+      // Second identical request -> Cache HIT (0 extra Azure calls)
+      const greetHitRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-solaris-energy', stepType: 'GREETING' }),
+      });
+      expect(greetHitRes.status).toBe(200);
+      expect(greetHitRes.headers.get('x-tts-cache')).toBe('HIT');
+      expect(providerCallCount).toBe(1);
+
+      // Sequential Product 1 & Product 2 on Solaris + Switching to Nordic booth
+      const prod1Res = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          boothId: 'booth-solaris-energy',
+          stepType: 'PRODUCT',
+          slotId: 'slot_01',
+          productId: 'prod-solaris-pack-10kw',
+        }),
+      });
+      expect(prod1Res.status).toBe(200);
+      expect(lastRawBody).toContain('năm mươi tư triệu đồng');
+      expect(lastRawBody).toContain('Power Wall');
+      expect(lastRawBody).toContain('10 ki lô oát giờ');
+
+      const prod2Res = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          boothId: 'booth-solaris-energy',
+          stepType: 'PRODUCT',
+          slotId: 'slot_05',
+          productId: 'prod-solaris-ev-charger',
+        }),
+      });
+      expect(prod2Res.status).toBe(200);
+      expect(lastRawBody).toContain('mười sáu triệu năm trăm nghìn đồng');
+      expect(lastRawBody).toContain('Charge Box');
+      expect(lastRawBody).toContain('22 ki lô oát');
+
+      const switchBoothRes = await fetch(`${baseUrl}/api/npc/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ boothId: 'booth-nordic-living', stepType: 'GREETING' }),
       });
-      expect(hitRes.status).toBe(200);
-      expect(hitRes.headers.get('x-tts-cache')).toBe('HIT');
-      expect(providerCallCount).toBe(1); // Provider was NOT called again!
+      expect(switchBoothRes.status).toBe(200);
+      expect(switchBoothRes.headers.get('x-tts-voice')).toBe('vi-VN-HoaiMyNeural');
+      expect(lastRawBody).toContain('Minh Châu');
 
-      // 4. Provider 429, 500, 401 (no secret leak), and Timeout (504)
+      // 5. Azure error handling: 401/403 (wrong credentials, zero secret leak), 429 (quota), 500, and Timeout (504)
+      mockMode = '401';
+      const err401Res = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-ecovita-craft', stepType: 'GREETING' }),
+      });
+      expect(err401Res.status).toBe(502);
+      const err401Text = await err401Res.text();
+      expect(err401Text).toContain('TTS_AUTH_FAILED');
+      expect(err401Text.includes(azureSecretKey)).toBe(false);
+
+      mockMode = '403';
+      const err403Res = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-lumina-design', stepType: 'GREETING' }),
+      });
+      expect(err403Res.status).toBe(502);
+      expect((await err403Res.text()).includes(azureSecretKey)).toBe(false);
+
       mockMode = '429';
       const quotaRes = await fetch(`${baseUrl}/api/npc/tts`, {
         method: 'POST',
@@ -877,19 +989,14 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       const err500Res = await fetch(`${baseUrl}/api/npc/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boothId: 'booth-aether-tech', stepType: 'CLOSING' }),
+        body: JSON.stringify({
+          boothId: 'booth-aether-tech',
+          stepType: 'PRODUCT',
+          slotId: 'slot_01',
+          productId: 'prod-aether-hub-x1',
+        }),
       });
       expect(err500Res.status).toBe(502);
-
-      mockMode = '401';
-      const err401Res = await fetch(`${baseUrl}/api/npc/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boothId: 'booth-ecovita-craft', stepType: 'GREETING' }),
-      });
-      expect(err401Res.status).toBe(502);
-      const err401Text = await err401Res.text();
-      expect(err401Text.includes(secretKey)).toBe(false); // Never leaks secret!
 
       mockMode = 'timeout';
       process.env.TTS_TIMEOUT_MS = '1000';
@@ -902,13 +1009,18 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       const timeoutJson = (await timeoutRes.json()) as { code: string };
       expect(timeoutJson.code).toBe('TTS_TIMEOUT');
 
-      // 5. Rate limiting per IP (429 RATE_LIMITED)
+      // 6. Rate limiting per IP (429 RATE_LIMITED)
       mockMode = 'ok';
       process.env.TTS_RATE_LIMIT_PER_MIN = '5';
       const rateLimitedRes = await fetch(`${baseUrl}/api/npc/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boothId: 'booth-solaris-energy', stepType: 'GREETING' }),
+        body: JSON.stringify({
+          boothId: 'booth-aether-tech',
+          stepType: 'PRODUCT',
+          slotId: 'slot_03',
+          productId: 'prod-aether-glass-ar',
+        }),
       });
       expect(rateLimitedRes.status).toBe(429);
       const rateLimitedJson = (await rateLimitedRes.json()) as { code: string };
@@ -922,7 +1034,7 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
     }
   });
 
-  it('normalizes Vietnamese numbers, prices, technical symbols, and sentence boundaries for human-like TTS speech', () => {
+  it('normalizes Vietnamese numbers, prices, technical symbols, English compounds, and escapes SSML XML safely', () => {
     expect(numberToVietnameseWords(6850000)).toBe('sáu triệu tám trăm năm mươi nghìn');
     expect(numberToVietnameseWords(12900000)).toBe('mười hai triệu chín trăm nghìn');
     expect(numberToVietnameseWords(1050000)).toBe('một triệu không trăm năm mươi nghìn');
@@ -930,23 +1042,53 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
     expect(numberToVietnameseWords(31000000)).toBe('ba mươi mốt triệu');
 
     const normalized = normalizeTextForVietnameseTts(
-      '<b>Cà phê/Trà</b> 100% nguyên chất https://example.com/item [SKU: CF-01] undefined — 24/7'
+      '<b>Cà phê/Trà</b> 100% ở 1.550m, ±5mm, <42dB, 22kW, 120kg, 2700K–5000K, PowerWall https://example.com/item [SKU: CF-01] undefined — 24/7',
+      300
     );
     expect(normalized).toContain('Cà phê và Trà');
     expect(normalized).toContain('100 phần trăm');
+    expect(normalized).toContain('1550 mét');
+    expect(normalized).toContain('cộng trừ 5 mi li mét');
+    expect(normalized).toContain('dưới 42 đê xi ben');
+    expect(normalized).toContain('22 ki lô oát');
+    expect(normalized).toContain('120 ki lô gam');
+    expect(normalized).toContain('2700 độ K đến 5000 độ K');
+    expect(normalized).toContain('Power Wall');
     expect(normalized).toContain('hai tư trên bảy');
     expect(normalized).not.toContain('https://');
     expect(normalized).not.toContain('SKU');
     expect(normalized).not.toContain('undefined');
+
+    // SSML XML escaping prevents injection of raw tags, ampersands, and quotes
+    expect(escapeSsmlXml('A & B <script>"test"\'s</script>')).toBe(
+      'A &amp; B &lt;script&gt;&quot;test&quot;&apos;s&lt;/script&gt;'
+    );
+    const ssml = buildAzureVietnameseSsml(
+      'Dạ xin chào quý khách! Em là Bảo Trân & "Solaris" <10kWh>.',
+      'vi-VN-HoaiMyNeural'
+    );
+    expect(ssml).toContain('xmlns="http://www.w3.org/2001/10/synthesis"');
+    expect(ssml).toContain('xml:lang="vi-VN"');
+    expect(ssml).toContain('<voice name="vi-VN-HoaiMyNeural">');
+    expect(ssml).toContain('<break time="220ms"/>');
+    expect(ssml).toContain('&amp;');
+    expect(ssml).toContain('&lt;10kWh&gt;');
+    expect(ssml).not.toContain('<10kWh>');
 
     const sentences = splitVietnameseSpeechIntoChunks(
       'Dạ xin chào quý khách! Em là Minh Châu, tư vấn viên tại gian hàng. Hôm nay em xin giới thiệu hai sản phẩm tiêu biểu ạ.'
     );
     expect(sentences).toHaveLength(3);
 
-    // Cache key changes when prosody/version tag changes
-    const k1 = computeTtsCacheKey('gtts', 'vi-VN-Standard-A', 'vi-VN', 'v1', 'Xin chào');
-    const k2 = computeTtsCacheKey('gtts', 'vi-VN-Standard-A', 'vi-VN', 'v2-natural-0.96', 'Xin chào');
-    expect(k1).not.toBe(k2);
+    // Cache key strictly separates gtts vs azure and different prosody/format tags
+    const kGtts = computeTtsCacheKey('gtts', 'vi-VN-Standard-A', 'vi-VN', 'v24-gtts-1.0', 'Xin chào');
+    const kAzure = computeTtsCacheKey(
+      'azure',
+      'vi-VN-HoaiMyNeural',
+      'vi-VN',
+      'v24-azure-audio-24khz-96kbitrate-mono-mp3-rate:0%-pitch:0%',
+      'Xin chào'
+    );
+    expect(kGtts).not.toBe(kAzure);
   });
 });

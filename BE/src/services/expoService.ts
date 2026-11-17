@@ -18,8 +18,11 @@ import {
   parseBatchProducts,
 } from '../integrations/productAdapter.js';
 
-export type TtsProviderId = 'fpt' | 'viettel' | 'google' | 'gtts';
+export type TtsProviderId = 'azure' | 'fpt' | 'viettel' | 'google' | 'gtts';
 export type NpcSpeechStepType = 'GREETING' | 'PRODUCT' | 'CLOSING';
+
+export const AZURE_DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
+export const AZURE_DEFAULT_OUTPUT_FORMAT = 'audio-24khz-96kbitrate-mono-mp3';
 
 export class TtsServiceError extends Error {
   constructor(
@@ -59,7 +62,7 @@ interface CachedAudioEntry {
 
 const MAX_TTS_CACHE_ENTRIES = 120;
 const MAX_TTS_CACHE_TOTAL_BYTES = 25 * 1024 * 1024; // 25 MB cap
-const MAX_SPEECH_TEXT_LENGTH = 380;
+const MAX_SPEECH_TEXT_LENGTH = 480;
 
 const VI_DIGITS = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
 
@@ -132,17 +135,32 @@ export function normalizeTextForVietnameseTts(raw: unknown, maxLength = 220): st
     .replace(/https?:\/\/\S+/gi, ' ')
     .replace(/\bwww\.\S+/gi, ' ')
     .replace(/\[(?:SKU|Mã|ID)[^\]]*\]/gi, ' ')
+    // Convert Vietnamese thousand-separated integers (e.g. 1.550m -> 1550m, 6.000 -> 6000) without touching decimals like 2.5 or 98.4
+    .replace(/\b([1-9]\d{0,2})\.(\d{3})(?!\d)/g, '$1$2')
+    .replace(/±\s*(?=\d)/g, 'cộng trừ ')
     .replace(/<\s*(?=\d)/g, 'dưới ')
     .replace(/>\s*(?=\d)/g, 'trên ')
     .replace(/[<>]/g, ' ')
+    .replace(/\b(\d{4})\s*K\s*[–—-]\s*(\d{4})\s*K\b/g, '$1 độ K đến $2 độ K')
+    .replace(/\b(\d{4})\s*K\b/g, '$1 độ K')
     .replace(/\b24\s*\/\s*7\b/g, 'hai tư trên bảy')
     .replace(/(\p{L})\s*\/\s*(\p{L})/gu, '$1 và $2')
     .replace(/&/g, ' và ')
     .replace(/(\d)\s*%/g, '$1 phần trăm')
     .replace(/°C\b/g, ' độ C')
     .replace(/\bm(?:2|²)\b/gi, ' mét vuông')
+    .replace(/(\d)\s*kWh\b/gi, '$1 ki lô oát giờ')
     .replace(/\bkWh\b/gi, ' ki lô oát giờ')
+    .replace(/(\d)\s*kW\b/gi, '$1 ki lô oát')
+    .replace(/(\d)\s*mAh\b/gi, '$1 mi li am pe giờ')
     .replace(/\bmAh\b/gi, ' mi li am pe giờ')
+    .replace(/(\d)\s*kg\b/gi, '$1 ki lô gam')
+    .replace(/(\d)\s*mm\b/gi, '$1 mi li mét')
+    .replace(/(\d)\s*cm\b/gi, '$1 xăng ti mét')
+    .replace(/(\d)\s*m\b/g, '$1 mét')
+    .replace(/(\d)\s*dB\b/gi, '$1 đê xi ben')
+    // Separate CamelCase English brand compounds (e.g. PowerWall -> Power Wall, AetherGlass -> Aether Glass) while keeping LiDAR/RFID intact
+    .replace(/([a-z]{2,})([A-Z][a-z])/g, '$1 $2')
     .replace(/\s*[—–]\s*/g, ', ')
     .replace(/\b(undefined|null|NaN)\b/gi, ' ')
     .replace(/\s+/g, ' ')
@@ -155,6 +173,38 @@ export function normalizeTextForVietnameseTts(raw: unknown, maxLength = 220): st
   const lastEnd = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf(', '), slice.lastIndexOf(' '));
   const cut = lastEnd > maxLength * 0.6 ? slice.slice(0, lastEnd) : slice;
   return `${cut.replace(/[.,;:\s]+$/, '')}.`;
+}
+
+export function escapeSsmlXml(raw: string): string {
+  return (raw || '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+export function buildAzureVietnameseSsml(
+  speechText: string,
+  voice = AZURE_DEFAULT_VOICE,
+  rate = '0%',
+  pitch = '0%'
+): string {
+  const safeVoice = escapeSsmlXml(voice.trim() || AZURE_DEFAULT_VOICE);
+  const safeRate = escapeSsmlXml(rate.trim() || '0%');
+  const safePitch = escapeSsmlXml(pitch.trim() || '0%');
+
+  const sentences = (speechText || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => escapeSsmlXml(s.trim()))
+    .filter(Boolean);
+
+  const innerContent = sentences.join('<break time="220ms"/>');
+
+  return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="vi-VN"><voice name="${safeVoice}"><prosody rate="${safeRate}" pitch="${safePitch}">${innerContent}</prosody></voice></speak>`;
 }
 
 function sanitizeTtsText(raw: unknown, maxLength = 220): string {
@@ -258,62 +308,87 @@ export function splitVietnameseSpeechIntoChunks(text: string, maxChunkLen = 175)
   return chunks;
 }
 
-export function resolveBackendTtsConfig(): {
+export interface ResolvedBackendTtsConfig {
   provider: TtsProviderId;
   apiKey: string;
+  region: string;
   requiresApiKey: boolean;
   voice: string;
+  outputFormat: string;
+  prosodyRate: string;
+  prosodyPitch: string;
   timeoutMs: number;
   rateLimitPerMin: number;
   endpointOverride?: string;
-} {
+}
+
+export function resolveBackendTtsConfig(): ResolvedBackendTtsConfig {
   const rawProvider = (process.env.TTS_PROVIDER || '').trim().toLowerCase();
-  let provider: TtsProviderId = 'gtts';
+  let provider: TtsProviderId = 'azure';
 
   if (
+    rawProvider === 'azure' ||
     rawProvider === 'google' ||
     rawProvider === 'viettel' ||
     rawProvider === 'fpt' ||
     rawProvider === 'gtts'
   ) {
     provider = rawProvider;
-  } else if (process.env.GOOGLE_TTS_API_KEY) {
-    provider = 'google';
-  } else if (process.env.VIETTEL_TTS_API_KEY) {
-    provider = 'viettel';
-  } else if (process.env.FPT_TTS_API_KEY || process.env.TTS_API_KEY) {
-    provider = 'fpt';
   }
 
   const apiKey = (
-    process.env.TTS_API_KEY ||
-    (provider === 'google' ? process.env.GOOGLE_TTS_API_KEY : '') ||
-    (provider === 'viettel' ? process.env.VIETTEL_TTS_API_KEY : '') ||
-    (provider === 'fpt' ? process.env.FPT_TTS_API_KEY : '') ||
-    ''
+    provider === 'azure'
+      ? process.env.AZURE_SPEECH_KEY || process.env.TTS_API_KEY || ''
+      : process.env.TTS_API_KEY ||
+        (provider === 'google' ? process.env.GOOGLE_TTS_API_KEY : '') ||
+        (provider === 'viettel' ? process.env.VIETTEL_TTS_API_KEY : '') ||
+        (provider === 'fpt' ? process.env.FPT_TTS_API_KEY : '') ||
+        ''
   ).trim();
 
+  const region = (process.env.AZURE_SPEECH_REGION || '').trim().toLowerCase();
   const requiresApiKey = provider !== 'gtts';
 
   const defaultVoice =
-    provider === 'google'
-      ? 'vi-VN-Neural2-A'
-      : provider === 'viettel'
-        ? 'hn-quynhanh'
-        : provider === 'fpt'
-          ? 'banmai'
-          : 'vi-VN-Standard-A';
+    provider === 'azure'
+      ? AZURE_DEFAULT_VOICE
+      : provider === 'google'
+        ? 'vi-VN-Neural2-A'
+        : provider === 'viettel'
+          ? 'hn-quynhanh'
+          : provider === 'fpt'
+            ? 'banmai'
+            : 'vi-VN-Standard-A';
 
-  const voice = (process.env.TTS_VOICE || defaultVoice).trim();
+  const voice = (
+    (provider === 'azure' ? process.env.AZURE_SPEECH_VOICE : '') ||
+    process.env.TTS_VOICE ||
+    defaultVoice
+  ).trim();
+
+  const outputFormat = (
+    process.env.AZURE_SPEECH_OUTPUT_FORMAT || AZURE_DEFAULT_OUTPUT_FORMAT
+  ).trim();
+  const prosodyRate = (process.env.AZURE_SPEECH_RATE || '0%').trim();
+  const prosodyPitch = (process.env.AZURE_SPEECH_PITCH || '0%').trim();
   const timeoutMs = Math.max(1000, Math.min(20000, Number(process.env.TTS_TIMEOUT_MS || 8000)));
   const rateLimitPerMin = Math.max(5, Math.min(300, Number(process.env.TTS_RATE_LIMIT_PER_MIN || 30)));
-  const endpointOverride = (process.env.TTS_API_ENDPOINT || '').trim() || undefined;
+  const endpointOverride =
+    (
+      (provider === 'azure' ? process.env.AZURE_SPEECH_ENDPOINT : '') ||
+      process.env.TTS_API_ENDPOINT ||
+      ''
+    ).trim() || undefined;
 
   return {
     provider,
     apiKey,
+    region,
     requiresApiKey,
     voice,
+    outputFormat,
+    prosodyRate,
+    prosodyPitch,
     timeoutMs,
     rateLimitPerMin,
     endpointOverride,
@@ -542,7 +617,13 @@ export class ExpoService {
       throw new TtsServiceError('Loại bước thuyết minh không hợp lệ.', 400, 'INVALID_STEP_TYPE');
     }
 
-    const normalized = speechText.replace(/\s+/g, ' ').trim().slice(0, MAX_SPEECH_TEXT_LENGTH);
+    let normalized = speechText.replace(/\s+/g, ' ').trim();
+    if (normalized.length > MAX_SPEECH_TEXT_LENGTH) {
+      const slice = normalized.slice(0, MAX_SPEECH_TEXT_LENGTH);
+      const lastBreak = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf(', '), slice.lastIndexOf(' '));
+      const cut = lastBreak > MAX_SPEECH_TEXT_LENGTH * 0.65 ? slice.slice(0, lastBreak) : slice;
+      normalized = `${cut.replace(/[.,;:\s]+$/, '')}.`;
+    }
     if (normalized.length < 4) {
       throw new TtsServiceError('Nội dung lời thoại không hợp lệ.', 400, 'EMPTY_SPEECH_TEXT');
     }
@@ -597,16 +678,20 @@ export class ExpoService {
     // 1. Validate booth/slot/product & build verified speech text on server
     const speechText = this.buildVerifiedNpcStepSpeechText(params);
 
-    // 2. Compute deterministic SHA-256 cache key (reflects provider, voice, prosody v2, and normalized text)
+    // 2. Compute deterministic SHA-256 cache key (strictly isolates provider, voice, format, prosody, and text)
+    const prosodyVersionTag =
+      cfg.provider === 'azure'
+        ? `v24-azure-${cfg.outputFormat}-rate:${cfg.prosodyRate}-pitch:${cfg.prosodyPitch}`
+        : `v24-${cfg.provider}-1.0`;
     const cacheKey = computeTtsCacheKey(
       cfg.provider,
       cfg.voice,
       'vi-VN',
-      'v2-natural-0.96',
+      prosodyVersionTag,
       speechText
     );
 
-    // 3. Check in-memory LRU cache first (0 provider cost on cache hit)
+    // 3. Check in-memory LRU cache first (0 provider cost on cache hit; never serves stale gtts audio for azure)
     const cached = this.getFromCache(cacheKey);
     if (cached) {
       return {
@@ -623,8 +708,23 @@ export class ExpoService {
     // 4. Enforce per-IP rate limit before calling external provider
     this.checkTtsRateLimit(params.clientIp || 'anonymous', cfg.rateLimitPerMin);
 
-    // 5. Verify API Key is configured before making external keyed provider call
-    if (cfg.requiresApiKey && !cfg.apiKey) {
+    // 5. Verify credentials & region before making external provider call (never silently fall back to gtts)
+    if (cfg.provider === 'azure') {
+      if (!cfg.apiKey || (!cfg.region && !cfg.endpointOverride)) {
+        throw new TtsServiceError(
+          `Dịch vụ giọng đọc Azure AI Speech (${cfg.voice}) chưa được cấu hình AZURE_SPEECH_KEY và AZURE_SPEECH_REGION trên máy chủ. Đang hiển thị phụ đề tiếng Việt tự động.`,
+          503,
+          'TTS_NOT_CONFIGURED'
+        );
+      }
+      if (!cfg.endpointOverride && !/^[a-z0-9-]+$/i.test(cfg.region)) {
+        throw new TtsServiceError(
+          'Cấu hình vùng AZURE_SPEECH_REGION không hợp lệ (ví dụ hợp lệ: southeastasia, eastasia, eastus).',
+          503,
+          'TTS_INVALID_CONFIG'
+        );
+      }
+    } else if (cfg.requiresApiKey && !cfg.apiKey) {
       throw new TtsServiceError(
         `Dịch vụ giọng đọc Tiếng Việt đám mây (${cfg.provider.toUpperCase()}) chưa được cấu hình khóa TTS_API_KEY trên máy chủ. Đang hiển thị phụ đề tự động.`,
         503,
@@ -656,19 +756,49 @@ export class ExpoService {
   }
 
   private async callProviderTtsApi(
-    cfg: {
-      provider: TtsProviderId;
-      apiKey: string;
-      voice: string;
-      timeoutMs: number;
-      endpointOverride?: string;
-    },
+    cfg: ResolvedBackendTtsConfig,
     speechText: string
   ): Promise<{ buffer: Buffer; mimeType: string }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
 
     try {
+      if (cfg.provider === 'azure') {
+        const endpoint =
+          cfg.endpointOverride ||
+          `https://${cfg.region}.tts.speech.microsoft.com/cognitiveservices/v1`;
+        const ssmlPayload = buildAzureVietnameseSsml(
+          speechText,
+          cfg.voice,
+          cfg.prosodyRate,
+          cfg.prosodyPitch
+        );
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Ocp-Apim-Subscription-Key': cfg.apiKey,
+            'Content-Type': 'application/ssml+xml; charset=utf-8',
+            'X-Microsoft-OutputFormat': cfg.outputFormat,
+            'User-Agent': 'VirtualExpoPlaza3D-Backend/1.0',
+          },
+          body: ssmlPayload,
+          signal: controller.signal,
+        });
+
+        this.validateProviderHttpStatus(res.status, 'Azure AI Speech');
+        const arrayBuf = await res.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
+        if (buffer.byteLength < 64) {
+          throw new TtsServiceError(
+            'Dữ liệu âm thanh trả về từ Azure AI Speech quá ngắn hoặc không hợp lệ.',
+            502,
+            'TTS_INVALID_RESPONSE'
+          );
+        }
+        return { buffer, mimeType: 'audio/mpeg' };
+      }
+
       if (cfg.provider === 'gtts') {
         const baseEndpoint =
           cfg.endpointOverride || 'https://translate.googleapis.com/translate_tts';
@@ -884,6 +1014,13 @@ export class ExpoService {
         `Khóa cấu hình dịch vụ giọng đọc (${providerLabel}) không hợp lệ hoặc bị từ chối.`,
         502,
         'TTS_AUTH_FAILED'
+      );
+    }
+    if (status === 400) {
+      throw new TtsServiceError(
+        `Yêu cầu tổng hợp giọng đọc gửi tới ${providerLabel} không hợp lệ (HTTP 400).`,
+        502,
+        'TTS_BAD_REQUEST'
       );
     }
     if (status === 429) {

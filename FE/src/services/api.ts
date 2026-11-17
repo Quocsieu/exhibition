@@ -288,9 +288,9 @@ export const apiClient = {
     const candidateUrls = isLocalHost
       ? Array.from(
           new Set([
+            primaryUrl,
             normalizedPath,
             `http://localhost:4000${normalizedPath}`,
-            primaryUrl,
           ].filter(Boolean))
         )
       : Array.from(new Set([primaryUrl, normalizedPath].filter(Boolean)));
