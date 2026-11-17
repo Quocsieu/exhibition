@@ -7,7 +7,10 @@ import {
   UpdateProductInputSchema,
   AssignSlotBodySchema,
 } from '../schemas/expoSchemas.js';
-import type { ExpoService } from '../services/expoService.js';
+import {
+  type ExpoService,
+  TtsServiceError,
+} from '../services/expoService.js';
 import {
   authenticateAdminCredentials,
   verifyAdminToken,
@@ -21,6 +24,13 @@ const BatchImportBodySchema = z.object({
   boothId: z.string().min(1),
   format: z.enum(['json', 'csv']),
   content: z.string().min(2).max(500_000),
+});
+
+const NpcTtsBodySchema = z.object({
+  boothId: z.string().min(1).max(120),
+  stepType: z.enum(['GREETING', 'PRODUCT', 'CLOSING']),
+  slotId: z.string().max(64).nullable().optional(),
+  productId: z.string().max(120).nullable().optional(),
 });
 
 export type DataMutationCallback = (payload: {
@@ -316,6 +326,59 @@ export class ExpoController {
       const status = (err as Error & { statusCode?: number }).statusCode || 400;
       res.status(status).json({
         error: err instanceof Error ? err.message : 'Không thể gỡ sản phẩm khỏi vị trí trưng bày.',
+      });
+    }
+  };
+
+  // Vietnamese Female NPC Text-to-Speech (Booth & Product Verified + Cached + Rate Limited)
+  synthesizeNpcTts = async (req: Request, res: Response): Promise<void> => {
+    const parsed = NpcTtsBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues[0]?.message || 'Yêu cầu tổng hợp giọng nói NPC không hợp lệ.',
+        code: 'INVALID_TTS_INPUT',
+      });
+      return;
+    }
+
+    const forwarded = req.headers['x-forwarded-for'];
+    const clientIp =
+      (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') ||
+      req.ip ||
+      req.socket?.remoteAddress ||
+      'anonymous';
+
+    try {
+      const result = await this.service.synthesizeNpcStepAudio({
+        boothId: parsed.data.boothId.trim(),
+        stepType: parsed.data.stepType,
+        slotId: parsed.data.slotId ? parsed.data.slotId.trim() : null,
+        productId: parsed.data.productId ? parsed.data.productId.trim() : null,
+        clientIp,
+      });
+
+      res.setHeader('Content-Type', result.mimeType);
+      res.setHeader('Content-Length', String(result.audioBuffer.byteLength));
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('X-TTS-Cache', result.cacheStatus);
+      res.setHeader('X-TTS-Provider', result.provider);
+      res.setHeader('X-TTS-Voice', result.voice);
+      res.setHeader(
+        'Access-Control-Expose-Headers',
+        'X-TTS-Cache, X-TTS-Provider, X-TTS-Voice, Content-Type'
+      );
+      res.status(200).send(result.audioBuffer);
+    } catch (err) {
+      if (err instanceof TtsServiceError) {
+        res.status(err.statusCode).json({
+          error: err.message,
+          code: err.code,
+        });
+        return;
+      }
+      res.status(502).json({
+        error: 'Không thể tổng hợp giọng đọc tại thời điểm này. Đang hiển thị phụ đề.',
+        code: 'TTS_INTERNAL_ERROR',
       });
     }
   };

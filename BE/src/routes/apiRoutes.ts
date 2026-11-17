@@ -41,5 +41,8 @@ export function createApiRoutes(controller: ExpoController): Router {
   router.post('/integrations/extract-url', requireAdminAuth, controller.extractUrl);
   router.post('/integrations/import-batch', requireAdminAuth, controller.importBatch);
 
+  // NPC Vietnamese Female Text-to-Speech
+  router.post('/npc/tts', controller.synthesizeNpcTts);
+
   return router;
 }

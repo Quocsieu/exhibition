@@ -50,6 +50,7 @@ body,
   position: relative;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   user-select: none;
 }
@@ -66,6 +67,37 @@ body,
 
 .expo-canvas-container--dragging {
   cursor: grabbing;
+}
+
+.expo-canvas-container--pointer-locked {
+  cursor: crosshair;
+}
+
+.pointer-lock-status-pill {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 32;
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  color: #e0f2fe;
+  font-size: 0.78rem;
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+}
+
+.pointer-lock-status-pill kbd {
+  background: #334155;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.74rem;
+  color: #fbbf24;
 }
 
 .expo-hud-top {
@@ -2305,21 +2337,25 @@ a:focus-visible {
    ========================================================================== */
 .npc-assistant-panel {
   position: fixed;
-  top: 76px;
+  bottom: 16px;
   right: 16px;
+  left: auto;
   z-index: 42;
-  width: min(410px, calc(100vw - 32px));
+  width: min(372px, calc(100vw - 32px));
+  max-height: calc(100vh - 88px);
+  max-height: calc(100dvh - 88px);
   background: rgba(15, 23, 42, 0.94);
   backdrop-filter: blur(14px);
   border: 1px solid rgba(148, 163, 184, 0.32);
-  border-radius: 16px;
+  border-radius: 14px;
   color: #f8fafc;
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45);
-  overflow: hidden;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.45);
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 0 16px 16px;
+  gap: 8px;
+  padding: 0 14px 12px;
 }
 
 .npc-assistant-panel__strip {
@@ -2443,6 +2479,24 @@ a:focus-visible {
   font-size: 0.76rem;
   font-weight: 700;
   color: #fbbf24;
+}
+
+.npc-assistant-panel__audio-warning {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(120, 53, 15, 0.35);
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  border-radius: 10px;
+  padding: 8px 11px;
+  font-size: 0.76rem;
+  line-height: 1.42;
+  color: #fef3c7;
+}
+
+.npc-assistant-panel__audio-warning strong {
+  color: #fde68a;
+  font-size: 0.78rem;
 }
 
 .npc-assistant-panel__subtitle-box {
@@ -2606,6 +2660,16 @@ a:focus-visible {
   color: #fcd34d;
 }
 
+@media (min-width: 861px) and (max-width: 1120px) {
+  .npc-assistant-panel {
+    right: 14px;
+    left: auto;
+    bottom: 14px;
+    width: min(338px, 38vw);
+    max-height: calc(100dvh - 96px);
+  }
+}
+
 @media (max-width: 860px) {
   .npc-assistant-panel {
     top: auto;
@@ -2615,5 +2679,327 @@ a:focus-visible {
     width: auto;
     max-height: 46vh;
     overflow-y: auto;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .camera-mode-btn--pointer-lock {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   MOBILE LANDSCAPE RESPONSIVE OPTIMIZATION (667x375 .. 932x430)
+   ========================================================================== */
+@media (max-width: 960px) and (orientation: landscape) and (max-height: 520px),
+  (max-height: 480px) and (orientation: landscape) {
+  .expo-hud-top {
+    top: max(6px, env(safe-area-inset-top, 6px));
+    left: max(8px, env(safe-area-inset-left, 8px));
+    right: max(8px, env(safe-area-inset-right, 8px));
+    padding: 4px 10px;
+    gap: 6px;
+    flex-wrap: nowrap;
+    border-radius: 10px;
+  }
+
+  .expo-hud-top__brand {
+    gap: 8px;
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  .expo-hud-top__logo {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    font-size: 0.74rem;
+    flex-shrink: 0;
+  }
+
+  .expo-hud-top__title {
+    font-size: 0.82rem;
+    white-space: nowrap;
+    line-height: 1.15;
+  }
+
+  .expo-hud-top__status {
+    font-size: 0.68rem;
+    white-space: nowrap;
+    line-height: 1.1;
+  }
+
+  .expo-hud-top__nav {
+    gap: 5px;
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+  }
+
+  .hud-select {
+    font-size: 0.74rem;
+    padding: 3px 7px;
+    min-height: 28px;
+    max-width: 158px;
+    border-radius: 6px;
+  }
+
+  .expo-hud-top__nav .btn {
+    padding: 3px 8px;
+    min-height: 28px;
+    font-size: 0.72rem;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+
+  .expo-help-card,
+  .booth-mini-list,
+  .camera-mode-btn--pointer-lock {
+    display: none !important;
+  }
+
+  .hud-profile-card {
+    top: 48px;
+    right: max(8px, env(safe-area-inset-right, 8px));
+    width: min(310px, calc(100vw - 16px));
+    max-height: calc(100dvh - 56px);
+    overflow-y: auto;
+    padding: 10px 12px;
+  }
+
+  .mobile-joystick {
+    bottom: max(8px, env(safe-area-inset-bottom, 8px));
+    left: max(10px, env(safe-area-inset-left, 10px));
+    width: 74px;
+    height: 74px;
+  }
+
+  .mobile-joystick__knob {
+    width: 30px;
+    height: 30px;
+  }
+
+  .expo-hud-dock {
+    bottom: max(8px, env(safe-area-inset-bottom, 8px));
+    right: max(10px, env(safe-area-inset-right, 10px));
+    gap: 6px;
+    max-width: calc(100vw - 104px);
+  }
+
+  .camera-mode-bar {
+    padding: 4px 6px;
+    gap: 4px;
+    border-radius: 9px;
+  }
+
+  .camera-mode-btn {
+    min-height: 28px;
+    padding: 3px 8px;
+    font-size: 0.73rem;
+    border-radius: 6px;
+  }
+
+  .zoom-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 0.95rem;
+    border-radius: 6px;
+  }
+
+  /* Shop Showcase Corner Bar in Mobile Landscape */
+  .shop-showcase-corner-hud {
+    top: max(6px, env(safe-area-inset-top, 6px));
+    left: max(8px, env(safe-area-inset-left, 8px));
+    right: max(8px, env(safe-area-inset-right, 8px));
+    max-width: calc(100vw - 16px);
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .shop-showcase-back-btn {
+    padding: 4px 10px;
+    font-size: 0.74rem;
+    min-height: 28px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .shop-showcase-back-btn kbd {
+    display: none;
+  }
+
+  .shop-showcase-booth-banner {
+    padding: 3px 10px;
+    gap: 6px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .shop-showcase-booth-banner__title {
+    font-size: 0.78rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .shop-showcase-booth-banner__sub {
+    display: none;
+  }
+
+  .shop-showcase-corner-hud .btn {
+    padding: 4px 9px;
+    min-height: 28px;
+    font-size: 0.73rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Compact Right-Docked NPC Assistant Card in Mobile Landscape (Clear of Joystick & Top-Left Bar) */
+  .npc-assistant-panel {
+    top: auto;
+    bottom: max(8px, env(safe-area-inset-bottom, 8px));
+    right: max(8px, env(safe-area-inset-right, 8px));
+    left: auto;
+    width: min(296px, 42vw);
+    max-height: calc(100dvh - 48px);
+    padding: 0 10px 8px;
+    gap: 5px;
+    border-radius: 11px;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .npc-assistant-panel__header {
+    padding-top: 3px;
+    gap: 6px;
+  }
+
+  .npc-assistant-panel__persona {
+    gap: 7px;
+  }
+
+  .npc-assistant-panel__avatar {
+    width: 30px;
+    height: 30px;
+    font-size: 0.95rem;
+  }
+
+  .npc-assistant-panel__name {
+    font-size: 0.82rem;
+  }
+
+  .npc-assistant-panel__role-badge {
+    font-size: 0.64rem;
+    padding: 1px 6px;
+  }
+
+  .npc-assistant-panel__booth-name {
+    font-size: 0.7rem;
+  }
+
+  .npc-assistant-panel__close-btn {
+    width: 26px;
+    height: 26px;
+    font-size: 0.82rem;
+  }
+
+  .npc-status-pill {
+    font-size: 0.68rem;
+    padding: 2px 7px;
+  }
+
+  .npc-counter-pill {
+    font-size: 0.68rem;
+  }
+
+  .npc-assistant-panel__subtitle-box {
+    padding: 6px 8px;
+    gap: 3px;
+  }
+
+  .npc-assistant-panel__subtitle-text {
+    font-size: 0.76rem;
+    line-height: 1.35;
+  }
+
+  .npc-assistant-panel__voice-meta {
+    font-size: 0.66rem;
+  }
+
+  .npc-assistant-panel__product-card {
+    padding: 5px 7px;
+    gap: 7px;
+  }
+
+  .npc-assistant-panel__product-img,
+  .npc-assistant-panel__product-placeholder {
+    width: 36px;
+    height: 36px;
+  }
+
+  .npc-assistant-panel__product-title {
+    font-size: 0.76rem;
+  }
+
+  .npc-assistant-panel__product-price {
+    font-size: 0.72rem;
+  }
+
+  .npc-ctrl-btn {
+    min-height: 27px;
+    padding: 3px 6px;
+    font-size: 0.7rem;
+    border-radius: 6px;
+  }
+
+  /* Product Detail Modal in Mobile Landscape */
+  .product-detail-modal-backdrop {
+    padding: 6px;
+  }
+
+  .product-detail-modal {
+    width: min(740px, calc(100vw - 16px));
+    max-height: calc(100dvh - 12px);
+    border-radius: 12px;
+  }
+
+  .product-detail-modal .expo-dialog__header {
+    padding: 8px 12px;
+  }
+
+  .product-detail-modal .expo-dialog__title {
+    font-size: 0.96rem;
+  }
+
+  .product-detail-modal .expo-dialog__body {
+    padding: 10px 12px;
+    overflow-y: auto;
+  }
+
+  .product-detail__layout {
+    grid-template-columns: 0.82fr 1.18fr;
+    gap: 12px;
+  }
+
+  .product-detail__main-image-wrap {
+    height: 145px;
+  }
+
+  .product-detail__title {
+    font-size: 1rem;
+    margin-bottom: 4px;
+  }
+
+  .product-detail__price-box {
+    font-size: 1.1rem;
+    margin-bottom: 8px;
+  }
+
+  .product-detail__cta-group {
+    margin: 10px 0 6px;
+    gap: 6px;
   }
 }

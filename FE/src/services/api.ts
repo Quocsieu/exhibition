@@ -256,4 +256,100 @@ export const apiClient = {
     notifyExpoDataMutated('import-batch');
     return res;
   },
+
+  async synthesizeNpcSpeech(
+    params: {
+      boothId: string;
+      stepType: 'GREETING' | 'PRODUCT' | 'CLOSING';
+      slotId?: string | null;
+      productId?: string | null;
+    },
+    signal?: AbortSignal
+  ): Promise<{
+    blob: Blob;
+    cacheStatus: string;
+    provider: string;
+    voice: string;
+  }> {
+    const normalizedPath = '/api/npc/tts';
+    const primaryUrl = buildApiUrl(normalizedPath);
+    const fetchOptions: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(params),
+      signal,
+    };
+
+    const isLocalHost =
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    const candidateUrls = isLocalHost
+      ? Array.from(
+          new Set([
+            normalizedPath,
+            `http://localhost:4000${normalizedPath}`,
+            primaryUrl,
+          ].filter(Boolean))
+        )
+      : Array.from(new Set([primaryUrl, normalizedPath].filter(Boolean)));
+
+    let response: Response | null = null;
+    let lastError: unknown = null;
+
+    for (let i = 0; i < candidateUrls.length; i++) {
+      const url = candidateUrls[i];
+      try {
+        const res = await fetch(url, fetchOptions);
+        const isHtmlFallback404 =
+          res.status === 404 && (res.headers.get('content-type') || '').includes('text/html');
+        const isProxyBadGateway = isLocalHost && (res.status === 502 || res.status === 504);
+
+        if ((isHtmlFallback404 || isProxyBadGateway) && i < candidateUrls.length - 1) {
+          continue;
+        }
+        response = res;
+        break;
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError') {
+          throw err;
+        }
+        lastError = err;
+      }
+    }
+
+    if (!response) {
+      throw lastError || new Error('Không thể kết nối tới dịch vụ âm thanh TTS.');
+    }
+
+    if (!response.ok) {
+      const errData = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+      };
+      const error = new Error(
+        errData.error || `Không thể tải âm thanh từ máy chủ (HTTP ${response.status})`
+      ) as Error & { code?: string; status?: number };
+      error.code = errData.code || `HTTP_${response.status}`;
+      error.status = response.status;
+      throw error;
+    }
+
+    const blob = await response.blob();
+    if (!blob || blob.size < 32) {
+      const error = new Error('Dữ liệu âm thanh trả về rỗng hoặc không hợp lệ.') as Error & {
+        code?: string;
+      };
+      error.code = 'EMPTY_AUDIO_BLOB';
+      throw error;
+    }
+
+    return {
+      blob,
+      cacheStatus: response.headers.get('X-TTS-Cache') || 'MISS',
+      provider: response.headers.get('X-TTS-Provider') || 'cloud',
+      voice: response.headers.get('X-TTS-Voice') || 'vi-female',
+    };
+  },
 };

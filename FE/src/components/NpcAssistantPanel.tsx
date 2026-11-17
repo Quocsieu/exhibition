@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Product } from '../types/expo';
 import type {
+  NpcAudioRuntimeState,
   NpcPresentationPlan,
   NpcPresentationStep,
   NpcSessionStatus,
@@ -10,6 +11,8 @@ import { formatCurrency } from './ProductPanel';
 export interface NpcAssistantPanelProps {
   plan: NpcPresentationPlan | null;
   status: NpcSessionStatus;
+  audioState: NpcAudioRuntimeState;
+  voiceNotice?: string | null;
   currentStepIndex: number;
   isMuted: boolean;
   hasVietnameseVoice: boolean;
@@ -19,23 +22,39 @@ export interface NpcAssistantPanelProps {
   onNext: () => void;
   onStop: () => void;
   onRestart: () => void;
+  onRetryAudio?: () => void;
   onToggleMute: () => void;
   onClose: () => void;
   onInspectProduct?: (product: Product) => void;
 }
 
-function getStatusLabel(status: NpcSessionStatus, step: NpcPresentationStep | undefined): string {
+function getStatusLabel(
+  status: NpcSessionStatus,
+  audioState: NpcAudioRuntimeState,
+  step: NpcPresentationStep | undefined
+): string {
   switch (status) {
     case 'GREETING':
-      return '👋 Đang chào mừng khách tham quan';
+      if (audioState === 'CHECKING_VOICE') return '⏳ Đang tải giọng đọc chào mừng...';
+      return audioState === 'SPEAKING'
+        ? '🔊 Đang phát lời chào mừng'
+        : '👋 Chào mừng khách tham quan (Phụ đề)';
     case 'PRESENTING':
       if (step?.type === 'PRODUCT' && step.productIndex && step.totalProducts) {
-        return `🎙️ Đang giới thiệu sản phẩm ${step.productIndex}/${step.totalProducts}`;
+        if (audioState === 'CHECKING_VOICE') {
+          return `⏳ Đang tải âm thanh SP ${step.productIndex}/${step.totalProducts}...`;
+        }
+        return audioState === 'SPEAKING'
+          ? `🔊 Đang thuyết minh SP ${step.productIndex}/${step.totalProducts}`
+          : `📝 Giới thiệu sản phẩm ${step.productIndex}/${step.totalProducts} (Phụ đề)`;
       }
       if (step?.type === 'CLOSING') {
-        return '✨ Lời cảm ơn & kết thúc';
+        if (audioState === 'CHECKING_VOICE') return '⏳ Đang tải lời cảm ơn...';
+        return audioState === 'SPEAKING'
+          ? '🔊 Lời cảm ơn & kết thúc'
+          : '✨ Lời cảm ơn & kết thúc (Phụ đề)';
       }
-      return '🎙️ Đang thuyết minh';
+      return audioState === 'SPEAKING' ? '🔊 Đang thuyết minh' : '📝 Đang hiển thị phụ đề';
     case 'PAUSED':
       return '⏸️ Đang tạm dừng thuyết minh';
     case 'COMPLETED':
@@ -53,6 +72,8 @@ export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
   ({
     plan,
     status,
+    audioState,
+    voiceNotice,
     currentStepIndex,
     isMuted,
     hasVietnameseVoice,
@@ -62,6 +83,7 @@ export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
     onNext,
     onStop,
     onRestart,
+    onRetryAudio,
     onToggleMute,
     onClose,
     onInspectProduct,
@@ -73,7 +95,8 @@ export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
     const { booth, profile, steps, totalProducts } = plan;
     const currentStep = steps[Math.min(Math.max(0, currentStepIndex), steps.length - 1)];
     const activeProduct = currentStep?.product ?? null;
-    const isSpeaking = status === 'GREETING' || status === 'PRESENTING';
+    const isSessionRunning = status === 'GREETING' || status === 'PRESENTING';
+    const isActuallySpeakingAudio = isSessionRunning && audioState === 'SPEAKING';
     const isPaused = status === 'PAUSED';
     const isFinishedOrStopped = status === 'COMPLETED' || status === 'CANCELLED';
 
@@ -86,6 +109,23 @@ export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
         : totalProducts > 0
           ? `${totalProducts} sản phẩm trưng bày`
           : 'Chưa có sản phẩm';
+
+    let voiceStatusText: string;
+    if (isMuted || audioState === 'MUTED') {
+      voiceStatusText = '🔇 Đang tắt tiếng (Chỉ hiển thị phụ đề)';
+    } else if (audioState === 'SPEAKING') {
+      voiceStatusText = `🔊 Đang phát giọng đọc: ${voiceNotice || 'Tiếng Việt (vi-VN)'}`;
+    } else if (audioState === 'CHECKING_VOICE') {
+      voiceStatusText = '⏳ Đang kiểm tra & khởi tạo giọng đọc Tiếng Việt...';
+    } else if (audioState === 'NO_VI_VOICE') {
+      voiceStatusText = '⚠️ Trình duyệt chưa có voice Tiếng Việt (vi-VN) — Chạy phụ đề';
+    } else if (audioState === 'AUDIO_ERROR') {
+      voiceStatusText = '⚠️ Không thể phát giọng đọc — Chạy phụ đề tự động';
+    } else if (hasVietnameseVoice) {
+      voiceStatusText = '🔊 Hỗ trợ giọng đọc Tiếng Việt (vi-VN)';
+    } else {
+      voiceStatusText = '📝 Chế độ phụ đề Tiếng Việt tự động';
+    }
 
     return (
       <aside
@@ -101,7 +141,7 @@ export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
           <div className="npc-assistant-panel__persona">
             <div
               className={`npc-assistant-panel__avatar ${
-                isSpeaking ? 'npc-assistant-panel__avatar--speaking' : ''
+                isActuallySpeakingAudio ? 'npc-assistant-panel__avatar--speaking' : ''
               }`}
               aria-hidden="true"
             >
@@ -137,18 +177,46 @@ export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
         <div className="npc-assistant-panel__status-bar">
           <span
             className={`npc-status-pill ${
-              isSpeaking
+              isSessionRunning
                 ? 'npc-status-pill--active'
                 : isPaused
                   ? 'npc-status-pill--paused'
                   : 'npc-status-pill--idle'
             }`}
           >
-            {getStatusLabel(status, currentStep)}
+            {getStatusLabel(status, audioState, currentStep)}
           </span>
 
           <span className="npc-counter-pill">{productCounterBadge}</span>
         </div>
+
+        {/* Clear Audio Notice Banner when Vietnamese TTS voice is unavailable or failed */}
+        {!isMuted && (audioState === 'NO_VI_VOICE' || audioState === 'AUDIO_ERROR') && (
+          <div className="npc-assistant-panel__audio-warning" role="alert">
+            <strong>
+              {audioState === 'NO_VI_VOICE'
+                ? '🔇 Đang chạy chế độ Phụ đề Tiếng Việt (Chưa có nguồn phát âm thanh)'
+                : '⚠️ Không thể phát âm thanh giọng đọc'}
+            </strong>
+            <span>
+              {voiceNotice ||
+                'Dịch vụ giọng đọc đám mây chưa được cấu hình hoặc tạm thời gián đoạn. Hệ thống đang hiển thị phụ đề tiếng Việt tuần tự.'}
+            </span>
+            {onRetryAudio && (
+              <div>
+                <button
+                  type="button"
+                  className="npc-ctrl-btn"
+                  style={{ marginTop: 4, flex: 'none', padding: '4px 10px', fontSize: '0.74rem' }}
+                  onClick={onRetryAudio}
+                  title="Thử tải và phát lại âm thanh cho lời thoại hiện tại"
+                >
+                  🔄 Thử lại âm thanh
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Subtitle Box (Vietnamese Transcript) */}
         <div
@@ -160,13 +228,7 @@ export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
             “{currentStep?.text || ''}”
           </p>
           <div className="npc-assistant-panel__voice-meta">
-            <span>
-              {isMuted
-                ? '🔇 Đang tắt tiếng (Hiển thị phụ đề)'
-                : hasVietnameseVoice
-                  ? '🔊 Giọng đọc Tiếng Việt (vi-VN)'
-                  : '📝 Phụ đề Tiếng Việt tự động'}
-            </span>
+            <span>{voiceStatusText}</span>
             {currentStep?.slotLabel && (
               <span>· Kệ: {currentStep.slotLabel}</span>
             )}

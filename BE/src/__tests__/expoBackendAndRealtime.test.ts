@@ -16,6 +16,12 @@ import {
   extractProductFromHtml,
   parseBatchProducts,
 } from '../integrations/productAdapter.js';
+import {
+  computeTtsCacheKey,
+  normalizeTextForVietnameseTts,
+  numberToVietnameseWords,
+  splitVietnameseSpeechIntoChunks,
+} from '../services/expoService.js';
 
 describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrations & Admin Auth', () => {
   let db: ExpoDatabase;
@@ -693,5 +699,254 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
 
     client.disconnect();
     await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
+  it('synthesizes Vietnamese Female NPC audio via POST /api/npc/tts with booth/product verification, SHA-256 caching, rate limiting, timeout, and zero secret leakage', async () => {
+    const savedEnv = {
+      TTS_PROVIDER: process.env.TTS_PROVIDER,
+      TTS_API_KEY: process.env.TTS_API_KEY,
+      TTS_VOICE: process.env.TTS_VOICE,
+      TTS_API_ENDPOINT: process.env.TTS_API_ENDPOINT,
+      TTS_TIMEOUT_MS: process.env.TTS_TIMEOUT_MS,
+      TTS_RATE_LIMIT_PER_MIN: process.env.TTS_RATE_LIMIT_PER_MIN,
+    };
+
+    let mockMode: 'ok' | '429' | '500' | '401' | 'timeout' = 'ok';
+    let providerCallCount = 0;
+    let lastReceivedBody: Record<string, unknown> = {};
+
+    const mockProviderServer = http.createServer(async (req, res) => {
+      providerCallCount += 1;
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const rawBody = Buffer.concat(chunks).toString('utf8');
+      try {
+        lastReceivedBody = JSON.parse(rawBody);
+      } catch {
+        lastReceivedBody = { rawBody };
+      }
+
+      if (mockMode === '429') {
+        res.writeHead(429, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Quota exceeded' }));
+        return;
+      }
+      if (mockMode === '500') {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Upstream failure' }));
+        return;
+      }
+      if (mockMode === '401') {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid secret token' }));
+        return;
+      }
+      if (mockMode === 'timeout') {
+        await new Promise((r) => setTimeout(r, 2000));
+        res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+        res.end(Buffer.alloc(256, 0x49));
+        return;
+      }
+
+      // Valid synthetic MP3 frame buffer (>= 64 bytes)
+      const mp3Buffer = Buffer.alloc(512, 0x49);
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      res.end(mp3Buffer);
+    });
+
+    await new Promise<void>((resolve) => mockProviderServer.listen(0, '127.0.0.1', () => resolve()));
+    const providerPort = (mockProviderServer.address() as AddressInfo).port;
+
+    try {
+      // 1. Input validation: reject invalid stepType (400), non-existent booth (404), and foreign product (400)
+      const invalidStepRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-nordic-living', stepType: 'INVALID_STEP' }),
+      });
+      expect(invalidStepRes.status).toBe(400);
+
+      const ghostBoothRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-does-not-exist', stepType: 'GREETING' }),
+      });
+      expect(ghostBoothRes.status).toBe(404);
+
+      const foreignProductRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          boothId: 'booth-nordic-living',
+          stepType: 'PRODUCT',
+          productId: 'prod-aether-hub-x1', // belongs to booth-aether-tech!
+        }),
+      });
+      expect(foreignProductRes.status).toBe(400);
+
+      // 1b. Zero-key default provider ('gtts'): works out-of-the-box without TTS_API_KEY!
+      delete process.env.TTS_PROVIDER;
+      delete process.env.TTS_API_KEY;
+      delete process.env.TTS_VOICE;
+      process.env.TTS_API_ENDPOINT = `http://127.0.0.1:${providerPort}/translate_tts`;
+
+      const gttsMissRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-ecovita-craft', stepType: 'CLOSING' }),
+      });
+      expect(gttsMissRes.status).toBe(200);
+      expect(gttsMissRes.headers.get('content-type')).toContain('audio/mpeg');
+      expect(gttsMissRes.headers.get('x-tts-provider')).toBe('gtts');
+      expect(gttsMissRes.headers.get('x-tts-voice')).toBe('vi-VN-Standard-A');
+      expect(gttsMissRes.headers.get('x-tts-cache')).toBe('MISS');
+      const gttsBuf = await gttsMissRes.arrayBuffer();
+      expect(gttsBuf.byteLength).toBeGreaterThanOrEqual(512);
+
+      const gttsHitRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-ecovita-craft', stepType: 'CLOSING' }),
+      });
+      expect(gttsHitRes.status).toBe(200);
+      expect(gttsHitRes.headers.get('x-tts-cache')).toBe('HIT');
+
+      providerCallCount = 0;
+
+      // 2. Explicit keyed provider ('viettel') with missing API Key -> returns 503 TTS_NOT_CONFIGURED without calling provider
+      process.env.TTS_PROVIDER = 'viettel';
+      process.env.TTS_API_KEY = '';
+      process.env.TTS_API_ENDPOINT = `http://127.0.0.1:${providerPort}/tts`;
+
+      const noKeyRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-nordic-living', stepType: 'GREETING' }),
+      });
+      expect(noKeyRes.status).toBe(503);
+      const noKeyJson = (await noKeyRes.json()) as { code: string; error: string };
+      expect(noKeyJson.code).toBe('TTS_NOT_CONFIGURED');
+      expect(providerCallCount).toBe(0);
+
+      // 3. Valid API Key -> Cache MISS on 1st call, Cache HIT on 2nd call (0 duplicate provider calls)
+      const secretKey = 'SECRET_TTS_TOKEN_999888777';
+      process.env.TTS_API_KEY = secretKey;
+      process.env.TTS_VOICE = 'hn-quynhanh';
+      process.env.TTS_TIMEOUT_MS = '1200';
+      process.env.TTS_RATE_LIMIT_PER_MIN = '30';
+
+      const missRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-nordic-living', stepType: 'GREETING' }),
+      });
+      expect(missRes.status).toBe(200);
+      expect(missRes.headers.get('content-type')).toContain('audio/mpeg');
+      expect(missRes.headers.get('x-tts-cache')).toBe('MISS');
+      expect(missRes.headers.get('x-tts-provider')).toBe('viettel');
+      expect(missRes.headers.get('x-tts-voice')).toBe('hn-quynhanh');
+      const missBuf = await missRes.arrayBuffer();
+      expect(missBuf.byteLength).toBe(512);
+      expect(providerCallCount).toBe(1);
+      expect(String(lastReceivedBody.text)).toContain('Minh Châu');
+      expect(String(lastReceivedBody.text)).toContain('Nordic Living Studio');
+
+      const hitRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-nordic-living', stepType: 'GREETING' }),
+      });
+      expect(hitRes.status).toBe(200);
+      expect(hitRes.headers.get('x-tts-cache')).toBe('HIT');
+      expect(providerCallCount).toBe(1); // Provider was NOT called again!
+
+      // 4. Provider 429, 500, 401 (no secret leak), and Timeout (504)
+      mockMode = '429';
+      const quotaRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-aether-tech', stepType: 'GREETING' }),
+      });
+      expect(quotaRes.status).toBe(429);
+      const quotaJson = (await quotaRes.json()) as { code: string };
+      expect(quotaJson.code).toBe('TTS_PROVIDER_QUOTA');
+
+      mockMode = '500';
+      const err500Res = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-aether-tech', stepType: 'CLOSING' }),
+      });
+      expect(err500Res.status).toBe(502);
+
+      mockMode = '401';
+      const err401Res = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-ecovita-craft', stepType: 'GREETING' }),
+      });
+      expect(err401Res.status).toBe(502);
+      const err401Text = await err401Res.text();
+      expect(err401Text.includes(secretKey)).toBe(false); // Never leaks secret!
+
+      mockMode = 'timeout';
+      process.env.TTS_TIMEOUT_MS = '1000';
+      const timeoutRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-kinetix-robotics', stepType: 'GREETING' }),
+      });
+      expect(timeoutRes.status).toBe(504);
+      const timeoutJson = (await timeoutRes.json()) as { code: string };
+      expect(timeoutJson.code).toBe('TTS_TIMEOUT');
+
+      // 5. Rate limiting per IP (429 RATE_LIMITED)
+      mockMode = 'ok';
+      process.env.TTS_RATE_LIMIT_PER_MIN = '5';
+      const rateLimitedRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-solaris-energy', stepType: 'GREETING' }),
+      });
+      expect(rateLimitedRes.status).toBe(429);
+      const rateLimitedJson = (await rateLimitedRes.json()) as { code: string };
+      expect(rateLimitedJson.code).toBe('RATE_LIMITED');
+    } finally {
+      await new Promise<void>((resolve) => mockProviderServer.close(() => resolve()));
+      for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it('normalizes Vietnamese numbers, prices, technical symbols, and sentence boundaries for human-like TTS speech', () => {
+    expect(numberToVietnameseWords(6850000)).toBe('sáu triệu tám trăm năm mươi nghìn');
+    expect(numberToVietnameseWords(12900000)).toBe('mười hai triệu chín trăm nghìn');
+    expect(numberToVietnameseWords(1050000)).toBe('một triệu không trăm năm mươi nghìn');
+    expect(numberToVietnameseWords(25400000)).toBe('hai mươi lăm triệu bốn trăm nghìn');
+    expect(numberToVietnameseWords(31000000)).toBe('ba mươi mốt triệu');
+
+    const normalized = normalizeTextForVietnameseTts(
+      '<b>Cà phê/Trà</b> 100% nguyên chất https://example.com/item [SKU: CF-01] undefined — 24/7'
+    );
+    expect(normalized).toContain('Cà phê và Trà');
+    expect(normalized).toContain('100 phần trăm');
+    expect(normalized).toContain('hai tư trên bảy');
+    expect(normalized).not.toContain('https://');
+    expect(normalized).not.toContain('SKU');
+    expect(normalized).not.toContain('undefined');
+
+    const sentences = splitVietnameseSpeechIntoChunks(
+      'Dạ xin chào quý khách! Em là Minh Châu, tư vấn viên tại gian hàng. Hôm nay em xin giới thiệu hai sản phẩm tiêu biểu ạ.'
+    );
+    expect(sentences).toHaveLength(3);
+
+    // Cache key changes when prosody/version tag changes
+    const k1 = computeTtsCacheKey('gtts', 'vi-VN-Standard-A', 'vi-VN', 'v1', 'Xin chào');
+    const k2 = computeTtsCacheKey('gtts', 'vi-VN-Standard-A', 'vi-VN', 'v2-natural-0.96', 'Xin chào');
+    expect(k1).not.toBe(k2);
   });
 });

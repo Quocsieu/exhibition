@@ -20,9 +20,11 @@ import { LoadingScreen } from '../components/LoadingScreen';
 import { useRealtime } from '../hooks/useRealtime';
 import {
   type NpcAnimationClipName,
+  type NpcAudioRuntimeState,
   type NpcPresentationPlan,
   type NpcSessionStatus,
   buildBoothPresentationPlan,
+  resolveVietnameseVoiceAsync,
   selectVietnameseVoice,
 } from '../services/npcPresentationService';
 import {
@@ -134,10 +136,14 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   const [editingProfile, setEditingProfile] = useState(false);
   const [draftName, setDraftName] = useState(playerName);
   const [draftColor, setDraftColor] = useState(playerColor);
+  const [isPointerLocked, setIsPointerLocked] = useState(false);
+  const pointerLockToggleRequestRef = useRef<(() => void) | null>(null);
 
   // NPC Sales Assistant Presentation State Machine & Speech Synthesis Refs
   const [npcPlan, setNpcPlan] = useState<NpcPresentationPlan | null>(null);
   const [npcStatus, setNpcStatus] = useState<NpcSessionStatus>('IDLE');
+  const [npcAudioState, setNpcAudioState] = useState<NpcAudioRuntimeState>('IDLE');
+  const [npcVoiceNotice, setNpcVoiceNotice] = useState<string | null>(null);
   const [npcStepIndex, setNpcStepIndex] = useState<number>(0);
   const [npcAnimation, setNpcAnimation] = useState<NpcAnimationClipName>('IDLE');
   const [npcMuted, setNpcMuted] = useState<boolean>(false);
@@ -145,11 +151,24 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   const npcMutedRef = useRef<boolean>(false);
   npcMutedRef.current = npcMuted;
   const utteranceTokenRef = useRef<number>(0);
+  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const activeObjectUrlRef = useRef<string | null>(null);
+  const ttsAbortControllerRef = useRef<AbortController | null>(null);
   const stepTimerRef = useRef<number | null>(null);
   const animTimerRef = useRef<number | null>(null);
+  const voiceWatchdogTimerRef = useRef<number | null>(null);
 
   const cancelNpcAudioAndTimers = useCallback(() => {
     utteranceTokenRef.current += 1;
+    if (ttsAbortControllerRef.current) {
+      try {
+        ttsAbortControllerRef.current.abort();
+      } catch {
+        // ignore abort errors
+      }
+      ttsAbortControllerRef.current = null;
+    }
     if (stepTimerRef.current !== null) {
       window.clearTimeout(stepTimerRef.current);
       stepTimerRef.current = null;
@@ -158,9 +177,44 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       window.clearTimeout(animTimerRef.current);
       animTimerRef.current = null;
     }
+    if (voiceWatchdogTimerRef.current !== null) {
+      window.clearTimeout(voiceWatchdogTimerRef.current);
+      voiceWatchdogTimerRef.current = null;
+    }
+    if (audioElementRef.current) {
+      const audioEl = audioElementRef.current;
+      audioEl.onplay = null;
+      audioEl.onended = null;
+      audioEl.onerror = null;
+      try {
+        audioEl.pause();
+        audioEl.removeAttribute('src');
+        audioEl.load();
+      } catch {
+        // ignore audio cleanup errors
+      }
+      audioElementRef.current = null;
+    }
+    if (activeObjectUrlRef.current) {
+      try {
+        URL.revokeObjectURL(activeObjectUrlRef.current);
+      } catch {
+        // ignore revokeObjectURL errors
+      }
+      activeObjectUrlRef.current = null;
+    }
+    if (activeUtteranceRef.current) {
+      activeUtteranceRef.current.onstart = null;
+      activeUtteranceRef.current.onend = null;
+      activeUtteranceRef.current.onerror = null;
+      activeUtteranceRef.current = null;
+    }
     try {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
+        const synth = window.speechSynthesis;
+        if (synth.speaking || synth.pending || synth.paused) {
+          synth.cancel();
+        }
       }
     } catch {
       // Ignore speechSynthesis errors in restricted environments
@@ -171,6 +225,8 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     cancelNpcAudioAndTimers();
     setNpcPlan(null);
     setNpcStatus('IDLE');
+    setNpcAudioState('IDLE');
+    setNpcVoiceNotice(null);
     setNpcStepIndex(0);
     setNpcAnimation('IDLE');
   }, [cancelNpcAudioAndTimers]);
@@ -624,6 +680,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
       if (stepIdx < 0 || stepIdx >= plan.steps.length) {
         setNpcStatus('COMPLETED');
+        setNpcAudioState('IDLE');
         setNpcAnimation('IDLE');
         return;
       }
@@ -632,20 +689,23 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       setNpcStepIndex(stepIdx);
       setNpcStatus(stepIdx === 0 ? 'GREETING' : 'PRESENTING');
 
-      // Initial gesture animation (`WAVE` for greeting/closing, `PRESENT` for product),
-      // transitioning smoothly to `TALKING` while speaking
-      const initialAnim: NpcAnimationClipName =
-        step.type === 'PRODUCT' ? 'PRESENT' : 'WAVE';
-      setNpcAnimation(initialAnim);
-
-      animTimerRef.current = window.setTimeout(() => {
-        if (utteranceTokenRef.current === token) {
-          setNpcAnimation('TALKING');
-        }
-      }, step.type === 'PRODUCT' ? 1600 : 1350);
-
-      const readingDurationMs = Math.min(8200, Math.max(2800, step.text.length * 48));
+      const readingDurationMs = Math.min(9000, Math.max(3600, step.text.length * 52));
       const effectiveMuted = mutedOverride !== undefined ? mutedOverride : npcMutedRef.current;
+
+      const triggerActiveStepAnimation = () => {
+        if (utteranceTokenRef.current !== token) return;
+        const initialAnim: NpcAnimationClipName =
+          step.type === 'PRODUCT' ? 'PRESENT' : 'WAVE';
+        setNpcAnimation(initialAnim);
+        if (animTimerRef.current !== null) {
+          window.clearTimeout(animTimerRef.current);
+        }
+        animTimerRef.current = window.setTimeout(() => {
+          if (utteranceTokenRef.current === token) {
+            setNpcAnimation('TALKING');
+          }
+        }, step.type === 'PRODUCT' ? 1600 : 1350);
+      };
 
       const advanceToNext = () => {
         if (utteranceTokenRef.current !== token) return;
@@ -653,49 +713,206 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
           playNpcStep(plan, stepIdx + 1);
         } else {
           setNpcStatus('COMPLETED');
+          setNpcAudioState('IDLE');
           setNpcAnimation('IDLE');
         }
       };
 
-      let usedSpeechSynthesis = false;
-      if (!effectiveMuted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try {
-          const voices = window.speechSynthesis.getVoices();
-          const viVoice = selectVietnameseVoice(voices);
-          if (viVoice) {
-            setHasVietnameseVoice(true);
-            const utterance = new SpeechSynthesisUtterance(step.text);
-            utterance.lang = viVoice.lang || 'vi-VN';
-            utterance.voice = viVoice;
-            utterance.rate = 1.02;
-            utterance.pitch = 1.08;
+      if (effectiveMuted) {
+        setNpcAudioState('MUTED');
+        triggerActiveStepAnimation();
+        stepTimerRef.current = window.setTimeout(advanceToNext, readingDurationMs);
+        return;
+      }
 
-            utterance.onend = () => {
+      // Fallback helper: Only uses Web Speech API if a genuine Vietnamese (`vi-VN` / `vi`) voice exists;
+      // otherwise enters Subtitle-Only Mode with the clear reason message.
+      const runFallbackOrSubtitleMode = (backendErrorNotice: string) => {
+        if (utteranceTokenRef.current !== token) return;
+        triggerActiveStepAnimation();
+
+        const startLocalViVoiceOrSubtitles = (viVoice: SpeechSynthesisVoice | null) => {
+          if (utteranceTokenRef.current !== token) return;
+
+          if (!viVoice) {
+            setHasVietnameseVoice(false);
+            setNpcAudioState('NO_VI_VOICE');
+            setNpcVoiceNotice(backendErrorNotice);
+            stepTimerRef.current = window.setTimeout(advanceToNext, readingDurationMs);
+            return;
+          }
+
+          setHasVietnameseVoice(true);
+          try {
+            const synth = window.speechSynthesis;
+            if (synth.paused) {
+              synth.resume();
+            }
+            const utterance = new SpeechSynthesisUtterance(step.text);
+            activeUtteranceRef.current = utterance;
+            try {
+              utterance.voice = viVoice;
+            } catch {
+              // Allow non-native SpeechSynthesisVoice wrappers while preserving lang
+            }
+            utterance.lang = viVoice.lang || 'vi-VN';
+            utterance.volume = 1.0;
+            utterance.rate = 0.96;
+            utterance.pitch = 1.02;
+
+            utterance.onstart = () => {
               if (utteranceTokenRef.current !== token) return;
+              if (voiceWatchdogTimerRef.current !== null) {
+                window.clearTimeout(voiceWatchdogTimerRef.current);
+                voiceWatchdogTimerRef.current = null;
+              }
+              setNpcAudioState('SPEAKING');
+              setNpcVoiceNotice(`${viVoice.name} (${viVoice.lang})`);
               if (stepTimerRef.current !== null) {
                 window.clearTimeout(stepTimerRef.current);
               }
-              stepTimerRef.current = window.setTimeout(advanceToNext, 380);
+              const maxSpeechSafetyMs = Math.max(28000, step.text.length * 165);
+              stepTimerRef.current = window.setTimeout(advanceToNext, maxSpeechSafetyMs);
             };
 
-            utterance.onerror = () => {
+            utterance.onend = () => {
               if (utteranceTokenRef.current !== token) return;
+              activeUtteranceRef.current = null;
+              if (voiceWatchdogTimerRef.current !== null) {
+                window.clearTimeout(voiceWatchdogTimerRef.current);
+                voiceWatchdogTimerRef.current = null;
+              }
+              if (stepTimerRef.current !== null) {
+                window.clearTimeout(stepTimerRef.current);
+              }
+              stepTimerRef.current = window.setTimeout(advanceToNext, 420);
+            };
+
+            utterance.onerror = (ev) => {
+              if (utteranceTokenRef.current !== token) return;
+              activeUtteranceRef.current = null;
+              const errCode = (ev as SpeechSynthesisErrorEvent)?.error || 'speech-error';
+              if (errCode === 'canceled' || errCode === 'interrupted') return;
+              setNpcAudioState('AUDIO_ERROR');
+              setNpcVoiceNotice(backendErrorNotice);
               if (stepTimerRef.current === null) {
-                stepTimerRef.current = window.setTimeout(advanceToNext, 600);
+                stepTimerRef.current = window.setTimeout(advanceToNext, readingDurationMs);
               }
             };
 
-            window.speechSynthesis.speak(utterance);
-            usedSpeechSynthesis = true;
+            stepTimerRef.current = window.setTimeout(advanceToNext, readingDurationMs);
+            synth.speak(utterance);
+          } catch {
+            setNpcAudioState('AUDIO_ERROR');
+            setNpcVoiceNotice(backendErrorNotice);
+            stepTimerRef.current = window.setTimeout(advanceToNext, readingDurationMs);
           }
-        } catch {
-          usedSpeechSynthesis = false;
-        }
-      }
+        };
 
-      // Synchronized subtitle timer (or watchdog if Web Speech API does not fire onend in headless browsers)
-      const fallbackDelay = usedSpeechSynthesis ? readingDurationMs + 2400 : readingDurationMs;
-      stepTimerRef.current = window.setTimeout(advanceToNext, fallbackDelay);
+        if (
+          typeof window !== 'undefined' &&
+          'speechSynthesis' in window &&
+          typeof SpeechSynthesisUtterance !== 'undefined'
+        ) {
+          let immediateVoices: SpeechSynthesisVoice[] = [];
+          try {
+            immediateVoices = window.speechSynthesis.getVoices() || [];
+          } catch {
+            immediateVoices = [];
+          }
+          if (immediateVoices.length > 0) {
+            startLocalViVoiceOrSubtitles(selectVietnameseVoice(immediateVoices));
+          } else {
+            void resolveVietnameseVoiceAsync(500).then((res) => {
+              startLocalViVoiceOrSubtitles(res.voice);
+            });
+          }
+        } else {
+          startLocalViVoiceOrSubtitles(null);
+        }
+      };
+
+      // Primary Path: Backend Vietnamese Female TTS (`POST /api/npc/tts`) -> HTMLAudioElement
+      // Phase 5: While loading audio, NPC remains in waiting state (`IDLE` animation, `CHECKING_VOICE`)
+      setNpcAudioState('CHECKING_VOICE');
+      setNpcVoiceNotice('Đang tải âm thanh giọng nữ Tiếng Việt từ máy chủ...');
+      setNpcAnimation('IDLE');
+
+      const abortController = new AbortController();
+      ttsAbortControllerRef.current = abortController;
+
+      void apiClient
+        .synthesizeNpcSpeech(
+          {
+            boothId: plan.booth.id,
+            stepType: step.type,
+            slotId: step.slotId,
+            productId: step.product?.id ?? null,
+          },
+          abortController.signal
+        )
+        .then(async (ttsResult) => {
+          if (utteranceTokenRef.current !== token) return;
+          ttsAbortControllerRef.current = null;
+
+          const objectUrl = URL.createObjectURL(ttsResult.blob);
+          activeObjectUrlRef.current = objectUrl;
+
+          const audio = new Audio(objectUrl);
+          audio.preload = 'auto';
+          audio.volume = 1.0;
+          audio.playbackRate = 0.96;
+          audio.defaultPlaybackRate = 0.96;
+          (audio as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = true;
+          audio.muted = npcMutedRef.current;
+          audioElementRef.current = audio;
+
+          const voiceLabel = `Giọng nữ Tiếng Việt (${ttsResult.provider.toUpperCase()} · ${ttsResult.voice})`;
+
+          audio.onplay = () => {
+            if (utteranceTokenRef.current !== token) return;
+            setHasVietnameseVoice(true);
+            setNpcAudioState(npcMutedRef.current ? 'MUTED' : 'SPEAKING');
+            setNpcVoiceNotice(voiceLabel);
+            triggerActiveStepAnimation();
+          };
+
+          audio.onended = () => {
+            if (utteranceTokenRef.current !== token) return;
+            if (stepTimerRef.current !== null) {
+              window.clearTimeout(stepTimerRef.current);
+            }
+            stepTimerRef.current = window.setTimeout(advanceToNext, 380);
+          };
+
+          audio.onerror = () => {
+            if (utteranceTokenRef.current !== token) return;
+            runFallbackOrSubtitleMode(
+              'Không thể giải mã dữ liệu âm thanh trình duyệt — Đang hiển thị phụ đề tiếng Việt.'
+            );
+          };
+
+          try {
+            await audio.play();
+          } catch (playErr) {
+            if (utteranceTokenRef.current !== token) return;
+            const errName = (playErr as Error)?.name || '';
+            const msg =
+              errName === 'NotAllowedError'
+                ? 'Trình duyệt chặn tự động phát âm thanh — Hãy nhấn "🔄 Thử lại âm thanh" để nghe.'
+                : 'Không thể phát âm thanh trên trình duyệt — Đang hiển thị phụ đề tiếng Việt.';
+            runFallbackOrSubtitleMode(msg);
+          }
+        })
+        .catch((err: Error & { code?: string }) => {
+          if (utteranceTokenRef.current !== token) return;
+          if (err?.name === 'AbortError') return;
+          ttsAbortControllerRef.current = null;
+          runFallbackOrSubtitleMode(
+            err?.message ||
+              'Dịch vụ giọng đọc đám mây hiện chưa khả dụng — Đang hiển thị phụ đề tiếng Việt.'
+          );
+        });
     },
     [cancelNpcAudioAndTimers]
   );
@@ -727,6 +944,14 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
   const handleNpcPause = useCallback(() => {
     if (!npcPlan) return;
+    if (ttsAbortControllerRef.current) {
+      try {
+        ttsAbortControllerRef.current.abort();
+      } catch {
+        // ignore
+      }
+      ttsAbortControllerRef.current = null;
+    }
     if (stepTimerRef.current !== null) {
       window.clearTimeout(stepTimerRef.current);
       stepTimerRef.current = null;
@@ -735,20 +960,91 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       window.clearTimeout(animTimerRef.current);
       animTimerRef.current = null;
     }
+    if (voiceWatchdogTimerRef.current !== null) {
+      window.clearTimeout(voiceWatchdogTimerRef.current);
+      voiceWatchdogTimerRef.current = null;
+    }
+    if (audioElementRef.current && !audioElementRef.current.paused) {
+      try {
+        audioElementRef.current.pause();
+      } catch {
+        // ignore
+      }
+    }
     try {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.pause();
+        if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+          window.speechSynthesis.pause();
+        }
       }
     } catch {
       // Ignore pause errors
     }
     setNpcStatus('PAUSED');
+    setNpcAudioState('PAUSED');
     setNpcAnimation('IDLE');
   }, [npcPlan]);
 
   const handleNpcResume = useCallback(() => {
     if (!npcPlan) return;
+    // 1. If HTMLAudioElement is paused mid-clip, resume directly from current timestamp
+    if (
+      audioElementRef.current &&
+      audioElementRef.current.paused &&
+      !audioElementRef.current.ended &&
+      audioElementRef.current.currentTime > 0
+    ) {
+      setNpcStatus(npcStepIndex === 0 ? 'GREETING' : 'PRESENTING');
+      setNpcAudioState(npcMutedRef.current ? 'MUTED' : 'SPEAKING');
+      setNpcAnimation('TALKING');
+      void audioElementRef.current.play().catch(() => {
+        playNpcStep(npcPlan, npcStepIndex);
+      });
+      return;
+    }
+
+    // 2. If fallback Web Speech API is paused mid-utterance, resume it
+    try {
+      if (
+        typeof window !== 'undefined' &&
+        'speechSynthesis' in window &&
+        window.speechSynthesis.paused &&
+        window.speechSynthesis.speaking &&
+        activeUtteranceRef.current
+      ) {
+        window.speechSynthesis.resume();
+        const token = utteranceTokenRef.current;
+        const step = npcPlan.steps[npcStepIndex];
+        setNpcStatus(npcStepIndex === 0 ? 'GREETING' : 'PRESENTING');
+        setNpcAudioState('SPEAKING');
+        setNpcAnimation('TALKING');
+        const safetyMs = Math.max(20000, (step?.text.length || 80) * 150);
+        stepTimerRef.current = window.setTimeout(() => {
+          if (utteranceTokenRef.current !== token) return;
+          if (npcStepIndex + 1 < npcPlan.steps.length) {
+            playNpcStep(npcPlan, npcStepIndex + 1);
+          } else {
+            setNpcStatus('COMPLETED');
+            setNpcAudioState('IDLE');
+            setNpcAnimation('IDLE');
+          }
+        }, safetyMs);
+        return;
+      }
+    } catch {
+      // Fall back to replaying current step cleanly
+    }
+
     playNpcStep(npcPlan, npcStepIndex);
+  }, [npcPlan, npcStepIndex, playNpcStep]);
+
+  const handleNpcRetryAudio = useCallback(() => {
+    if (!npcPlan) return;
+    if (npcMutedRef.current) {
+      npcMutedRef.current = false;
+      setNpcMuted(false);
+    }
+    playNpcStep(npcPlan, npcStepIndex, false);
   }, [npcPlan, npcStepIndex, playNpcStep]);
 
   const handleNpcPrevious = useCallback(() => {
@@ -764,6 +1060,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   const handleNpcStop = useCallback(() => {
     cancelNpcAudioAndTimers();
     setNpcStatus('CANCELLED');
+    setNpcAudioState('IDLE');
     setNpcAnimation('IDLE');
   }, [cancelNpcAudioAndTimers]);
 
@@ -783,6 +1080,21 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     const nextMuted = !npcMutedRef.current;
     npcMutedRef.current = nextMuted;
     setNpcMuted(nextMuted);
+
+    // If HTMLAudioElement is currently playing, toggle its .muted property in real time without restarting!
+    if (
+      audioElementRef.current &&
+      !audioElementRef.current.paused &&
+      !audioElementRef.current.ended
+    ) {
+      audioElementRef.current.muted = nextMuted;
+      setNpcAudioState(nextMuted ? 'MUTED' : 'SPEAKING');
+      return;
+    }
+
+    if (nextMuted) {
+      setNpcAudioState('MUTED');
+    }
     if (npcPlan && (npcStatus === 'GREETING' || npcStatus === 'PRESENTING')) {
       playNpcStep(npcPlan, npcStepIndex, nextMuted);
     }
@@ -803,6 +1115,9 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         setSelectedProduct(null);
         return;
       }
+      if (npcPlan && (npcStatus === 'GREETING' || npcStatus === 'PRESENTING')) {
+        handleNpcPause();
+      }
       const ownerBooth = booths.find((b) => b.id === product.boothId) || selectedBooth;
       if (ownerBooth && selectedBooth?.id !== ownerBooth.id) {
         setSelectedBooth(ownerBooth);
@@ -812,7 +1127,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       }
       setSelectedProduct(product);
     },
-    [booths, selectedBooth]
+    [booths, handleNpcPause, npcPlan, npcStatus, selectedBooth]
   );
 
   const activeBoothProducts = useMemo(() => {
@@ -834,6 +1149,23 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   );
 
   const isBoothShowcaseActive = cameraMode === 'focus' && Boolean(selectedBooth || focusedBooth);
+  const isPointerLockBlocked = Boolean(
+    cameraMode !== 'explore' ||
+      selectedProduct ||
+      editingProfile ||
+      (npcPlan && npcStatus !== 'IDLE')
+  );
+
+  const handleOpenAdminSafe = useCallback(() => {
+    try {
+      if (typeof document !== 'undefined' && document.pointerLockElement) {
+        document.exitPointerLock?.();
+      }
+    } catch {
+      // ignore
+    }
+    onOpenAdmin();
+  }, [onOpenAdmin]);
 
   return (
     <main className="expo-viewport">
@@ -910,7 +1242,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
               ❓ Hướng dẫn
             </button>
 
-            <button type="button" className="btn btn--primary btn--sm" onClick={onOpenAdmin}>
+            <button type="button" className="btn btn--primary btn--sm" onClick={handleOpenAdminSafe}>
               ⚙️ Quản trị (Dashboard)
             </button>
           </div>
@@ -1003,6 +1335,24 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
               🚶 Tham quan
             </button>
 
+            {cameraMode === 'explore' && (
+              <button
+                type="button"
+                className={`camera-mode-btn camera-mode-btn--pointer-lock ${
+                  isPointerLocked ? 'camera-mode-btn--active' : ''
+                }`}
+                onClick={() => pointerLockToggleRequestRef.current?.()}
+                aria-pressed={isPointerLocked}
+                title={
+                  isPointerLocked
+                    ? 'Đang khóa con trỏ chuột kiểu game 3D — Nhấn phím Esc để thoát'
+                    : 'Khóa chuột góc nhìn 3D: Rê chuột tự do để xoay camera 360° không cần giữ nút chuột (Nhấn Esc để thoát)'
+                }
+              >
+                {isPointerLocked ? '🎯 Đang khóa chuột (Esc)' : '🎯 Khóa chuột 3D'}
+              </button>
+            )}
+
             <div className="zoom-controls">
               <button
                 type="button"
@@ -1071,7 +1421,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
               <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> hoặc <strong>Phím mũi tên</strong>: Di chuyển nhân vật theo hướng nhìn camera.
             </li>
             <li>
-              <strong>Giữ chuột trái &amp; kéo</strong> (PC) / <strong>Vuốt màn hình</strong> (Điện thoại): Xoay góc nhìn camera 360° (trái, phải, lên, xuống) trong chế độ <em>Tham quan</em>; <strong>Cuộn chuột</strong> để zoom.
+              <strong>Click vào khung cảnh 3D</strong> hoặc bấm <strong>🎯 Khóa chuột 3D</strong> (PC): Rê chuột tự do để xoay góc nhìn 360° kiểu game 3D mà không cần giữ nút chuột (<kbd>Esc</kbd> để hiện lại con trỏ); hoặc <strong>Vuốt màn hình</strong> trên điện thoại.
             </li>
             <li>
               <strong>Joystick cảm ứng</strong> (Góc dưới trái): Di chuyển nhân vật trên điện thoại/máy tính bảng (hỗ trợ vừa đi vừa vuốt xoay góc nhìn).
@@ -1081,6 +1431,12 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
             </li>
           </ul>
         </aside>
+      )}
+
+      {!isBoothShowcaseActive && cameraMode === 'explore' && isPointerLocked && (
+        <div className="pointer-lock-status-pill" role="status" aria-live="polite">
+          🎯 Đang bật góc nhìn chuột 3D — Rê chuột để xoay camera · Nhấn <kbd>Esc</kbd> để hiện con trỏ
+        </div>
       )}
 
       <LoadingScreen loading={loadingData} warningMessage={dataWarning} />
@@ -1110,6 +1466,9 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         onGroundClick={handleGroundClick}
         zoom={zoom}
         onZoomChange={setZoom}
+        isPointerLockBlocked={isPointerLockBlocked}
+        onPointerLockChange={setIsPointerLocked}
+        pointerLockToggleRequestRef={pointerLockToggleRequestRef}
       />
 
       {!isBoothShowcaseActive && <MobileJoystick onMove={handleJoystickMove} />}
@@ -1128,6 +1487,8 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       <NpcAssistantPanel
         plan={npcPlan}
         status={npcStatus}
+        audioState={npcAudioState}
+        voiceNotice={npcVoiceNotice}
         currentStepIndex={npcStepIndex}
         isMuted={npcMuted}
         hasVietnameseVoice={hasVietnameseVoice}
@@ -1137,6 +1498,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         onNext={handleNpcNext}
         onStop={handleNpcStop}
         onRestart={handleNpcRestart}
+        onRetryAudio={handleNpcRetryAudio}
         onToggleMute={handleNpcToggleMute}
         onClose={closeNpcSession}
         onInspectProduct={handleSelectSlotProduct}

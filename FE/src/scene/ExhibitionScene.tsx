@@ -53,6 +53,9 @@ export interface ExhibitionSceneProps {
   onGroundClick: (x: number, z: number) => void;
   zoom?: number;
   onZoomChange?: (updater: (prevZoom: number) => number) => void;
+  isPointerLockBlocked?: boolean;
+  onPointerLockChange?: (locked: boolean) => void;
+  pointerLockToggleRequestRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 export interface ShopShowcaseCameraTargets {
@@ -72,6 +75,61 @@ const MAX_CAMERA_ZOOM = 64;
 const SHOP_SHOWCASE_FOV = 38;
 const THIRD_PERSON_FOV = 50;
 const EMPTY_PRODUCTS: Product[] = [];
+
+export const POINTER_LOCK_YAW_SENSITIVITY = 0.0026;
+export const POINTER_LOCK_PITCH_SENSITIVITY = 0.0022;
+export const MIN_CAMERA_PITCH = -0.38;
+export const MAX_CAMERA_PITCH = 0.42;
+
+/**
+ * Computes the next horizontal yaw and clamped vertical pitch from Pointer Lock mouse movement deltas.
+ * Clamps single-frame movement spikes and strictly bounds pitch within `[MIN_CAMERA_PITCH, MAX_CAMERA_PITCH]`
+ * so the third-person camera never flips upside down or clips below the ground.
+ */
+export function applyPointerLockMouseDelta(
+  currentYaw: number,
+  currentPitch: number,
+  movementX: number,
+  movementY: number,
+  yawSensitivity = POINTER_LOCK_YAW_SENSITIVITY,
+  pitchSensitivity = POINTER_LOCK_PITCH_SENSITIVITY
+): { yaw: number; pitch: number } {
+  const safeMovX = Number.isFinite(movementX) ? THREE.MathUtils.clamp(movementX, -180, 180) : 0;
+  const safeMovY = Number.isFinite(movementY) ? THREE.MathUtils.clamp(movementY, -180, 180) : 0;
+  const nextYaw = currentYaw - safeMovX * yawSensitivity;
+  const nextPitch = THREE.MathUtils.clamp(
+    currentPitch - safeMovY * pitchSensitivity,
+    MIN_CAMERA_PITCH,
+    MAX_CAMERA_PITCH
+  );
+  return { yaw: nextYaw, pitch: nextPitch };
+}
+
+export function requestElementPointerLockSafely(el: HTMLElement | null): boolean {
+  if (!el || typeof el.requestPointerLock !== 'function') return false;
+  try {
+    const maybePromise = el.requestPointerLock() as unknown as Promise<void> | undefined;
+    if (maybePromise && typeof maybePromise.catch === 'function') {
+      maybePromise.catch(() => {
+        // Ignore browser cooldown / user-cancelled pointer lock rejection
+      });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function exitDocumentPointerLockSafely(): void {
+  if (typeof document === 'undefined') return;
+  if (document.pointerLockElement && typeof document.exitPointerLock === 'function') {
+    try {
+      document.exitPointerLock();
+    } catch {
+      // Ignore exitPointerLock errors
+    }
+  }
+}
 
 /**
  * Computes the front-facing eye-level camera position and lookAt target in world coordinates
@@ -93,8 +151,9 @@ export function computeShopShowcaseCameraTargets(
   const aspect = safeWidth / safeHeight;
   const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(SHOP_SHOWCASE_FOV / 2));
 
-  const isDesktopSplit = isPanelOpen && safeWidth > 860;
-  const isMobileSheet = isPanelOpen && safeWidth <= 860;
+  const isMobileLandscape = safeWidth <= 960 && safeHeight <= 500 && safeWidth > safeHeight;
+  const isDesktopSplit = isPanelOpen && safeWidth > 860 && !isMobileLandscape;
+  const isMobileSheet = isPanelOpen && safeWidth <= 860 && !isMobileLandscape;
 
   let localCamZ: number;
   let localCamY: number;
@@ -102,7 +161,16 @@ export function computeShopShowcaseCameraTargets(
   const localLookZ = -0.25;
   let panX = 0;
 
-  if (isDesktopSplit) {
+  if (isMobileLandscape) {
+    const halfSpanRequired = Math.max(booth.width, 6.2) * 0.55;
+    const distForWidth = 2.2 + halfSpanRequired / Math.max(0.26, tanHalfFov * aspect);
+    localCamZ = THREE.MathUtils.clamp(Math.max(9.2, distForWidth), 9.2, 13.8);
+    localCamY = 2.08;
+    localLookY = 1.96;
+    // When compact NPC card is open on bottom-left in landscape, shift camera slightly left (-X)
+    // so the booth & right-side NPC sit comfortably in the center-right open viewport
+    panX = isPanelOpen ? -0.65 : 0;
+  } else if (isDesktopSplit) {
     // Drawer occupies min(500px, 44vw) on the right side of the screen
     const drawerFraction = Math.min(500 / safeWidth, 0.44);
     const openFraction = Math.max(0.52, 1 - drawerFraction);
@@ -530,7 +598,11 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     onGroundClick,
     zoom = 34,
     onZoomChange,
+    isPointerLockBlocked = false,
+    onPointerLockChange,
+    pointerLockToggleRequestRef,
   }) => {
+    const containerRef = useRef<HTMLDivElement | null>(null);
     const orthoCamRef = useRef<THREE.OrthographicCamera | null>(null);
     const perspCamRef = useRef<THREE.PerspectiveCamera | null>(null);
 
@@ -542,9 +614,14 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     });
     const activePointerIdRef = useRef<number | null>(null);
     const lastPointerPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+    const lastPointerTypeRef = useRef<string>('mouse');
+    const lastPointerButtonRef = useRef<number>(0);
     const dragDistanceRef = useRef<number>(0);
     const suppressClickUntilRef = useRef<number>(0);
+    const didSelectInteractive3DRef = useRef<boolean>(false);
+    const isPointerLockedRef = useRef<boolean>(false);
     const [isDraggingOrbit, setIsDraggingOrbit] = useState(false);
+    const [isPointerLocked, setIsPointerLocked] = useState(false);
 
     const boothNamesById = useMemo(() => {
       const m = new Map<string, string>();
@@ -589,24 +666,144 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     const handleBoothSelect = useCallback(
       (booth: BoothType) => {
         if (performance.now() < suppressClickUntilRef.current) return;
+        didSelectInteractive3DRef.current = true;
+        exitDocumentPointerLockSafely();
         onSelectBooth(booth);
       },
       [onSelectBooth]
     );
 
+    const handleNpcActivate = useCallback(
+      (booth: BoothType) => {
+        if (performance.now() < suppressClickUntilRef.current) return;
+        didSelectInteractive3DRef.current = true;
+        exitDocumentPointerLockSafely();
+        onActivateNpc?.(booth);
+      },
+      [onActivateNpc]
+    );
+
     const handleProductSelect = useCallback(
       (product: Product) => {
         if (performance.now() < suppressClickUntilRef.current) return;
+        didSelectInteractive3DRef.current = true;
+        exitDocumentPointerLockSafely();
         onSelectProduct?.(product);
       },
       [onSelectProduct]
     );
 
+    // Sync Pointer Lock state & handle mousemove in Pointer Lock mode (3D game camera)
+    React.useEffect(() => {
+      if (typeof document === 'undefined') return;
+
+      const handlePointerLockChange = () => {
+        const locked =
+          Boolean(containerRef.current) &&
+          document.pointerLockElement === containerRef.current;
+        isPointerLockedRef.current = locked;
+        setIsPointerLocked(locked);
+        onPointerLockChange?.(locked);
+      };
+
+      const handlePointerLockError = () => {
+        isPointerLockedRef.current = false;
+        setIsPointerLocked(false);
+        onPointerLockChange?.(false);
+      };
+
+      const handleDocumentMouseMove = (e: MouseEvent) => {
+        if (cameraMode !== 'explore') return;
+        const isLockedToContainer =
+          Boolean(containerRef.current) &&
+          document.pointerLockElement === containerRef.current;
+        if (!isLockedToContainer && !isPointerLockedRef.current) return;
+
+        if (e.movementX === 0 && e.movementY === 0) return;
+
+        const next = applyPointerLockMouseDelta(
+          orbitStateRef.current.yaw,
+          orbitStateRef.current.pitch,
+          e.movementX,
+          e.movementY
+        );
+        orbitStateRef.current.yaw = next.yaw;
+        orbitStateRef.current.pitch = next.pitch;
+        orbitStateRef.current.lastManualOrbitAt = performance.now();
+      };
+
+      const handleWindowBlur = () => {
+        exitDocumentPointerLockSafely();
+      };
+
+      const handleVisibilityChange = () => {
+        if (document.visibilityState !== 'visible') {
+          exitDocumentPointerLockSafely();
+        }
+      };
+
+      document.addEventListener('pointerlockchange', handlePointerLockChange);
+      document.addEventListener('pointerlockerror', handlePointerLockError);
+      document.addEventListener('mousemove', handleDocumentMouseMove);
+      window.addEventListener('blur', handleWindowBlur);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+        document.removeEventListener('pointerlockchange', handlePointerLockChange);
+        document.removeEventListener('pointerlockerror', handlePointerLockError);
+        document.removeEventListener('mousemove', handleDocumentMouseMove);
+        window.removeEventListener('blur', handleWindowBlur);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }, [cameraMode, onPointerLockChange]);
+
+    // Automatically release Pointer Lock when leaving Explore mode or when any UI panel/modal blocks 3D look
+    React.useEffect(() => {
+      if (cameraMode !== 'explore' || isPointerLockBlocked) {
+        exitDocumentPointerLockSafely();
+      }
+    }, [cameraMode, isPointerLockBlocked]);
+
+    // Clean up Pointer Lock on unmount
+    React.useEffect(() => {
+      return () => {
+        exitDocumentPointerLockSafely();
+      };
+    }, []);
+
+    // Expose imperative toggle function for the HUD "Khóa chuột 3D" button & keyboard shortcut
+    React.useEffect(() => {
+      if (!pointerLockToggleRequestRef) return;
+      pointerLockToggleRequestRef.current = () => {
+        if (cameraMode !== 'explore' || isPointerLockBlocked) {
+          exitDocumentPointerLockSafely();
+          return;
+        }
+        if (
+          typeof document !== 'undefined' &&
+          document.pointerLockElement === containerRef.current
+        ) {
+          exitDocumentPointerLockSafely();
+        } else {
+          requestElementPointerLockSafely(containerRef.current);
+        }
+      };
+      return () => {
+        pointerLockToggleRequestRef.current = null;
+      };
+    }, [cameraMode, isPointerLockBlocked, pointerLockToggleRequestRef]);
+
     const handlePointerDown = useCallback(
       (e: React.PointerEvent<HTMLDivElement>) => {
+        didSelectInteractive3DRef.current = false;
+        lastPointerTypeRef.current = e.pointerType;
+        lastPointerButtonRef.current = e.button;
+
         if (cameraMode !== 'explore') return;
-        // On PC mouse, hold Right Mouse Button (button === 2) to rotate camera; Left Mouse Button clicks ground/booths
-        if (e.pointerType === 'mouse' && e.button !== 2) return;
+        // When Pointer Lock is already active, mouse movement is handled via document mousemove
+        if (isPointerLockedRef.current) return;
+        // Fallback drag orbit when not in Pointer Lock: allow Left (0) or Right (2) mouse button or touch
+        if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2) return;
         if (activePointerIdRef.current !== null) return;
 
         activePointerIdRef.current = e.pointerId;
@@ -618,6 +815,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
 
     const handlePointerMove = useCallback(
       (e: React.PointerEvent<HTMLDivElement>) => {
+        if (isPointerLockedRef.current) return;
         if (cameraMode !== 'explore' || e.pointerId !== activePointerIdRef.current) return;
 
         const dx = e.clientX - lastPointerPosRef.current.x;
@@ -638,8 +836,8 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
           orbitStateRef.current.yaw -= dx * yawSens;
           orbitStateRef.current.pitch = THREE.MathUtils.clamp(
             orbitStateRef.current.pitch - dy * pitchSens,
-            -0.42,
-            0.48
+            MIN_CAMERA_PITCH,
+            MAX_CAMERA_PITCH
           );
         }
       },
@@ -655,6 +853,22 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
       orbitStateRef.current.isDragging = false;
       setIsDraggingOrbit(false);
     }, []);
+
+    const handleCanvasClick = useCallback(
+      (e: React.MouseEvent<HTMLDivElement>) => {
+        if (cameraMode !== 'explore' || isPointerLockBlocked) return;
+        if (lastPointerTypeRef.current !== 'mouse' || e.button !== 0) return;
+        if (dragDistanceRef.current > 6) return;
+        if (didSelectInteractive3DRef.current) {
+          didSelectInteractive3DRef.current = false;
+          return;
+        }
+        if (!isPointerLockedRef.current) {
+          requestElementPointerLockSafely(containerRef.current);
+        }
+      },
+      [cameraMode, isPointerLockBlocked]
+    );
 
     const handleContextMenu = useCallback(
       (e: React.MouseEvent<HTMLDivElement>) => {
@@ -678,10 +892,14 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
 
     return (
       <div
+        ref={containerRef}
         className={`expo-canvas-container ${
           isExploreMode ? 'expo-canvas-container--explore' : ''
-        } ${isDraggingOrbit ? 'expo-canvas-container--dragging' : ''}`}
+        } ${isDraggingOrbit ? 'expo-canvas-container--dragging' : ''} ${
+          isPointerLocked ? 'expo-canvas-container--pointer-locked' : ''
+        }`}
         aria-label="Không gian triển lãm 3D"
+        onClick={handleCanvasClick}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUpOrCancel}
@@ -800,7 +1018,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
               activeNpcAnimation={
                 activeNpcBoothId === booth.id ? activeNpcAnimation : 'IDLE'
               }
-              onActivateNpc={onActivateNpc}
+              onActivateNpc={handleNpcActivate}
               onSelectProduct={handleProductSelect}
               isSelected={
                 selectedBoothId === booth.id ||

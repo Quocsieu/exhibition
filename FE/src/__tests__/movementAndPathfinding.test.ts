@@ -48,6 +48,9 @@ import {
 } from '../scene/assetLoader';
 import { resolveBoothTheme } from '../scene/Booth';
 import {
+  MIN_CAMERA_PITCH,
+  MAX_CAMERA_PITCH,
+  applyPointerLockMouseDelta,
   computeShopShowcaseCameraTargets,
   computeThirdPersonCameraTargets,
 } from '../scene/ExhibitionScene';
@@ -64,7 +67,10 @@ import {
   normalizeBackendOrigin,
 } from '../config/apiConfig';
 import {
+  NPC_GLB_URL,
+  TARGET_NPC_HEIGHT_METERS,
   buildBoothPresentationPlan,
+  computeNormalizedNpcTransform,
   computeNpcPlacement,
   filterValidBoothSlotProducts,
   formatVietnameseSpeechPrice,
@@ -843,7 +849,7 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     }
   });
 
-  it('places 6 Vietnamese Female 3D Sales Assistant NPCs beside all 6 booths without overlapping slots, approach paths, or booth structures', () => {
+  it('places 6 Vietnamese Female 3D Sales Assistant NPCs beside all 6 booths without overlapping slots, approach paths, columns, planters, or booth structures', () => {
     const worldPositions = new Set<string>();
     const profileNames = new Set<string>();
 
@@ -854,9 +860,9 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
       profileNames.add(profile.assistantName);
 
       const placement = computeNpcPlacement(booth);
-      expect(placement.localX).toBeCloseTo(3.18, 2);
+      expect(placement.localX).toBeCloseTo(2.32, 2);
       expect(placement.localY).toBeCloseTo(0.02, 3);
-      expect(placement.localZ).toBeCloseTo(2.45, 2);
+      expect(placement.localZ).toBeCloseTo(3.24, 2);
       expect(isWithinWorldBounds(placement.worldX, placement.worldZ)).toBe(true);
 
       const safety = verifyNpcPlacementSafety(booth);
@@ -865,6 +871,8 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
       expect(safety.clearOfApproachPoint).toBe(true);
       expect(safety.clearOfProductSlots).toBe(true);
       expect(safety.clearOfBoothInterior).toBe(true);
+      expect(safety.clearOfColumnsAndPlanters).toBe(true);
+      expect(safety.groundedOnFloor).toBe(true);
 
       const posKey = `${placement.worldX.toFixed(2)},${placement.worldZ.toFixed(2)}`;
       worldPositions.add(posKey);
@@ -946,6 +954,13 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     const chosen = selectVietnameseVoice(mixedVoices);
     expect(chosen).not.toBeNull();
     expect(chosen?.name).toContain('HoaiMy');
+
+    // Also match when browser reports empty lang string but voice name identifies Vietnamese
+    const fallbackLangVoices = [
+      ...englishOnlyVoices,
+      { lang: '', name: 'Google Tiếng Việt', default: false, localService: false, voiceURI: 'g-vi' },
+    ] as unknown as SpeechSynthesisVoice[];
+    expect(selectVietnameseVoice(fallbackLangVoices)?.name).toBe('Google Tiếng Việt');
   });
 
   it('verifies the 3D Vietnamese Female Assistant GLB asset exists and embeds all 4 required animation clips (IDLE, WAVE, TALKING, PRESENT)', () => {
@@ -977,5 +992,72 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     expect(matNames).toContain('NpcHair');
     expect(matNames).toContain('NpcTunicIvory');
     expect(matNames).toContain('NpcBrandAccent');
+
+    // Verify V20 active NPC model (`untitled.glb`) exists, is valid glTF v2, and normalizes to 1.70m standing height
+    expect(NPC_GLB_URL).toContain('models/npc/untitled.glb');
+    const untitledPath = path.resolve(__dirname, '../../public/models/npc/untitled.glb');
+    expect(fs.existsSync(untitledPath)).toBe(true);
+    const untitledBuf = fs.readFileSync(untitledPath);
+    expect(untitledBuf.readUInt32LE(0)).toBe(0x46546c67);
+    expect(untitledBuf.readUInt32LE(4)).toBe(2);
+    expect(untitledBuf.byteLength).toBeGreaterThan(200_000);
+
+    const norm = computeNormalizedNpcTransform(
+      [-2.332693, 0.001917, -0.456096],
+      [2.332693, 7.224624, 0.767009],
+      TARGET_NPC_HEIGHT_METERS
+    );
+    expect(norm.normalizedHeight).toBeCloseTo(1.7, 3);
+    expect(norm.scale).toBeCloseTo(0.23537, 4);
+    expect(norm.offsetX).toBeCloseTo(0, 4);
+    expect(norm.offsetY).toBeLessThanOrEqual(0);
+  });
+
+  it('computes 3D game-style Pointer Lock yaw/pitch deltas and frames all 5 mobile landscape viewports cleanly', () => {
+    // 1. Horizontal mouse movement updates yaw without affecting pitch
+    const stepRight = applyPointerLockMouseDelta(Math.PI, 0, 100, 0);
+    expect(stepRight.yaw).toBeLessThan(Math.PI);
+    expect(stepRight.pitch).toBeCloseTo(0, 5);
+
+    const stepLeft = applyPointerLockMouseDelta(Math.PI, 0, -100, 0);
+    expect(stepLeft.yaw).toBeGreaterThan(Math.PI);
+    expect(stepLeft.pitch).toBeCloseTo(0, 5);
+
+    // 2. Vertical mouse movement updates pitch and strictly clamps within [MIN_CAMERA_PITCH, MAX_CAMERA_PITCH]
+    const lookUp = applyPointerLockMouseDelta(0, 0, 0, -80);
+    expect(lookUp.pitch).toBeGreaterThan(0);
+    expect(lookUp.pitch).toBeLessThanOrEqual(MAX_CAMERA_PITCH);
+
+    const clampMaxUp = applyPointerLockMouseDelta(0, 0.35, 0, -500);
+    expect(clampMaxUp.pitch).toBeCloseTo(MAX_CAMERA_PITCH, 5);
+
+    const clampMaxDown = applyPointerLockMouseDelta(0, -0.32, 0, 500);
+    expect(clampMaxDown.pitch).toBeCloseTo(MIN_CAMERA_PITCH, 5);
+
+    // 3. Verify Shop Showcase camera framing across all 5 target Mobile Landscape viewports
+    const landscapeViewports: [number, number][] = [
+      [667, 375],
+      [740, 360],
+      [844, 390],
+      [896, 414],
+      [932, 430],
+    ];
+    for (const [vw, vh] of landscapeViewports) {
+      for (const booth of DEFAULT_BOOTHS) {
+        const closedTargets = computeShopShowcaseCameraTargets(booth, vw, vh, false);
+        const openTargets = computeShopShowcaseCameraTargets(booth, vw, vh, true);
+        expect(closedTargets.cameraPosition.y).toBeCloseTo(2.08, 2);
+        expect(openTargets.cameraPosition.y).toBeCloseTo(2.08, 2);
+        expect(openTargets.lookAtTarget.y).toBeCloseTo(1.96, 2);
+      }
+    }
+
+    // 4. Verify desktop NPC dialogue panel is positioned on the right side (right: 16px; left: auto;)
+    const cssPath = path.resolve(__dirname, '../styles.css');
+    const cssText = fs.readFileSync(cssPath, 'utf8');
+    const panelRuleMatch = cssText.match(/\.npc-assistant-panel\s*\{([^}]*)\}/);
+    expect(panelRuleMatch).not.toBeNull();
+    expect(panelRuleMatch?.[1]).toContain('right: 16px;');
+    expect(panelRuleMatch?.[1]).toContain('left: auto;');
   });
 });

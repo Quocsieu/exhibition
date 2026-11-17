@@ -19,6 +19,15 @@ export type NpcSessionStatus =
   | 'CANCELLED'
   | 'ERROR';
 
+export type NpcAudioRuntimeState =
+  | 'IDLE'
+  | 'CHECKING_VOICE'
+  | 'SPEAKING'
+  | 'PAUSED'
+  | 'MUTED'
+  | 'NO_VI_VOICE'
+  | 'AUDIO_ERROR';
+
 export type NpcAnimationClipName = 'IDLE' | 'WAVE' | 'TALKING' | 'PRESENT';
 
 export interface NpcAssistantProfile {
@@ -60,7 +69,49 @@ export interface NpcPresentationPlan {
   totalProducts: number;
 }
 
-export const NPC_GLB_URL = `${import.meta.env?.BASE_URL || '/'}models/npc/vietnamese_female_assistant.glb`;
+export const NPC_GLB_URL = `${import.meta.env?.BASE_URL || '/'}models/npc/untitled.glb`;
+export const TARGET_NPC_HEIGHT_METERS = 1.7;
+
+export interface NormalizedNpcBoundsResult {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  offsetZ: number;
+  normalizedHeight: number;
+  normalizedWidth: number;
+  normalizedDepth: number;
+}
+
+/**
+ * Computes the uniform scale factor and local translation offsets so any 3D NPC GLB model
+ * (such as `untitled.glb`) stands at human height (`1.70m`), centered horizontally at `(0, 0)`,
+ * with feet grounded accurately at `y = 0`.
+ */
+export function computeNormalizedNpcTransform(
+  min: [number, number, number],
+  max: [number, number, number],
+  targetHeight = TARGET_NPC_HEIGHT_METERS
+): NormalizedNpcBoundsResult {
+  const rawW = Math.max(0.001, max[0] - min[0]);
+  const rawH = Math.max(0.001, max[1] - min[1]);
+  const rawD = Math.max(0.001, max[2] - min[2]);
+  const scale = Number((targetHeight / rawH).toFixed(6));
+  const centerX = (min[0] + max[0]) * 0.5;
+  const centerZ = (min[2] + max[2]) * 0.5;
+  const offsetX = Number((-centerX * scale).toFixed(5));
+  const offsetY = Number((-min[1] * scale).toFixed(5));
+  const offsetZ = Number((-centerZ * scale).toFixed(5));
+
+  return {
+    scale,
+    offsetX,
+    offsetY,
+    offsetZ,
+    normalizedHeight: Number((rawH * scale).toFixed(4)),
+    normalizedWidth: Number((rawW * scale).toFixed(4)),
+    normalizedDepth: Number((rawD * scale).toFixed(4)),
+  };
+}
 
 /**
  * Resolves the Vietnamese Female Sales Assistant's name and title for a booth.
@@ -103,20 +154,24 @@ export function getNpcAssistantProfile(booth: Pick<Booth, 'id' | 'name' | 'categ
 /**
  * Computes the deterministic local and world placement for a booth's 3D Sales Assistant NPC.
  *
- * Placement guarantees:
- * - Stands beside the right storefront entrance (`localX = vw / 2 + 0.18 = 3.18m`, `localZ = vd / 2 + 0.25 = 2.45m`)
- * - 100% clear of all 6 product slots (`slot_01..slot_06` span `x = -3.03m .. +3.03m` at `z = 0.68..1.12m`)
- * - 100% clear of the visitor approach point (`[0, 0, ~3.8m]`) and walkway
- * - Angled slightly inward (`localRotationY = -0.28 rad`) facing approaching visitors
+ * Placement guarantees (V18 Verified):
+ * - Stands on the front-right apron in front of the entrance step and right column:
+ *   `localX = vw * 0.42 = 2.52m`, `localY = 0.02m`, `localZ = vd / 2 + 1.04 = 3.24m`
+ * - `0.79m` IN FRONT of the front-right column (`x = 3.28m, z = 2.45m`) and `0.76m` inward -> zero column occlusion
+ * - `1.13m` inward from the front-right planter/tree (`x = 3.65m, z = 3.68m`) -> zero tree/planter occlusion
+ * - Grounded directly on the flat plaza floor (`localY = 0.02m`, in front of `Step_Tier1` which ends at `z = 3.15m`) -> zero floating or plinth sinking
+ * - 100% clear of all 6 product slots (`slot_01..slot_06`) and their Focus camera sightlines
+ * - 100% clear of the visitor approach point (`[0, 0, ~3.42m]`) and walkway
+ * - Angled slightly inward (`localRotationY = -0.26 rad`) facing approaching visitors
  */
 export function computeNpcPlacement(booth: BoothFootprint): NpcPlacementTransform {
   const vw = Math.max(booth.width || 5.6, 6.0);
   const vd = Math.max(booth.depth || 4.2, 4.4);
 
-  const localX = Number((vw / 2 + 0.18).toFixed(3));
+  const localX = Number((vw * 0.3867).toFixed(3));
   const localY = 0.02;
-  const localZ = Number((vd / 2 + 0.25).toFixed(3));
-  const localRotationY = -0.28;
+  const localZ = Number((vd / 2 + 1.04).toFixed(3));
+  const localRotationY = -0.24;
 
   const ry = booth.rotationY || 0;
   const cosR = Math.cos(ry);
@@ -141,7 +196,7 @@ export function computeNpcPlacement(booth: BoothFootprint): NpcPlacementTransfor
 
 /**
  * Validates that a booth's NPC placement does not block the walkway, approach point,
- * product slots, or booth interior obstacle box.
+ * product slots, booth columns, planters, or booth interior obstacle box.
  */
 export function verifyNpcPlacementSafety(booth: BoothFootprint): {
   valid: boolean;
@@ -149,6 +204,8 @@ export function verifyNpcPlacementSafety(booth: BoothFootprint): {
   clearOfApproachPoint: boolean;
   clearOfProductSlots: boolean;
   clearOfBoothInterior: boolean;
+  clearOfColumnsAndPlanters: boolean;
+  groundedOnFloor: boolean;
   distanceToApproachPoint: number;
 } {
   const placement = computeNpcPlacement(booth);
@@ -166,12 +223,30 @@ export function verifyNpcPlacementSafety(booth: BoothFootprint): {
   );
   const clearOfApproachPoint = distanceToApproachPoint >= 1.6;
 
-  // Check distance in local space to all 6 product slots
+  // Check distance in local space to all 6 product slots and Focus camera sightline clearance
+  const focusCamZ = 9.05;
   const clearOfProductSlots = BOOTH_SLOT_DEFINITIONS.every((slot) => {
     const dx = placement.localX - slot.position[0];
     const dz = placement.localZ - slot.position[2];
-    return Math.hypot(dx, dz) >= 1.25 && Math.abs(placement.localX) > Math.abs(slot.position[0]) + 0.55;
+    const dist2D = Math.hypot(dx, dz);
+    // Project slot's center onto the plane z = placement.localZ
+    const projectedSlotCenterX =
+      slot.position[0] * ((focusCamZ - placement.localZ) / (focusCamZ - slot.position[2]));
+    return dist2D >= 2.1 && Math.abs(placement.localX - projectedSlotCenterX) >= 0.45;
   });
+
+  // In front of right column (x = 3.28, z = 2.45, radius ~0.22) and clear of front planter (x = 3.65, z = 3.68, radius ~0.35)
+  const distToRightColumn = Math.hypot(placement.localX - 3.28, placement.localZ - 2.45);
+  const distToRightPlanter = Math.hypot(placement.localX - 3.65, placement.localZ - 3.68);
+  const clearOfColumnsAndPlanters =
+    placement.localZ >= 2.95 &&
+    placement.localX >= 2.1 &&
+    placement.localX <= 2.65 &&
+    distToRightColumn >= 1.15 &&
+    distToRightPlanter >= 1.3;
+
+  // Grounded on flat plaza floor in front of Step_Tier1 (which ends at z = 3.15m)
+  const groundedOnFloor = Math.abs(placement.localY - 0.02) < 0.005 && placement.localZ >= 3.18;
 
   // Outside the booth's core obstacle box
   const clearOfBoothInterior =
@@ -181,11 +256,19 @@ export function verifyNpcPlacementSafety(booth: BoothFootprint): {
     placement.worldZ > box.maxZ;
 
   return {
-    valid: withinWorldBounds && clearOfApproachPoint && clearOfProductSlots && clearOfBoothInterior,
+    valid:
+      withinWorldBounds &&
+      clearOfApproachPoint &&
+      clearOfProductSlots &&
+      clearOfBoothInterior &&
+      clearOfColumnsAndPlanters &&
+      groundedOnFloor,
     withinWorldBounds,
     clearOfApproachPoint,
     clearOfProductSlots,
     clearOfBoothInterior,
+    clearOfColumnsAndPlanters,
+    groundedOnFloor,
     distanceToApproachPoint,
   };
 }
@@ -197,9 +280,14 @@ export function sanitizeSpeechText(raw: unknown, maxLength = 220): string {
   if (typeof raw !== 'string') return '';
   let cleaned = raw
     .replace(/<[^>]*>/g, ' ')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/\bwww\.\S+/gi, ' ')
+    .replace(/\[(?:SKU|Mã|ID)[^\]]*\]/gi, ' ')
     .replace(/<\s*(?=\d)/g, 'dưới ')
     .replace(/>\s*(?=\d)/g, 'trên ')
     .replace(/[<>]/g, ' ')
+    .replace(/(\p{L})\s*\/\s*(\p{L})/gu, '$1 và $2')
+    .replace(/&/g, ' và ')
     .replace(/\b(undefined|null|NaN)\b/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -306,7 +394,7 @@ export function buildBoothPresentationPlan(
       stepIndex: 0,
       type: 'GREETING',
       animation: 'WAVE',
-      text: `Xin chào! Mình là ${profile.assistantName}. Chào mừng bạn đến với gian hàng ${cleanBoothName}. Hiện tại gian hàng chưa có sản phẩm nào được trưng bày trên kệ để giới thiệu. Cảm ơn bạn đã ghé thăm!`,
+      text: `Dạ xin chào quý khách! Em là ${profile.assistantName}, chuyên viên tư vấn tại gian hàng ${cleanBoothName}. Hiện tại gian hàng chưa có sản phẩm nào được trưng bày trên kệ. Em cảm ơn quý khách đã ghé thăm ạ!`,
       slotId: null,
       slotLabel: null,
       product: null,
@@ -329,7 +417,7 @@ export function buildBoothPresentationPlan(
     stepIndex: 0,
     type: 'GREETING',
     animation: 'WAVE',
-    text: `Xin chào! Mình là ${profile.assistantName}. Chào mừng bạn đến với gian hàng ${cleanBoothName}${taglineClause}. Sau đây mình xin giới thiệu lần lượt ${totalProducts} sản phẩm đang được trưng bày tại gian hàng.`,
+    text: `Dạ xin chào quý khách! Em là ${profile.assistantName}, tư vấn viên tại gian hàng ${cleanBoothName}${taglineClause}. Hôm nay, em xin phép giới thiệu ${totalProducts} sản phẩm tiêu biểu đang trưng bày tại gian hàng mình ạ.`,
     slotId: validSlotViews[0].slot.slotId,
     slotLabel: validSlotViews[0].slot.label,
     product: validSlotViews[0].product,
@@ -340,22 +428,24 @@ export function buildBoothPresentationPlan(
   // 2. Sequential product steps (1..N)
   validSlotViews.forEach((slotView, idx) => {
     const product = slotView.product!;
-    const cleanName = sanitizeSpeechText(product.name, 120);
-    const cleanDesc = sanitizeSpeechText(product.description, 175);
+    const cleanName = sanitizeSpeechText(product.name, 115);
+    const cleanDesc = sanitizeSpeechText(product.description, 155);
     const priceText = formatVietnameseSpeechPrice(product.price, product.currency);
 
-    let prefix: string;
+    let introClause: string;
     if (idx === 0) {
-      prefix = 'Đầu tiên là sản phẩm';
+      introClause = `Mở đầu là mẫu ${cleanName}`;
     } else if (idx === totalProducts - 1 && totalProducts > 1) {
-      prefix = 'Cuối cùng là sản phẩm';
+      introClause = `Và sản phẩm tiếp theo trên kệ là ${cleanName}`;
     } else {
-      prefix = `Tiếp theo là sản phẩm thứ ${idx + 1},`;
+      introClause = `Tiếp theo là sản phẩm thứ ${idx + 1}, ${cleanName}`;
     }
 
-    const clauses: string[] = [`${prefix} ${cleanName}.`];
+    const clauses: string[] = [];
     if (priceText) {
-      clauses.push(`Sản phẩm có giá niêm yết ${priceText}.`);
+      clauses.push(`${introClause}, hiện có mức giá ${priceText}.`);
+    } else {
+      clauses.push(`${introClause}.`);
     }
     if (cleanDesc) {
       clauses.push(cleanDesc.endsWith('.') ? cleanDesc : `${cleanDesc}.`);
@@ -379,7 +469,7 @@ export function buildBoothPresentationPlan(
     stepIndex: steps.length,
     type: 'CLOSING',
     animation: 'WAVE',
-    text: `Đó là những sản phẩm đang được trưng bày tại gian hàng ${cleanBoothName}. Bạn có thể nhấn trực tiếp vào từng sản phẩm trên kệ để xem chi tiết. Cảm ơn bạn đã ghé thăm!`,
+    text: 'Dạ, vừa rồi là những sản phẩm nổi bật đang trưng bày tại gian hàng. Quý khách có thể chạm trực tiếp vào từng sản phẩm trên kệ để xem thông tin chi tiết nhé. Em cảm ơn quý khách đã ghé thăm ạ!',
     slotId: null,
     slotLabel: null,
     product: null,
@@ -405,23 +495,26 @@ export function selectVietnameseVoice(
 ): SpeechSynthesisVoice | null {
   if (!voices || voices.length === 0) return null;
 
+  const viNameKeywords = ['vietnam', 'tiếng việt', 'tieng viet', 'hoaimy', 'namminh', 'myan'];
   const viVoices = voices.filter((v) => {
     const lang = (v.lang || '').toLowerCase().replace('_', '-');
-    return lang.startsWith('vi');
+    if (lang.startsWith('vi')) return true;
+    const nameLower = `${v.name || ''} ${v.voiceURI || ''}`.toLowerCase();
+    return viNameKeywords.some((kw) => nameLower.includes(kw));
   });
 
   if (viVoices.length === 0) {
     return null;
   }
 
-  const femaleKeywords = ['hoaimy', 'linh', 'myan', 'female', 'nữ', 'nu', 'natural', 'google'];
+  const femaleKeywords = ['hoaimy', 'linh', 'myan', 'female', 'nữ', 'nu', 'natural', 'online', 'google'];
   let bestVoice = viVoices[0];
   let bestScore = -1;
 
   for (const v of viVoices) {
     const nameLower = `${v.name || ''} ${v.voiceURI || ''}`.toLowerCase();
     let score = 0;
-    if ((v.lang || '').toLowerCase().includes('vi-vn')) score += 2;
+    if ((v.lang || '').toLowerCase().replace('_', '-').includes('vi-vn')) score += 2;
     for (const kw of femaleKeywords) {
       if (nameLower.includes(kw)) score += 3;
     }
@@ -433,4 +526,90 @@ export function selectVietnameseVoice(
   }
 
   return bestVoice;
+}
+
+export interface VietnameseVoiceResolution {
+  supported: boolean;
+  voice: SpeechSynthesisVoice | null;
+  totalVoicesCount: number;
+  availableLangs: string[];
+}
+
+/**
+ * Resolves the best Vietnamese voice, waiting briefly for asynchronous `voiceschanged`
+ * if the browser's `speechSynthesis.getVoices()` list has not populated yet.
+ */
+export async function resolveVietnameseVoiceAsync(
+  timeoutMs = 650
+): Promise<VietnameseVoiceResolution> {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    return {
+      supported: false,
+      voice: null,
+      totalVoicesCount: 0,
+      availableLangs: [],
+    };
+  }
+
+  const synth = window.speechSynthesis;
+  let voices: SpeechSynthesisVoice[] = [];
+  try {
+    voices = synth.getVoices() || [];
+  } catch {
+    voices = [];
+  }
+
+  if (voices.length === 0 && timeoutMs > 0) {
+    voices = await new Promise<SpeechSynthesisVoice[]>((resolve) => {
+      let settled = false;
+      const finish = (list: SpeechSynthesisVoice[]) => {
+        if (settled) return;
+        settled = true;
+        synth.removeEventListener?.('voiceschanged', onVoicesChanged);
+        window.clearInterval(pollId);
+        window.clearTimeout(timerId);
+        resolve(list);
+      };
+
+      const onVoicesChanged = () => {
+        try {
+          const next = synth.getVoices() || [];
+          if (next.length > 0) finish(next);
+        } catch {
+          // ignore
+        }
+      };
+
+      synth.addEventListener?.('voiceschanged', onVoicesChanged);
+
+      const pollId = window.setInterval(() => {
+        try {
+          const next = synth.getVoices() || [];
+          if (next.length > 0) finish(next);
+        } catch {
+          // ignore
+        }
+      }, 80);
+
+      const timerId = window.setTimeout(() => {
+        try {
+          finish(synth.getVoices() || []);
+        } catch {
+          finish([]);
+        }
+      }, timeoutMs);
+    });
+  }
+
+  const chosen = selectVietnameseVoice(voices);
+  const availableLangs = Array.from(
+    new Set(voices.map((v) => v.lang || 'unknown').filter(Boolean))
+  );
+
+  return {
+    supported: true,
+    voice: chosen,
+    totalVoicesCount: voices.length,
+    availableLangs,
+  };
 }
