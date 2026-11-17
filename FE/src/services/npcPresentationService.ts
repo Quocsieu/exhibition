@@ -385,6 +385,11 @@ export function buildBoothPresentationPlan(
   const validSlotViews = filterValidBoothSlotProducts(booth.id, slots, allValidProducts);
   const totalProducts = validSlotViews.length;
   const cleanBoothName = sanitizeSpeechText(booth.name, 100) || 'Gian hàng triển lãm';
+  const cleanCompanyName = sanitizeSpeechText(booth.companyName, 100);
+  const brandClause =
+    cleanCompanyName && cleanCompanyName.toLowerCase() !== cleanBoothName.toLowerCase()
+      ? ` thuộc thương hiệu ${cleanCompanyName.replace(/\.$/, '')}`
+      : '';
   const cleanTagline = sanitizeSpeechText(booth.tagline, 120);
 
   const steps: NpcPresentationStep[] = [];
@@ -394,7 +399,7 @@ export function buildBoothPresentationPlan(
       stepIndex: 0,
       type: 'GREETING',
       animation: 'WAVE',
-      text: `Dạ xin chào quý khách! Em là ${profile.assistantName}, chuyên viên tư vấn tại gian hàng ${cleanBoothName}. Hiện tại gian hàng chưa có sản phẩm nào được trưng bày trên kệ. Em cảm ơn quý khách đã ghé thăm ạ!`,
+      text: `Dạ xin chào quý khách! Em là ${profile.assistantName}, chuyên viên tư vấn tại gian hàng ${cleanBoothName}${brandClause}. Hiện tại gian hàng chưa có sản phẩm nào được trưng bày trên kệ. Em cảm ơn quý khách đã ghé thăm ạ!`,
       slotId: null,
       slotLabel: null,
       product: null,
@@ -417,7 +422,7 @@ export function buildBoothPresentationPlan(
     stepIndex: 0,
     type: 'GREETING',
     animation: 'WAVE',
-    text: `Dạ xin chào quý khách! Em là ${profile.assistantName}, tư vấn viên tại gian hàng ${cleanBoothName}${taglineClause}. Hôm nay, em xin phép giới thiệu ${totalProducts} sản phẩm tiêu biểu đang trưng bày tại gian hàng mình ạ.`,
+    text: `Dạ xin chào quý khách! Em là ${profile.assistantName}, tư vấn viên tại gian hàng ${cleanBoothName}${brandClause}${taglineClause}. Hôm nay, em xin phép giới thiệu ${totalProducts} sản phẩm tiêu biểu đang trưng bày tại gian hàng mình ạ.`,
     slotId: validSlotViews[0].slot.slotId,
     slotLabel: validSlotViews[0].slot.label,
     product: validSlotViews[0].product,

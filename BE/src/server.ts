@@ -59,6 +59,7 @@ export function createApp(
   app.use(express.json({ limit: '1mb' }));
 
   const service = new ExpoService(db);
+  app.locals.expoService = service;
   const controller = new ExpoController(service, (payload) => {
     onMutation?.(payload);
     const io = app.get('io') as Server<ClientToServerEvents, ServerToClientEvents> | undefined;
@@ -97,4 +98,21 @@ if (isMain) {
   httpServer.listen(PORT, () => {
     console.log(`[Virtual Expo BE] Running on http://localhost:${PORT}`);
   });
+
+  const gracefulShutdown = () => {
+    const svc = app.locals.expoService as ExpoService | undefined;
+    void (svc ? svc.shutdown() : Promise.resolve()).finally(() => {
+      httpServer.close(() => {
+        try {
+          db.close();
+        } catch {
+          // ignore
+        }
+        process.exit(0);
+      });
+    });
+  };
+
+  process.once('SIGINT', gracefulShutdown);
+  process.once('SIGTERM', gracefulShutdown);
 }

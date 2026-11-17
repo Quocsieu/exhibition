@@ -1,4 +1,11 @@
 import crypto from 'node:crypto';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import readline from 'node:readline';
+import type { Readable, Writable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import type {
   Booth,
   CreateBoothInput,
@@ -18,8 +25,14 @@ import {
   parseBatchProducts,
 } from '../integrations/productAdapter.js';
 
-export type TtsProviderId = 'azure' | 'fpt' | 'viettel' | 'google' | 'gtts';
+export type TtsProviderId = 'korvatts' | 'azure' | 'fpt' | 'viettel' | 'google' | 'gtts';
 export type NpcSpeechStepType = 'GREETING' | 'PRODUCT' | 'CLOSING';
+
+export const KORVATTS_DEFAULT_VOICE = 'phuong_linh';
+export const KORVATTS_DEFAULT_LANGUAGE = 'vi';
+export const KORVATTS_DEFAULT_SPEED = 1.05;
+export const KORVATTS_DEFAULT_STEPS = 32;
+export const KORVATTS_MODEL_VERSION = 'korvatts-0.1.3-e5c8c218';
 
 export const AZURE_DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 export const AZURE_DEFAULT_OUTPUT_FORMAT = 'audio-24khz-96kbitrate-mono-mp3';
@@ -128,9 +141,13 @@ export function numberToVietnameseWords(raw: number): string {
   return segments.join(' ').replace(/\s+/g, ' ').trim();
 }
 
-export function normalizeTextForVietnameseTts(raw: unknown, maxLength = 220): string {
+export function normalizeTextForVietnameseTts(
+  raw: unknown,
+  maxLength = 220,
+  options?: { preserveEnglishCompounds?: boolean }
+): string {
   if (typeof raw !== 'string') return '';
-  const cleaned = raw
+  let cleaned = raw
     .replace(/<[^>]*>/g, ' ')
     .replace(/https?:\/\/\S+/gi, ' ')
     .replace(/\bwww\.\S+/gi, ' ')
@@ -158,9 +175,14 @@ export function normalizeTextForVietnameseTts(raw: unknown, maxLength = 220): st
     .replace(/(\d)\s*mm\b/gi, '$1 mi li mét')
     .replace(/(\d)\s*cm\b/gi, '$1 xăng ti mét')
     .replace(/(\d)\s*m\b/g, '$1 mét')
-    .replace(/(\d)\s*dB\b/gi, '$1 đê xi ben')
-    // Separate CamelCase English brand compounds (e.g. PowerWall -> Power Wall, AetherGlass -> Aether Glass) while keeping LiDAR/RFID intact
-    .replace(/([a-z]{2,})([A-Z][a-z])/g, '$1 $2')
+    .replace(/(\d)\s*dB\b/gi, '$1 đê xi ben');
+
+  if (!options?.preserveEnglishCompounds) {
+    // Separate CamelCase English brand compounds for cloud G2P engines while keeping LiDAR/RFID intact
+    cleaned = cleaned.replace(/([a-z]{2,})([A-Z][a-z])/g, '$1 $2');
+  }
+
+  cleaned = cleaned
     .replace(/\s*[—–]\s*/g, ', ')
     .replace(/\b(undefined|null|NaN)\b/gi, ' ')
     .replace(/\s+/g, ' ')
@@ -173,6 +195,76 @@ export function normalizeTextForVietnameseTts(raw: unknown, maxLength = 220): st
   const lastEnd = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf(', '), slice.lastIndexOf(' '));
   const cut = lastEnd > maxLength * 0.6 ? slice.slice(0, lastEnd) : slice;
   return `${cut.replace(/[.,;:\s]+$/, '')}.`;
+}
+
+const VIETNAMESE_DIACRITIC_RE =
+  /[ăâđêôơưáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/i;
+
+/**
+ * Converts Title-Cased Vietnamese common words in product titles (e.g. "Pin Lưu Trữ Điện Mặt Trời Solaris PowerWall")
+ * into natural lowercase ("pin lưu trữ điện mặt trời Solaris PowerWall") while strictly preserving English brand/model
+ * capitalization ("Solaris", "PowerWall", "Green Future", "Solar Battery", "Fjäll Standing Desk").
+ */
+export function smoothVietnameseProductTitleForKorva(title: string): string {
+  const tokens = (title || '').trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return '';
+
+  const hasViDiacritic = tokens.map((tok) => VIETNAMESE_DIACRITIC_RE.test(tok));
+  return tokens
+    .map((tok, idx) => {
+      if (hasViDiacritic[idx]) {
+        return tok.toLowerCase();
+      }
+      // Also lowercase short Title-Case ASCII Vietnamese lead words (like "Pin", "Bộ", "Kem") when immediately followed by a Vietnamese-diacritic word
+      if (/^[A-Z][a-z]{1,4}$/.test(tok) && idx + 1 < tokens.length && hasViDiacritic[idx + 1]) {
+        return tok.toLowerCase();
+      }
+      return tok;
+    })
+    .join(' ');
+}
+
+/**
+ * Expands remaining Arabic numerals and decimals into natural Vietnamese words for KorvaTTS
+ * so bilingual code-switching never misreads digits next to English brand/tech tokens
+ * (e.g. "Solar Battery 15 ki lô oát giờ" -> "Solar Battery mười lăm ki lô oát giờ",
+ *  "6000 chu kỳ" -> "sáu nghìn chu kỳ", "IP65" -> "IP sáu mươi lăm").
+ */
+export function expandNumbersForKorvaVietnamese(text: string): string {
+  if (!text) return '';
+  return (
+    text
+      // Convert parenthetical remarks into natural comma-delimited phrases so KorvaTTS never stutters on '(' or ')'
+      .replace(/\s*\(\s*/g, ', ')
+      .replace(/\s*\)\s*/g, ', ')
+      // Separate attached ASCII letter+digit boundaries (e.g. IP65 -> IP 65, X1 -> X 1, 4K -> 4 K)
+      .replace(/([A-Za-z])(\d)/g, '$1 $2')
+      .replace(/(\d)([A-Za-z])/g, '$1 $2')
+      // Convert decimals (e.g. 2.5 -> hai phẩy năm, 0.85 -> không phẩy tám mươi lăm)
+      .replace(/\b(\d{1,9})\.(\d{1,4})\b/g, (_m, intPart: string, fracPart: string) => {
+        const intWords = numberToVietnameseWords(Number(intPart));
+        const strippedFrac = fracPart.replace(/^0+/, '');
+        let fracWords = '';
+        if (!strippedFrac) {
+          fracWords = 'không';
+        } else if (fracPart.startsWith('0')) {
+          const leadingZeros = 'không '.repeat(fracPart.length - strippedFrac.length).trim();
+          fracWords = `${leadingZeros} ${numberToVietnameseWords(Number(strippedFrac))}`.trim();
+        } else {
+          fracWords = numberToVietnameseWords(Number(fracPart));
+        }
+        return `${intWords} phẩy ${fracWords}`;
+      })
+      // Convert all remaining integers up to 12 digits into Vietnamese words
+      .replace(/\b\d{1,12}\b/g, (numStr) => {
+        const n = Number(numStr);
+        return Number.isFinite(n) ? numberToVietnameseWords(n) : numStr;
+      })
+      .replace(/\s*,\s*,+/g, ', ')
+      .replace(/,\s*([.!?])/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 export function escapeSsmlXml(raw: string): string {
@@ -314,6 +406,13 @@ export interface ResolvedBackendTtsConfig {
   region: string;
   requiresApiKey: boolean;
   voice: string;
+  korvaLang: string;
+  korvaSpeed: number;
+  korvaSteps: number;
+  korvaModelVersion: string;
+  korvaMaxQueue: number;
+  korvaInitTimeoutMs: number;
+  korvaNonBlockingInit: boolean;
   outputFormat: string;
   prosodyRate: string;
   prosodyPitch: string;
@@ -324,9 +423,10 @@ export interface ResolvedBackendTtsConfig {
 
 export function resolveBackendTtsConfig(): ResolvedBackendTtsConfig {
   const rawProvider = (process.env.TTS_PROVIDER || '').trim().toLowerCase();
-  let provider: TtsProviderId = 'azure';
+  let provider: TtsProviderId = 'korvatts';
 
   if (
+    rawProvider === 'korvatts' ||
     rawProvider === 'azure' ||
     rawProvider === 'google' ||
     rawProvider === 'viettel' ||
@@ -339,39 +439,74 @@ export function resolveBackendTtsConfig(): ResolvedBackendTtsConfig {
   const apiKey = (
     provider === 'azure'
       ? process.env.AZURE_SPEECH_KEY || process.env.TTS_API_KEY || ''
-      : process.env.TTS_API_KEY ||
-        (provider === 'google' ? process.env.GOOGLE_TTS_API_KEY : '') ||
-        (provider === 'viettel' ? process.env.VIETTEL_TTS_API_KEY : '') ||
-        (provider === 'fpt' ? process.env.FPT_TTS_API_KEY : '') ||
-        ''
+      : provider === 'korvatts'
+        ? ''
+        : process.env.TTS_API_KEY ||
+          (provider === 'google' ? process.env.GOOGLE_TTS_API_KEY : '') ||
+          (provider === 'viettel' ? process.env.VIETTEL_TTS_API_KEY : '') ||
+          (provider === 'fpt' ? process.env.FPT_TTS_API_KEY : '') ||
+          ''
   ).trim();
 
   const region = (process.env.AZURE_SPEECH_REGION || '').trim().toLowerCase();
-  const requiresApiKey = provider !== 'gtts';
+  const requiresApiKey = provider !== 'korvatts' && provider !== 'gtts';
 
   const defaultVoice =
-    provider === 'azure'
-      ? AZURE_DEFAULT_VOICE
-      : provider === 'google'
-        ? 'vi-VN-Neural2-A'
-        : provider === 'viettel'
-          ? 'hn-quynhanh'
-          : provider === 'fpt'
-            ? 'banmai'
-            : 'vi-VN-Standard-A';
+    provider === 'korvatts'
+      ? KORVATTS_DEFAULT_VOICE
+      : provider === 'azure'
+        ? AZURE_DEFAULT_VOICE
+        : provider === 'google'
+          ? 'vi-VN-Neural2-A'
+          : provider === 'viettel'
+            ? 'hn-quynhanh'
+            : provider === 'fpt'
+              ? 'banmai'
+              : 'vi-VN-Standard-A';
 
   const voice = (
+    (provider === 'korvatts' ? process.env.KORVATTS_VOICE : '') ||
     (provider === 'azure' ? process.env.AZURE_SPEECH_VOICE : '') ||
     process.env.TTS_VOICE ||
     defaultVoice
   ).trim();
+
+  const korvaLang = ((process.env.KORVATTS_LANGUAGE || KORVATTS_DEFAULT_LANGUAGE).trim() || 'vi').toLowerCase();
+  const parsedSpeed = Number(process.env.KORVATTS_SPEED || KORVATTS_DEFAULT_SPEED);
+  const korvaSpeed = Number.isFinite(parsedSpeed)
+    ? Math.max(0.5, Math.min(2.0, parsedSpeed))
+    : KORVATTS_DEFAULT_SPEED;
+  const parsedSteps = Math.round(Number(process.env.KORVATTS_STEPS || KORVATTS_DEFAULT_STEPS));
+  const korvaSteps = Number.isFinite(parsedSteps)
+    ? Math.max(1, Math.min(32, parsedSteps))
+    : KORVATTS_DEFAULT_STEPS;
+  const korvaModelVersion = (process.env.KORVATTS_MODEL_VERSION || KORVATTS_MODEL_VERSION).trim();
+
+  const parsedMaxQueue = Number(process.env.KORVATTS_MAX_QUEUE ?? 3);
+  const korvaMaxQueue = Number.isFinite(parsedMaxQueue)
+    ? Math.max(0, Math.min(16, Math.floor(parsedMaxQueue)))
+    : 3;
+
+  const parsedInitTimeout = Number(process.env.KORVATTS_INIT_TIMEOUT_MS || 30000);
+  const korvaInitTimeoutMs = Number.isFinite(parsedInitTimeout)
+    ? Math.max(200, Math.min(120000, parsedInitTimeout))
+    : 30000;
+  const korvaNonBlockingInit =
+    (process.env.KORVATTS_NON_BLOCKING_INIT || '').trim().toLowerCase() === 'true';
 
   const outputFormat = (
     process.env.AZURE_SPEECH_OUTPUT_FORMAT || AZURE_DEFAULT_OUTPUT_FORMAT
   ).trim();
   const prosodyRate = (process.env.AZURE_SPEECH_RATE || '0%').trim();
   const prosodyPitch = (process.env.AZURE_SPEECH_PITCH || '0%').trim();
-  const timeoutMs = Math.max(1000, Math.min(20000, Number(process.env.TTS_TIMEOUT_MS || 8000)));
+
+  const defaultTimeoutMs = provider === 'korvatts' ? 60000 : 8000;
+  const maxTimeoutMs = provider === 'korvatts' ? 120000 : 20000;
+  const minTimeoutMs = provider === 'korvatts' ? 300 : 1000;
+  const timeoutMs = Math.max(
+    minTimeoutMs,
+    Math.min(maxTimeoutMs, Number(process.env.TTS_TIMEOUT_MS || defaultTimeoutMs))
+  );
   const rateLimitPerMin = Math.max(5, Math.min(300, Number(process.env.TTS_RATE_LIMIT_PER_MIN || 30)));
   const endpointOverride =
     (
@@ -386,6 +521,13 @@ export function resolveBackendTtsConfig(): ResolvedBackendTtsConfig {
     region,
     requiresApiKey,
     voice,
+    korvaLang,
+    korvaSpeed,
+    korvaSteps,
+    korvaModelVersion,
+    korvaMaxQueue,
+    korvaInitTimeoutMs,
+    korvaNonBlockingInit,
     outputFormat,
     prosodyRate,
     prosodyPitch,
@@ -395,13 +537,521 @@ export function resolveBackendTtsConfig(): ResolvedBackendTtsConfig {
   };
 }
 
+const BE_SERVICE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+export function resolveKorvaPythonExecutable(): string {
+  const explicit = (process.env.KORVATTS_PYTHON_PATH || '').trim();
+  if (explicit) return explicit;
+
+  const localAppData =
+    process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+  const candidates = [
+    path.join(localAppData, 'korvatts-venv', 'Scripts', 'python.exe'),
+    path.resolve(BE_SERVICE_ROOT, '..', '.venv-korvatts', 'Scripts', 'python.exe'),
+    path.resolve(BE_SERVICE_ROOT, '..', '.venv-korvatts', 'bin', 'python'),
+    path.join(os.homedir(), '.local', 'share', 'korvatts-venv', 'bin', 'python'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return process.platform === 'win32' ? 'python' : 'python3';
+}
+
+export function resolveKorvaWorkerScript(): string {
+  const explicit = (process.env.KORVATTS_WORKER_SCRIPT || '').trim();
+  if (explicit) return explicit;
+  return path.resolve(BE_SERVICE_ROOT, 'src', 'services', 'korvaTtsWorker.py');
+}
+
+export function isValidWavBuffer(buf: Buffer): boolean {
+  if (!buf || buf.byteLength <= 44) return false;
+  return (
+    buf.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buf.subarray(8, 12).toString('ascii') === 'WAVE'
+  );
+}
+
+interface PendingKorvaJob {
+  id: string;
+  text: string;
+  cfg: ResolvedBackendTtsConfig;
+  resolve: (res: { buffer: Buffer; mimeType: string }) => void;
+  reject: (err: Error) => void;
+}
+
+interface ActiveKorvaJob extends PendingKorvaJob {
+  timer: ReturnType<typeof setTimeout>;
+}
+
+class KorvaTtsWorkerManager {
+  private proc: ChildProcessByStdio<Writable, Readable, Readable> | null = null;
+  private rl: readline.Interface | null = null;
+  private state: 'stopped' | 'starting' | 'ready' | 'failed' = 'stopped';
+  private readyPromise: Promise<void> | null = null;
+  private resolveReady: (() => void) | null = null;
+  private rejectReady: ((err: TtsServiceError) => void) | null = null;
+  private jobRunning = false;
+  private activeJob: ActiveKorvaJob | null = null;
+  private readonly pendingQueue: PendingKorvaJob[] = [];
+  private spawnedConfigSignature = '';
+  private checkpointId = 'default';
+
+  getCheckpointId(): string {
+    return this.checkpointId;
+  }
+
+  getState(): 'stopped' | 'starting' | 'ready' | 'failed' {
+    return this.state;
+  }
+
+  private ensureProcessStarted(): Promise<void> {
+    const pythonExe = resolveKorvaPythonExecutable();
+    const workerScript = resolveKorvaWorkerScript();
+    const assetsDir = (process.env.KORVATTS_ASSETS_DIR || '').trim();
+    const currentSignature = `${pythonExe}|${workerScript}|${assetsDir}`;
+
+    if (
+      this.proc &&
+      (this.state === 'ready' || this.state === 'starting') &&
+      this.spawnedConfigSignature === currentSignature &&
+      this.readyPromise
+    ) {
+      return this.readyPromise;
+    }
+
+    // Restart cleanly if config signature changed while idle
+    if (this.proc && !this.activeJob) {
+      this.killProcessImmediate();
+    }
+
+    if (!fs.existsSync(workerScript)) {
+      const err = new TtsServiceError(
+        'Không tìm thấy tiến trình worker KorvaTTS trên máy chủ. Đang hiển thị phụ đề tiếng Việt.',
+        503,
+        'TTS_MODEL_LOAD_FAILED'
+      );
+      this.state = 'failed';
+      return Promise.reject(err);
+    }
+
+    this.state = 'starting';
+    this.spawnedConfigSignature = currentSignature;
+
+    this.readyPromise = new Promise<void>((resolve, reject) => {
+      this.resolveReady = resolve;
+      this.rejectReady = reject;
+
+      let child: ChildProcessByStdio<Writable, Readable, Readable>;
+      try {
+        child = spawn(pythonExe, [workerScript], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            PYTHONIOENCODING: 'utf-8',
+            HF_HUB_DISABLE_SYMLINKS_WARNING: '1',
+            HF_HUB_DISABLE_PROGRESS_BARS: '1',
+          },
+          windowsHide: true,
+        });
+      } catch {
+        this.state = 'failed';
+        reject(
+          new TtsServiceError(
+            'Không thể khởi chạy môi trường Python cho mô hình KorvaTTS. Đang hiển thị phụ đề tiếng Việt.',
+            503,
+            'TTS_MODEL_LOAD_FAILED'
+          )
+        );
+        return;
+      }
+
+      this.proc = child;
+      // Drain stderr safely so pipe buffer never blocks; never leak stack traces to HTTP clients
+      child.stderr.on('data', () => {
+        // intentionally drained
+      });
+
+      const rl = readline.createInterface({
+        input: child.stdout,
+        crlfDelay: Infinity,
+      });
+      this.rl = rl;
+
+      rl.on('line', (rawLine) => {
+        const trimmed = rawLine.trim();
+        if (!trimmed.startsWith('{')) return;
+        let msg: Record<string, unknown>;
+        try {
+          msg = JSON.parse(trimmed) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+
+        if (msg.type === 'ready') {
+          this.state = 'ready';
+          if (typeof msg.checkpoint === 'string' && msg.checkpoint) {
+            this.checkpointId = msg.checkpoint;
+          }
+          const r = this.resolveReady;
+          this.resolveReady = null;
+          this.rejectReady = null;
+          r?.();
+          return;
+        }
+
+        if (msg.type === 'init_error') {
+          this.state = 'failed';
+          const rej = this.rejectReady;
+          this.resolveReady = null;
+          this.rejectReady = null;
+          this.killProcessImmediate();
+          rej?.(
+            new TtsServiceError(
+              'Không thể nạp mô hình giọng nói KorvaTTS trên máy chủ. Đang hiển thị phụ đề tiếng Việt.',
+              503,
+              'TTS_MODEL_LOAD_FAILED'
+            )
+          );
+          return;
+        }
+
+        if (msg.type === 'result' && this.activeJob && msg.id === this.activeJob.id) {
+          const finishedJob = this.activeJob;
+          clearTimeout(finishedJob.timer);
+          this.activeJob = null;
+
+          if (msg.ok === true && typeof msg.audioBase64 === 'string') {
+            const wavBuf = Buffer.from(msg.audioBase64, 'base64');
+            if (isValidWavBuffer(wavBuf)) {
+              finishedJob.resolve({ buffer: wavBuf, mimeType: 'audio/wav' });
+            } else {
+              finishedJob.reject(
+                new TtsServiceError(
+                  'Dữ liệu âm thanh WAV từ KorvaTTS không hợp lệ. Đang hiển thị phụ đề tiếng Việt.',
+                  502,
+                  'TTS_SYNTHESIS_FAILED'
+                )
+              );
+            }
+          } else {
+            finishedJob.reject(
+              new TtsServiceError(
+                'Quá trình tổng hợp giọng nói KorvaTTS gặp lỗi. Đang hiển thị phụ đề tiếng Việt.',
+                502,
+                'TTS_SYNTHESIS_FAILED'
+              )
+            );
+          }
+
+          this.jobRunning = false;
+          this.pumpQueue();
+        }
+      });
+
+      child.on('error', () => {
+        const wasStarting = this.state === 'starting';
+        this.state = 'failed';
+        const rej = this.rejectReady;
+        this.resolveReady = null;
+        this.rejectReady = null;
+        this.failActiveJob(
+          new TtsServiceError(
+            'Tiến trình KorvaTTS gặp sự cố bất ngờ. Đang hiển thị phụ đề tiếng Việt.',
+            502,
+            'TTS_SYNTHESIS_FAILED'
+          )
+        );
+        this.killProcessImmediate();
+        if (wasStarting && rej) {
+          rej(
+            new TtsServiceError(
+              'Không tìm thấy hoặc không thể chạy môi trường Python của KorvaTTS. Đang hiển thị phụ đề tiếng Việt.',
+              503,
+              'TTS_MODEL_LOAD_FAILED'
+            )
+          );
+        }
+        this.pumpQueue();
+      });
+
+      child.on('exit', () => {
+        if (this.proc !== child) return;
+        const wasStarting = this.state === 'starting';
+        this.proc = null;
+        this.rl?.close();
+        this.rl = null;
+        this.readyPromise = null;
+        this.state = wasStarting ? 'failed' : 'stopped';
+
+        const rej = this.rejectReady;
+        this.resolveReady = null;
+        this.rejectReady = null;
+
+        if (wasStarting && rej) {
+          rej(
+            new TtsServiceError(
+              'Tiến trình khởi tạo mô hình KorvaTTS dừng sớm. Đang hiển thị phụ đề tiếng Việt.',
+              503,
+              'TTS_MODEL_LOAD_FAILED'
+            )
+          );
+        }
+
+        this.failActiveJob(
+          new TtsServiceError(
+            'Tiến trình tổng hợp giọng nói KorvaTTS bị ngắt giữa chừng. Đang hiển thị phụ đề tiếng Việt.',
+            502,
+            'TTS_SYNTHESIS_FAILED'
+          )
+        );
+        this.pumpQueue();
+      });
+    });
+
+    return this.readyPromise;
+  }
+
+  private failActiveJob(err: TtsServiceError): void {
+    if (!this.activeJob) return;
+    const job = this.activeJob;
+    clearTimeout(job.timer);
+    this.activeJob = null;
+    this.jobRunning = false;
+    job.reject(err);
+  }
+
+  private killProcessImmediate(): void {
+    const child = this.proc;
+    this.proc = null;
+    if (this.rl) {
+      try {
+        this.rl.close();
+      } catch {
+        // ignore
+      }
+      this.rl = null;
+    }
+    this.readyPromise = null;
+    if (this.state !== 'failed') {
+      this.state = 'stopped';
+    }
+    if (child) {
+      try {
+        child.stdin.end();
+      } catch {
+        // ignore
+      }
+      try {
+        child.kill();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  async waitForReady(cfg: ResolvedBackendTtsConfig): Promise<void> {
+    const initPromise = this.ensureProcessStarted();
+    // Prevent unhandled rejection if caller times out waiting for readiness while init continues
+    initPromise.catch(() => undefined);
+
+    if (this.state === 'ready') return;
+
+    if (cfg.korvaNonBlockingInit && this.state === 'starting') {
+      throw new TtsServiceError(
+        'Mô hình giọng nói KorvaTTS đang khởi tạo, chưa sẵn sàng phục vụ ngay lúc này. Đang hiển thị phụ đề tiếng Việt.',
+        503,
+        'TTS_MODEL_NOT_READY'
+      );
+    }
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      await Promise.race([
+        initPromise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(
+              new TtsServiceError(
+                'Mô hình giọng nói KorvaTTS đang tải hoặc chưa sẵn sàng trong thời gian chờ. Đang hiển thị phụ đề tiếng Việt.',
+                503,
+                'TTS_MODEL_NOT_READY'
+              )
+            );
+          }, cfg.korvaInitTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  synthesize(
+    cfg: ResolvedBackendTtsConfig,
+    speechText: string
+  ): Promise<{ buffer: Buffer; mimeType: string }> {
+    if (this.jobRunning && this.pendingQueue.length >= cfg.korvaMaxQueue) {
+      return Promise.reject(
+        new TtsServiceError(
+          'Hệ thống tổng hợp giọng nói KorvaTTS đang bận xử lý các yêu cầu khác. Đang hiển thị phụ đề tiếng Việt.',
+          503,
+          'TTS_BUSY'
+        )
+      );
+    }
+
+    return new Promise<{ buffer: Buffer; mimeType: string }>((resolve, reject) => {
+      this.pendingQueue.push({
+        id: crypto.randomUUID(),
+        text: speechText,
+        cfg,
+        resolve,
+        reject,
+      });
+      this.pumpQueue();
+    });
+  }
+
+  private pumpQueue(): void {
+    if (this.jobRunning || this.activeJob !== null || this.pendingQueue.length === 0) return;
+
+    const nextJob = this.pendingQueue.shift()!;
+    this.jobRunning = true;
+    this.runJob(nextJob).catch((err) => {
+      this.jobRunning = false;
+      nextJob.reject(
+        err instanceof TtsServiceError
+          ? err
+          : new TtsServiceError(
+              'Không thể tổng hợp giọng nói từ KorvaTTS. Đang hiển thị phụ đề tiếng Việt.',
+              502,
+              'TTS_SYNTHESIS_FAILED'
+            )
+      );
+      this.pumpQueue();
+    });
+  }
+
+  private async runJob(job: PendingKorvaJob): Promise<void> {
+    await this.waitForReady(job.cfg);
+
+    if (!this.proc || !this.proc.stdin.writable || this.state !== 'ready') {
+      throw new TtsServiceError(
+        'Tiến trình KorvaTTS chưa sẵn sàng nhận yêu cầu. Đang hiển thị phụ đề tiếng Việt.',
+        503,
+        'TTS_MODEL_NOT_READY'
+      );
+    }
+
+    const timer = setTimeout(() => {
+      if (this.activeJob && this.activeJob.id === job.id) {
+        this.activeJob = null;
+        this.jobRunning = false;
+        this.killProcessImmediate();
+        job.reject(
+          new TtsServiceError(
+            'Quá trình tổng hợp giọng nói KorvaTTS vượt quá thời gian chờ (Timeout). Đang hiển thị phụ đề tiếng Việt.',
+            504,
+            'TTS_TIMEOUT'
+          )
+        );
+        this.pumpQueue();
+      }
+    }, job.cfg.timeoutMs);
+
+    this.activeJob = { ...job, timer };
+
+    const requestLine =
+      JSON.stringify({
+        id: job.id,
+        type: 'synthesize',
+        text: job.text,
+        voice: job.cfg.voice,
+        lang: job.cfg.korvaLang,
+        steps: job.cfg.korvaSteps,
+        speed: job.cfg.korvaSpeed,
+        seed: 42,
+      }) + '\n';
+
+    try {
+      this.proc.stdin.write(requestLine, 'utf8');
+    } catch {
+      clearTimeout(timer);
+      this.activeJob = null;
+      this.killProcessImmediate();
+      throw new TtsServiceError(
+        'Không thể gửi yêu cầu tới tiến trình KorvaTTS. Đang hiển thị phụ đề tiếng Việt.',
+        502,
+        'TTS_SYNTHESIS_FAILED'
+      );
+    }
+  }
+
+  async shutdown(): Promise<void> {
+    while (this.pendingQueue.length > 0) {
+      const queued = this.pendingQueue.shift();
+      queued?.reject(
+        new TtsServiceError(
+          'Tiến trình KorvaTTS đã dừng theo vòng đời máy chủ.',
+          503,
+          'TTS_MODEL_NOT_READY'
+        )
+      );
+    }
+    this.failActiveJob(
+      new TtsServiceError(
+        'Tiến trình KorvaTTS đã dừng theo vòng đời máy chủ.',
+        503,
+        'TTS_MODEL_NOT_READY'
+      )
+    );
+    this.jobRunning = false;
+
+    const child = this.proc;
+    if (!child) {
+      this.killProcessImmediate();
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(killTimer);
+        this.killProcessImmediate();
+        resolve();
+      };
+      const killTimer = setTimeout(done, 350);
+      child.once('exit', done);
+      try {
+        child.stdin.write(JSON.stringify({ type: 'shutdown', id: 'stop' }) + '\n');
+        child.stdin.end();
+      } catch {
+        done();
+      }
+    });
+  }
+}
+
 export class ExpoService {
   private readonly ttsAudioCache = new Map<string, CachedAudioEntry>();
   private ttsTotalCacheBytes = 0;
   private readonly ttsInFlight = new Map<string, Promise<{ buffer: Buffer; mimeType: string }>>();
   private readonly ttsRateBuckets = new Map<string, { count: number; resetAt: number }>();
+  private readonly korvaWorker = new KorvaTtsWorkerManager();
+  private readonly onProcessExit = () => {
+    void this.korvaWorker.shutdown();
+  };
 
-  constructor(private readonly db: ExpoDatabase) {}
+  constructor(private readonly db: ExpoDatabase) {
+    process.once('exit', this.onProcessExit);
+  }
+
+  async shutdown(): Promise<void> {
+    process.off('exit', this.onProcessExit);
+    await this.korvaWorker.shutdown();
+  }
 
   listBooths(): Booth[] {
     return this.db.listBooths();
@@ -520,16 +1170,22 @@ export class ExpoService {
    * Builds and verifies the exact Vietnamese speech text from real booth/slot/product records
    * stored in the Backend SQLite database. Rejects any invalid booth or foreign product.
    */
-  buildVerifiedNpcStepSpeechText(params: {
-    boothId: string;
-    stepType: NpcSpeechStepType;
-    slotId?: string | null;
-    productId?: string | null;
-  }): string {
+  buildVerifiedNpcStepSpeechText(
+    params: {
+      boothId: string;
+      stepType: NpcSpeechStepType;
+      slotId?: string | null;
+      productId?: string | null;
+    },
+    providerHint?: TtsProviderId
+  ): string {
     const booth = this.db.getBoothById(params.boothId);
     if (!booth) {
       throw new TtsServiceError('Không tìm thấy gian hàng.', 404, 'BOOTH_NOT_FOUND');
     }
+
+    const activeProvider = providerHint || resolveBackendTtsConfig().provider;
+    const preserveCompounds = activeProvider === 'korvatts';
 
     const slotDefs = this.db.listSlotDefinitions();
     const slotOrder = new Map<string, number>(slotDefs.map((d, i) => [d.slotId, i]));
@@ -545,7 +1201,9 @@ export class ExpoService {
     for (const sv of sortedSlots) {
       const p = sv.product;
       if (!p || !p.id || p.boothId !== booth.id) continue;
-      const cleanName = sanitizeTtsText(p.name, 140);
+      const cleanName = normalizeTextForVietnameseTts(p.name, 140, {
+        preserveEnglishCompounds: preserveCompounds,
+      });
       if (!cleanName) continue;
       if (seenProductIds.has(p.id)) continue;
       seenProductIds.add(p.id);
@@ -554,20 +1212,32 @@ export class ExpoService {
 
     const totalProducts = validSlotViews.length;
     const assistantName = resolveAssistantNameForBooth(booth);
-    const cleanBoothName = sanitizeTtsText(booth.name, 100) || 'Gian hàng triển lãm';
-    const cleanTagline = sanitizeTtsText(booth.tagline, 120);
+    const cleanBoothName =
+      normalizeTextForVietnameseTts(booth.name, 100, {
+        preserveEnglishCompounds: preserveCompounds,
+      }) || 'Gian hàng triển lãm';
+    const cleanCompanyName = normalizeTextForVietnameseTts(booth.companyName, 100, {
+      preserveEnglishCompounds: preserveCompounds,
+    });
+    const brandClause =
+      cleanCompanyName && cleanCompanyName.toLowerCase() !== cleanBoothName.toLowerCase()
+        ? ` thuộc thương hiệu ${cleanCompanyName.replace(/\.$/, '')}`
+        : '';
+    const cleanTagline = normalizeTextForVietnameseTts(booth.tagline, 120, {
+      preserveEnglishCompounds: preserveCompounds,
+    });
 
     let speechText = '';
 
     if (params.stepType === 'GREETING') {
       if (totalProducts === 0) {
-        speechText = `Dạ xin chào quý khách! Em là ${assistantName}, chuyên viên tư vấn tại gian hàng ${cleanBoothName}. Hiện tại gian hàng chưa có sản phẩm nào được trưng bày trên kệ. Em cảm ơn quý khách đã ghé thăm ạ!`;
+        speechText = `Dạ xin chào quý khách! Em là ${assistantName}, chuyên viên tư vấn tại gian hàng ${cleanBoothName}${brandClause}. Hiện tại gian hàng chưa có sản phẩm nào được trưng bày trên kệ. Em cảm ơn quý khách đã ghé thăm ạ!`;
       } else {
         const taglineClause = cleanTagline
           ? `, chuyên về ${cleanTagline.replace(/\.$/, '')}`
           : '';
         const spokenCount = numberToVietnameseWords(totalProducts) || String(totalProducts);
-        speechText = `Dạ xin chào quý khách! Em là ${assistantName}, tư vấn viên tại gian hàng ${cleanBoothName}${taglineClause}. Hôm nay, em xin phép giới thiệu ${spokenCount} sản phẩm tiêu biểu đang trưng bày tại gian hàng mình ạ.`;
+        speechText = `Dạ xin chào quý khách! Em là ${assistantName}, tư vấn viên tại gian hàng ${cleanBoothName}${brandClause}${taglineClause}. Hôm nay, em xin phép giới thiệu ${spokenCount} sản phẩm tiêu biểu đang trưng bày tại gian hàng mình ạ.`;
       }
     } else if (params.stepType === 'CLOSING') {
       speechText =
@@ -589,8 +1259,15 @@ export class ExpoService {
 
       const targetSlotView = validSlotViews[targetIndex];
       const product = targetSlotView.product!;
-      const cleanName = sanitizeTtsText(product.name, 115);
-      const cleanDesc = sanitizeTtsText(product.description, 155);
+      const rawCleanName = normalizeTextForVietnameseTts(product.name, 115, {
+        preserveEnglishCompounds: preserveCompounds,
+      });
+      const cleanName = preserveCompounds
+        ? smoothVietnameseProductTitleForKorva(rawCleanName)
+        : rawCleanName;
+      const cleanDesc = normalizeTextForVietnameseTts(product.description, 155, {
+        preserveEnglishCompounds: preserveCompounds,
+      });
       const priceText = formatVietnamesePriceText(product.price, product.currency);
 
       let introClause: string;
@@ -618,6 +1295,9 @@ export class ExpoService {
     }
 
     let normalized = speechText.replace(/\s+/g, ' ').trim();
+    if (preserveCompounds) {
+      normalized = expandNumbersForKorvaVietnamese(normalized);
+    }
     if (normalized.length > MAX_SPEECH_TEXT_LENGTH) {
       const slice = normalized.slice(0, MAX_SPEECH_TEXT_LENGTH);
       const lastBreak = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf(', '), slice.lastIndexOf(' '));
@@ -676,22 +1356,25 @@ export class ExpoService {
     const cfg = resolveBackendTtsConfig();
 
     // 1. Validate booth/slot/product & build verified speech text on server
-    const speechText = this.buildVerifiedNpcStepSpeechText(params);
+    const speechText = this.buildVerifiedNpcStepSpeechText(params, cfg.provider);
 
-    // 2. Compute deterministic SHA-256 cache key (strictly isolates provider, voice, format, prosody, and text)
+    // 2. Compute deterministic SHA-256 cache key (strictly isolates provider, modelVersion, voice, speed, steps, and text)
     const prosodyVersionTag =
-      cfg.provider === 'azure'
-        ? `v24-azure-${cfg.outputFormat}-rate:${cfg.prosodyRate}-pitch:${cfg.prosodyPitch}`
-        : `v24-${cfg.provider}-1.0`;
+      cfg.provider === 'korvatts'
+        ? `${cfg.korvaModelVersion}|speed:${cfg.korvaSpeed.toFixed(2)}|steps:${cfg.korvaSteps}`
+        : cfg.provider === 'azure'
+          ? `v24-azure-${cfg.outputFormat}-rate:${cfg.prosodyRate}-pitch:${cfg.prosodyPitch}`
+          : `v24-${cfg.provider}-1.0`;
+    const languageTag = cfg.provider === 'korvatts' ? cfg.korvaLang : 'vi-VN';
     const cacheKey = computeTtsCacheKey(
       cfg.provider,
       cfg.voice,
-      'vi-VN',
+      languageTag,
       prosodyVersionTag,
       speechText
     );
 
-    // 3. Check in-memory LRU cache first (0 provider cost on cache hit; never serves stale gtts audio for azure)
+    // 3. Check in-memory LRU cache first (0 synthesis cost on cache hit; never collides with V24 Azure/gTTS)
     const cached = this.getFromCache(cacheKey);
     if (cached) {
       return {
@@ -705,10 +1388,10 @@ export class ExpoService {
       };
     }
 
-    // 4. Enforce per-IP rate limit before calling external provider
+    // 4. Enforce per-IP rate limit before invoking worker or external provider
     this.checkTtsRateLimit(params.clientIp || 'anonymous', cfg.rateLimitPerMin);
 
-    // 5. Verify credentials & region before making external provider call (never silently fall back to gtts)
+    // 5. Verify credentials & region when using external keyed providers (korvatts needs ZERO paid API keys)
     if (cfg.provider === 'azure') {
       if (!cfg.apiKey || (!cfg.region && !cfg.endpointOverride)) {
         throw new TtsServiceError(
@@ -732,7 +1415,7 @@ export class ExpoService {
       );
     }
 
-    // 6. Deduplicate concurrent in-flight requests for the exact same cacheKey
+    // 6. Deduplicate concurrent in-flight requests for the exact same cacheKey (2 visitors requesting same step share 1 run)
     let inFlightPromise = this.ttsInFlight.get(cacheKey);
     if (!inFlightPromise) {
       inFlightPromise = this.callProviderTtsApi(cfg, speechText).finally(() => {
@@ -759,6 +1442,10 @@ export class ExpoService {
     cfg: ResolvedBackendTtsConfig,
     speechText: string
   ): Promise<{ buffer: Buffer; mimeType: string }> {
+    if (cfg.provider === 'korvatts') {
+      return this.korvaWorker.synthesize(cfg, speechText);
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
 

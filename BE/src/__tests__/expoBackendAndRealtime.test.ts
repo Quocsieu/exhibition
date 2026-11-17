@@ -16,29 +16,43 @@ import {
   extractProductFromHtml,
   parseBatchProducts,
 } from '../integrations/productAdapter.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import type { Express } from 'express';
 import {
   AZURE_DEFAULT_OUTPUT_FORMAT,
   AZURE_DEFAULT_VOICE,
+  KORVATTS_DEFAULT_LANGUAGE,
+  KORVATTS_DEFAULT_SPEED,
+  KORVATTS_DEFAULT_STEPS,
+  KORVATTS_DEFAULT_VOICE,
+  KORVATTS_MODEL_VERSION,
+  type ExpoService,
   buildAzureVietnameseSsml,
   computeTtsCacheKey,
   escapeSsmlXml,
+  expandNumbersForKorvaVietnamese,
+  isValidWavBuffer,
   normalizeTextForVietnameseTts,
   numberToVietnameseWords,
   resolveBackendTtsConfig,
+  smoothVietnameseProductTitleForKorva,
   splitVietnameseSpeechIntoChunks,
 } from '../services/expoService.js';
 
 describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrations & Admin Auth', () => {
   let db: ExpoDatabase;
+  let appInstance: Express;
   let server: http.Server;
   let baseUrl: string;
 
   beforeEach(async () => {
     db = new ExpoDatabase(':memory:');
-    const app = createApp(db);
-    server = http.createServer(app);
+    appInstance = createApp(db);
+    server = http.createServer(appInstance);
     const io = attachSocketServer(server, db);
-    app.set('io', io);
+    appInstance.set('io', io);
 
     await new Promise<void>((resolve) => {
       server.listen(0, '127.0.0.1', () => resolve());
@@ -48,6 +62,11 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
   });
 
   afterEach(async () => {
+    const svc = appInstance?.locals?.expoService as ExpoService | undefined;
+    if (svc) {
+      await svc.shutdown();
+    }
+    server.closeAllConnections?.();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();
   });
@@ -798,10 +817,10 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       });
       expect(foreignProductRes.status).toBe(400);
 
-      // 2. Default provider is strictly 'azure' + 'vi-VN-HoaiMyNeural':
+      // 2. Explicit 'azure' provider ('vi-VN-HoaiMyNeural'):
       //    When AZURE_SPEECH_KEY / AZURE_SPEECH_REGION are missing, returns 503 TTS_NOT_CONFIGURED
       //    and NEVER silently falls back to 'gtts' or makes external calls!
-      delete process.env.TTS_PROVIDER;
+      process.env.TTS_PROVIDER = 'azure';
       delete process.env.TTS_API_KEY;
       delete process.env.TTS_VOICE;
       delete process.env.TTS_API_ENDPOINT;
@@ -811,10 +830,10 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       delete process.env.AZURE_SPEECH_ENDPOINT;
       process.env.TTS_RATE_LIMIT_PER_MIN = '60';
 
-      const defaultCfg = resolveBackendTtsConfig();
-      expect(defaultCfg.provider).toBe('azure');
-      expect(defaultCfg.voice).toBe(AZURE_DEFAULT_VOICE);
-      expect(defaultCfg.outputFormat).toBe(AZURE_DEFAULT_OUTPUT_FORMAT);
+      const azureCfg = resolveBackendTtsConfig();
+      expect(azureCfg.provider).toBe('azure');
+      expect(azureCfg.voice).toBe(AZURE_DEFAULT_VOICE);
+      expect(azureCfg.outputFormat).toBe(AZURE_DEFAULT_OUTPUT_FORMAT);
 
       const missingCredsRes = await fetch(`${baseUrl}/api/npc/tts`, {
         method: 'POST',
@@ -838,7 +857,7 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       expect(missingRegionRes.status).toBe(503);
       expect(providerCallCount).toBe(0);
 
-      // 3. Cache isolation: Populate an explicit 'gtts' entry for EcoVita CLOSING, then switch back to default 'azure'
+      // 3. Cache isolation: Populate an explicit 'gtts' entry for EcoVita CLOSING, then switch to 'azure'
       //    and prove Azure NEVER serves the cached 'gtts' buffer!
       process.env.TTS_PROVIDER = 'gtts';
       process.env.TTS_API_ENDPOINT = `http://127.0.0.1:${providerPort}/translate_tts`;
@@ -851,8 +870,8 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       expect(gttsSeedRes.headers.get('x-tts-provider')).toBe('gtts');
       expect(gttsSeedRes.headers.get('x-tts-cache')).toBe('MISS');
 
-      // Switch to default Azure AI Speech (`vi-VN-HoaiMyNeural`)
-      delete process.env.TTS_PROVIDER;
+      // Switch to Azure AI Speech (`vi-VN-HoaiMyNeural`)
+      process.env.TTS_PROVIDER = 'azure';
       delete process.env.TTS_API_ENDPOINT;
       const azureSecretKey = 'AZURE_SUPER_SECRET_KEY_888999000';
       process.env.AZURE_SPEECH_KEY = azureSecretKey;
@@ -1080,7 +1099,7 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
     );
     expect(sentences).toHaveLength(3);
 
-    // Cache key strictly separates gtts vs azure and different prosody/format tags
+    // Cache key strictly separates korvatts vs azure vs gtts and different speed/steps/modelVersion tags
     const kGtts = computeTtsCacheKey('gtts', 'vi-VN-Standard-A', 'vi-VN', 'v24-gtts-1.0', 'Xin chào');
     const kAzure = computeTtsCacheKey(
       'azure',
@@ -1089,6 +1108,349 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       'v24-azure-audio-24khz-96kbitrate-mono-mp3-rate:0%-pitch:0%',
       'Xin chào'
     );
+    const kKorva32 = computeTtsCacheKey(
+      'korvatts',
+      'phuong_linh',
+      'vi',
+      `${KORVATTS_MODEL_VERSION}|speed:1.05|steps:32`,
+      'Xin chào'
+    );
+    const kKorva16 = computeTtsCacheKey(
+      'korvatts',
+      'phuong_linh',
+      'vi',
+      `${KORVATTS_MODEL_VERSION}|speed:1.05|steps:16`,
+      'Xin chào'
+    );
     expect(kGtts).not.toBe(kAzure);
+    expect(kKorva32).not.toBe(kAzure);
+    expect(kKorva32).not.toBe(kGtts);
+    expect(kKorva32).not.toBe(kKorva16);
+
+    // Title-Case Vietnamese product phrase smoothing preserves English brands while lowercasing Vietnamese common words
+    expect(
+      smoothVietnameseProductTitleForKorva('Pin Lưu Trữ Điện Mặt Trời Solaris PowerWall 10 ki lô oát giờ')
+    ).toBe('pin lưu trữ điện mặt trời Solaris PowerWall 10 ki lô oát giờ');
+    expect(smoothVietnameseProductTitleForKorva('Solar Battery 15 ki lô oát giờ')).toBe(
+      'Solar Battery 15 ki lô oát giờ'
+    );
   });
+
+  it('integrates KorvaTTS as the zero-key default provider (audio/wav), updates speech dynamically on Admin edits, deduplicates concurrent requests, and enforces worker lifecycle error codes', async () => {
+    const savedEnv = {
+      TTS_PROVIDER: process.env.TTS_PROVIDER,
+      KORVATTS_VOICE: process.env.KORVATTS_VOICE,
+      KORVATTS_LANGUAGE: process.env.KORVATTS_LANGUAGE,
+      KORVATTS_SPEED: process.env.KORVATTS_SPEED,
+      KORVATTS_STEPS: process.env.KORVATTS_STEPS,
+      KORVATTS_PYTHON_PATH: process.env.KORVATTS_PYTHON_PATH,
+      KORVATTS_WORKER_SCRIPT: process.env.KORVATTS_WORKER_SCRIPT,
+      KORVATTS_MAX_QUEUE: process.env.KORVATTS_MAX_QUEUE,
+      KORVATTS_INIT_TIMEOUT_MS: process.env.KORVATTS_INIT_TIMEOUT_MS,
+      KORVATTS_NON_BLOCKING_INIT: process.env.KORVATTS_NON_BLOCKING_INIT,
+      TTS_TIMEOUT_MS: process.env.TTS_TIMEOUT_MS,
+      TTS_RATE_LIMIT_PER_MIN: process.env.TTS_RATE_LIMIT_PER_MIN,
+      AZURE_SPEECH_KEY: process.env.AZURE_SPEECH_KEY,
+      AZURE_SPEECH_REGION: process.env.AZURE_SPEECH_REGION,
+    };
+
+    const tmpWorkerFile = path.join(
+      os.tmpdir(),
+      `korva-mock-worker-${process.pid}-${Date.now()}.cjs`
+    );
+
+    // Lightweight Node JSON-Lines IPC mock matching korvaTtsWorker.py's exact stdin/stdout protocol
+    const mockWorkerCode = `
+      const readline = require('node:readline');
+      const mode = process.env.MOCK_KORVA_MODE || 'ok';
+
+      function makeWavBuffer(text) {
+        const payload = Buffer.from(text, 'utf8');
+        const pcmBytes = Math.max(200, payload.length * 2);
+        const buf = Buffer.alloc(44 + pcmBytes, 0);
+        buf.write('RIFF', 0, 'ascii');
+        buf.writeUInt32LE(36 + pcmBytes, 4);
+        buf.write('WAVE', 8, 'ascii');
+        buf.write('fmt ', 12, 'ascii');
+        buf.writeUInt32LE(16, 16);
+        buf.writeUInt16LE(1, 20); // PCM
+        buf.writeUInt16LE(1, 22); // mono
+        buf.writeUInt32LE(44100, 24);
+        buf.writeUInt32LE(88200, 28);
+        buf.writeUInt16LE(2, 32);
+        buf.writeUInt16LE(16, 34);
+        buf.write('data', 36, 'ascii');
+        buf.writeUInt32LE(pcmBytes, 40);
+        payload.copy(buf, 44, 0, Math.min(payload.length, pcmBytes));
+        return buf;
+      }
+
+      if (mode === 'load_fail') {
+        process.stdout.write(JSON.stringify({ type: 'init_error', code: 'TTS_MODEL_LOAD_FAILED', message: 'Missing ONNX' }) + '\\n');
+        process.exit(2);
+      }
+
+      const initDelay = mode === 'slow_init' ? 1500 : 10;
+      setTimeout(() => {
+        process.stdout.write(JSON.stringify({
+          type: 'ready',
+          korvaVersion: '0.1.3',
+          checkpoint: 'e5c8c218',
+          sampleRate: 44100,
+          voices: ['phuong_linh', 'khanh_vy', 'ngoc_huyen']
+        }) + '\\n');
+      }, initDelay);
+
+      const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+      rl.on('line', (line) => {
+        if (!line.trim()) return;
+        const msg = JSON.parse(line);
+        if (msg.type === 'shutdown') {
+          process.stdout.write(JSON.stringify({ type: 'shutdown_ack', id: msg.id }) + '\\n');
+          process.exit(0);
+        }
+        if (msg.type === 'synthesize') {
+          if (mode === 'synth_fail' || msg.text.includes('TRIGGER_SYNTH_ERROR')) {
+            process.stdout.write(JSON.stringify({ id: msg.id, type: 'result', ok: false, code: 'TTS_SYNTHESIS_FAILED', message: 'Infer error' }) + '\\n');
+            return;
+          }
+          const delay = mode === 'timeout' ? 1500 : mode === 'busy_slow' ? 220 : 25;
+          setTimeout(() => {
+            const wav = makeWavBuffer(msg.voice + '|' + msg.text);
+            process.stdout.write(JSON.stringify({
+              id: msg.id,
+              type: 'result',
+              ok: true,
+              mimeType: 'audio/wav',
+              sampleRate: 44100,
+              durationSec: 2.5,
+              audioBase64: wav.toString('base64')
+            }) + '\\n');
+          }, delay);
+        }
+      });
+    `;
+    fs.writeFileSync(tmpWorkerFile, mockWorkerCode, 'utf8');
+
+    try {
+      // 1. Verify KorvaTTS is the default provider with zero Azure/FPT/paid keys needed
+      delete process.env.TTS_PROVIDER;
+      delete process.env.AZURE_SPEECH_KEY;
+      delete process.env.AZURE_SPEECH_REGION;
+      delete process.env.KORVATTS_VOICE;
+      process.env.KORVATTS_PYTHON_PATH = process.execPath;
+      process.env.KORVATTS_WORKER_SCRIPT = tmpWorkerFile;
+      process.env.TTS_RATE_LIMIT_PER_MIN = '120';
+      process.env.MOCK_KORVA_MODE = 'ok';
+
+      const defaultCfg = resolveBackendTtsConfig();
+      expect(defaultCfg.provider).toBe('korvatts');
+      expect(defaultCfg.voice).toBe(KORVATTS_DEFAULT_VOICE);
+      expect(defaultCfg.korvaLang).toBe(KORVATTS_DEFAULT_LANGUAGE);
+      expect(defaultCfg.korvaSpeed).toBe(KORVATTS_DEFAULT_SPEED);
+      expect(defaultCfg.korvaSteps).toBe(KORVATTS_DEFAULT_STEPS);
+      expect(defaultCfg.requiresApiKey).toBe(false);
+
+      // 1b. Verify Vietnamese title casing smoother & numeral expansion for bilingual KorvaTTS
+      expect(smoothVietnameseProductTitleForKorva('Pin Lưu Trữ Điện Mặt Trời Solaris PowerWall')).toBe(
+        'pin lưu trữ điện mặt trời Solaris PowerWall'
+      );
+      expect(
+        expandNumbersForKorvaVietnamese('Solar Battery 15 ki lô oát giờ, hơn 6000 chu kỳ (80 phần trăm DoD), IP65, PM2.5.')
+      ).toBe(
+        'Solar Battery mười lăm ki lô oát giờ, hơn sáu nghìn chu kỳ, tám mươi phần trăm DoD, IP sáu mươi lăm, PM hai phẩy năm.'
+      );
+
+      // 2. Valid WAV synthesis (Content-Type: audio/wav, never audio/mpeg) + Cache MISS -> HIT
+      const greetMiss = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-solaris-energy', stepType: 'GREETING' }),
+      });
+      expect(greetMiss.status).toBe(200);
+      expect(greetMiss.headers.get('content-type')).toBe('audio/wav');
+      expect(greetMiss.headers.get('x-tts-provider')).toBe('korvatts');
+      expect(greetMiss.headers.get('x-tts-voice')).toBe('phuong_linh');
+      expect(greetMiss.headers.get('x-tts-cache')).toBe('MISS');
+      const greetWav = Buffer.from(await greetMiss.arrayBuffer());
+      expect(isValidWavBuffer(greetWav)).toBe(true);
+      const embeddedGreeting = greetWav.subarray(44).toString('utf8');
+      expect(embeddedGreeting).toContain('Bảo Trân');
+      expect(embeddedGreeting).toContain('Solaris Green Energy Group');
+
+      const greetHit = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-solaris-energy', stepType: 'GREETING' }),
+      });
+      expect(greetHit.status).toBe(200);
+      expect(greetHit.headers.get('x-tts-cache')).toBe('HIT');
+
+      // 3. Dynamic Admin Update (Brand: Solaris Green Energy -> Green Future; Product: PowerWall 10kWh -> Solar Battery 15kWh; Price: 54M -> 62M)
+      const loginRes = await fetch(`${baseUrl}/api/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: 'admin',
+          password: process.env.ADMIN_PASSWORD || 'expo-admin-2026',
+        }),
+      });
+      const { token } = (await loginRes.json()) as { token: string };
+      const authHeaders = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      };
+
+      await fetch(`${baseUrl}/api/booths/booth-solaris-energy`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({ companyName: 'Green Future' }),
+      });
+      await fetch(`${baseUrl}/api/products/prod-solaris-pack-10kw`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({
+          name: 'Solar Battery 15kWh',
+          price: 62000000,
+        }),
+      });
+
+      const updatedGreetRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-solaris-energy', stepType: 'GREETING' }),
+      });
+      expect(updatedGreetRes.status).toBe(200);
+      expect(updatedGreetRes.headers.get('x-tts-cache')).toBe('MISS'); // New content -> new cache key!
+      const updatedGreetWav = Buffer.from(await updatedGreetRes.arrayBuffer());
+      expect(updatedGreetWav.subarray(44).toString('utf8')).toContain('Green Future');
+
+      const updatedProdRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          boothId: 'booth-solaris-energy',
+          stepType: 'PRODUCT',
+          slotId: 'slot_01',
+          productId: 'prod-solaris-pack-10kw',
+        }),
+      });
+      expect(updatedProdRes.status).toBe(200);
+      expect(updatedProdRes.headers.get('x-tts-cache')).toBe('MISS');
+      const updatedProdWav = Buffer.from(await updatedProdRes.arrayBuffer());
+      const updatedProdPayload = updatedProdWav.subarray(44).toString('utf8');
+      expect(updatedProdPayload).toContain('Solar Battery mười lăm ki lô oát giờ');
+      expect(updatedProdPayload).toContain('sáu mươi hai triệu đồng');
+
+      // 4. Two visitors requesting the exact same uncached speech concurrently -> deduplicated in-flight!
+      const [vis1Res, vis2Res] = await Promise.all([
+        fetch(`${baseUrl}/api/npc/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ boothId: 'booth-nordic-living', stepType: 'GREETING' }),
+        }),
+        fetch(`${baseUrl}/api/npc/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ boothId: 'booth-nordic-living', stepType: 'GREETING' }),
+        }),
+      ]);
+      expect(vis1Res.status).toBe(200);
+      expect(vis2Res.status).toBe(200);
+      const buf1 = Buffer.from(await vis1Res.arrayBuffer());
+      const buf2 = Buffer.from(await vis2Res.arrayBuffer());
+      expect(buf1.equals(buf2)).toBe(true);
+
+      // 5. Worker lifecycle error codes: TTS_BUSY, TTS_SYNTHESIS_FAILED, TTS_TIMEOUT, TTS_MODEL_NOT_READY, TTS_MODEL_LOAD_FAILED
+      const svc = appInstance.locals.expoService as ExpoService;
+      await svc.shutdown();
+
+      // 5a. TTS_BUSY when distinct concurrent requests exceed KORVATTS_MAX_QUEUE=0
+      process.env.MOCK_KORVA_MODE = 'busy_slow';
+      process.env.KORVATTS_MAX_QUEUE = '0';
+      const [busyFirst, busySecond] = await Promise.all([
+        fetch(`${baseUrl}/api/npc/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ boothId: 'booth-aether-tech', stepType: 'GREETING' }),
+        }),
+        fetch(`${baseUrl}/api/npc/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ boothId: 'booth-lumina-design', stepType: 'GREETING' }),
+        }),
+      ]);
+      const statuses = [busyFirst.status, busySecond.status].sort();
+      expect(statuses).toEqual([200, 503]);
+      const rejectedBusy = busyFirst.status === 503 ? busyFirst : busySecond;
+      expect(((await rejectedBusy.json()) as { code: string }).code).toBe('TTS_BUSY');
+      process.env.KORVATTS_MAX_QUEUE = '3';
+
+      // 5b. TTS_SYNTHESIS_FAILED
+      await svc.shutdown();
+      process.env.MOCK_KORVA_MODE = 'synth_fail';
+      const synthFailRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-ecovita-craft', stepType: 'GREETING' }),
+      });
+      expect(synthFailRes.status).toBe(502);
+      expect(((await synthFailRes.json()) as { code: string }).code).toBe('TTS_SYNTHESIS_FAILED');
+
+      // 5c. TTS_TIMEOUT
+      await svc.shutdown();
+      process.env.MOCK_KORVA_MODE = 'timeout';
+      process.env.TTS_TIMEOUT_MS = '350';
+      const timeoutRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-kinetix-robotics', stepType: 'GREETING' }),
+      });
+      expect(timeoutRes.status).toBe(504);
+      expect(((await timeoutRes.json()) as { code: string }).code).toBe('TTS_TIMEOUT');
+      delete process.env.TTS_TIMEOUT_MS;
+
+      // 5d. TTS_MODEL_NOT_READY
+      await svc.shutdown();
+      process.env.MOCK_KORVA_MODE = 'slow_init';
+      process.env.KORVATTS_INIT_TIMEOUT_MS = '250';
+      const notReadyRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boothId: 'booth-kinetix-robotics', stepType: 'CLOSING' }),
+      });
+      expect(notReadyRes.status).toBe(503);
+      expect(((await notReadyRes.json()) as { code: string }).code).toBe('TTS_MODEL_NOT_READY');
+      delete process.env.KORVATTS_INIT_TIMEOUT_MS;
+
+      // 5e. TTS_MODEL_LOAD_FAILED
+      await svc.shutdown();
+      process.env.MOCK_KORVA_MODE = 'load_fail';
+      const loadFailRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          boothId: 'booth-aether-tech',
+          stepType: 'PRODUCT',
+          slotId: 'slot_01',
+          productId: 'prod-aether-hub-x1',
+        }),
+      });
+      expect(loadFailRes.status).toBe(503);
+      const loadFailJson = (await loadFailRes.json()) as { code: string; error: string };
+      expect(loadFailJson.code).toBe('TTS_MODEL_LOAD_FAILED');
+      expect(loadFailJson.error).not.toContain('Traceback');
+    } finally {
+      delete process.env.MOCK_KORVA_MODE;
+      try {
+        if (fs.existsSync(tmpWorkerFile)) fs.unlinkSync(tmpWorkerFile);
+      } catch {
+        // ignore
+      }
+      for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }, 15000);
 });

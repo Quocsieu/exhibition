@@ -155,6 +155,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const activeObjectUrlRef = useRef<string | null>(null);
   const ttsAbortControllerRef = useRef<AbortController | null>(null);
+  const ttsPrefetchAbortRef = useRef<AbortController | null>(null);
   const stepTimerRef = useRef<number | null>(null);
   const animTimerRef = useRef<number | null>(null);
   const voiceWatchdogTimerRef = useRef<number | null>(null);
@@ -168,6 +169,14 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         // ignore abort errors
       }
       ttsAbortControllerRef.current = null;
+    }
+    if (ttsPrefetchAbortRef.current) {
+      try {
+        ttsPrefetchAbortRef.current.abort();
+      } catch {
+        // ignore abort errors
+      }
+      ttsPrefetchAbortRef.current = null;
     }
     if (stepTimerRef.current !== null) {
       window.clearTimeout(stepTimerRef.current);
@@ -428,6 +437,9 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
   const handleReachBooth = useCallback(
     (booth: Booth) => {
+      if (npcPlan && npcPlan.booth.id !== booth.id) {
+        closeNpcSession();
+      }
       setCameraMode((prev) => {
         if (prev === 'overview' || prev === 'explore') {
           previousExteriorModeRef.current = prev;
@@ -441,7 +453,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       setZoom(FOCUS_DEFAULT_ZOOM);
       void refreshExpoDataSilently();
     },
-    [booths, refreshExpoDataSilently]
+    [booths, closeNpcSession, npcPlan, refreshExpoDataSilently]
   );
 
   const emitMovementRef = useRef<
@@ -875,6 +887,24 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
             setNpcAudioState(npcMutedRef.current ? 'MUTED' : 'SPEAKING');
             setNpcVoiceNotice(voiceLabel);
             triggerActiveStepAnimation();
+
+            // Warm Backend LRU cache for the immediate next step while current audio plays
+            const nextStep = plan.steps[stepIdx + 1];
+            if (nextStep && !npcMutedRef.current) {
+              const prefetchCtrl = new AbortController();
+              ttsPrefetchAbortRef.current = prefetchCtrl;
+              void apiClient
+                .synthesizeNpcSpeech(
+                  {
+                    boothId: plan.booth.id,
+                    stepType: nextStep.type,
+                    slotId: nextStep.slotId,
+                    productId: nextStep.product?.id ?? null,
+                  },
+                  prefetchCtrl.signal
+                )
+                .catch(() => undefined);
+            }
           };
 
           audio.onended = () => {
