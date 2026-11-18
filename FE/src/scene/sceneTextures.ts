@@ -317,24 +317,11 @@ export function createBoothSignTexture(options: {
     ctx.fillStyle = options.active ? '#fbbf24' : pal.border;
     ctx.fillRect(42, 16, 1452, 8);
 
-    // Left Corporate Emblem Medallion
-    ctx.save();
-    createRoundRectPath(ctx, 34, 34, 172, 172, 26);
-    ctx.fillStyle = 'rgba(9, 13, 22, 0.85)';
-    ctx.fill();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = options.active ? '#fbbf24' : pal.border;
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.font = '900 76px Inter, Segoe UI, Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(pal.icon, 120, 144);
-
-    // Center Full Enterprise Name (100% complete — never truncated with `...`)
+    // Left-aligned Full Enterprise Name (reclaiming icon box space — never truncated with `...`)
+    const titleLeftX = 58;
+    const maxTitleWidth = 1148;
     const fullEnterpriseTitle = options.name.toUpperCase();
-    const fittedTitle = fitEnterpriseTitleLines(ctx, fullEnterpriseTitle, 980, 62, 36);
+    const fittedTitle = fitEnterpriseTitleLines(ctx, fullEnterpriseTitle, maxTitleWidth, 62, 36);
     ctx.save();
     ctx.font = `900 ${fittedTitle.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
     ctx.textAlign = 'left';
@@ -344,20 +331,20 @@ export function createBoothSignTexture(options: {
     ctx.shadowOffsetY = 2;
 
     if (fittedTitle.lines.length === 1) {
-      ctx.fillText(fittedTitle.lines[0], 234, 114);
+      ctx.fillText(fittedTitle.lines[0], titleLeftX, 114);
     } else {
-      ctx.fillText(fittedTitle.lines[0], 234, 84);
-      ctx.fillText(fittedTitle.lines[1], 234, 134);
+      ctx.fillText(fittedTitle.lines[0], titleLeftX, 84);
+      ctx.fillText(fittedTitle.lines[1], titleLeftX, 134);
     }
     ctx.restore();
 
     // Subtitle: Booth Name & Category
     const categoryHeader = `★ ${options.category.toUpperCase()} ★`;
-    const fittedSub = fitEnterpriseTitleLines(ctx, categoryHeader, 980, 30, 22);
+    const fittedSub = fitEnterpriseTitleLines(ctx, categoryHeader, maxTitleWidth, 30, 22);
     ctx.font = `800 ${fittedSub.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
     ctx.textAlign = 'left';
     ctx.fillStyle = pal.textSub;
-    ctx.fillText(fittedSub.lines[0] || categoryHeader, 234, 184);
+    ctx.fillText(fittedSub.lines[0] || categoryHeader, titleLeftX, 184);
 
     // Right Product Count Pill
     ctx.save();

@@ -111,6 +111,9 @@ import {
   computePiperWavCacheKey,
   resolveTtsProviderConfig,
 } from '../services/hybridTtsAdapter';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { NpcAssistantPanel } from '../components/NpcAssistantPanel';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -1665,5 +1668,144 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
         (globalThis as Record<string, unknown>).Worker = originalWorker;
       }
     }
+  });
+
+  it('V25.10 — removes redundant NPC voice status/source lines across all steps while preserving loading progress, error retry banner, and CC BY 4.0 file attribution', () => {
+    const booth = DEFAULT_BOOTHS[1]; // Nordic Living Interiors AB
+    const slotViews = buildBoothSlotViews(booth.id, DEFAULT_PRODUCTS, FALLBACK_SLOT_ASSIGNMENTS);
+    const plan = buildBoothPresentationPlan(booth, slotViews, DEFAULT_PRODUCTS);
+    const noop = () => undefined;
+
+    const renderPanel = (
+      status: 'GREETING' | 'PRESENTING' | 'PAUSED' | 'COMPLETED' | 'CANCELLED' | 'ERROR',
+      audioState:
+        | 'PLAYING'
+        | 'SPEAKING'
+        | 'ENDED'
+        | 'MODEL_LOADING'
+        | 'GENERATING_AUDIO'
+        | 'NO_VI_VOICE'
+        | 'AUDIO_ERROR'
+        | 'MUTED',
+      stepIdx: number,
+      voiceNotice: string | null = 'Giọng nữ VAIS-1000 (Piper WASM) · Đoạn 1/2'
+    ) =>
+      renderToStaticMarkup(
+        React.createElement(NpcAssistantPanel, {
+          plan,
+          status,
+          audioState,
+          voiceNotice,
+          currentStepIndex: stepIdx,
+          isMuted: audioState === 'MUTED',
+          hasVietnameseVoice: true,
+          onPause: noop,
+          onResume: noop,
+          onPrevious: noop,
+          onNext: noop,
+          onStop: noop,
+          onRestart: noop,
+          onRetryAudio: noop,
+          onToggleMute: noop,
+          onClose: noop,
+        })
+      );
+
+    // 1. Greeting, Product, Paused, Completed (Replay ready), and Cancelled states:
+    // Zero redundant voice-meta lines (`Đã phát xong phần giới thiệu gian hàng`, `Nguồn giọng: VAIS-1000`, `Đang phát giọng đọc:`)
+    const activeAndDoneMarkup = [
+      renderPanel('GREETING', 'PLAYING', 0),
+      renderPanel('PRESENTING', 'PLAYING', 1),
+      renderPanel('PAUSED', 'SPEAKING', 1),
+      renderPanel('COMPLETED', 'ENDED', plan.steps.length - 1),
+      renderPanel('CANCELLED', 'ENDED', 1),
+      renderPanel('PRESENTING', 'MUTED', 1),
+    ];
+
+    for (const html of activeAndDoneMarkup) {
+      expect(html).not.toContain('Đã phát xong phần giới thiệu gian hàng');
+      expect(html).not.toContain('Nguồn giọng: VAIS-1000');
+      expect(html).not.toContain('CC BY 4.0');
+      expect(html).not.toContain('Đang phát giọng đọc');
+      expect(html).not.toContain('npc-assistant-panel__voice-meta');
+    }
+
+    // Completed state still renders `Nghe lại` control and subtitle cleanly
+    const completedHtml = activeAndDoneMarkup[3];
+    expect(completedHtml).toContain('Nghe lại');
+    expect(completedHtml).toContain(plan.steps[plan.steps.length - 1].text);
+
+    // 2. Active downloading / audio preparation preserves clean progress without technical VAIS-1000 code
+    const loadingHtml = renderPanel(
+      'GREETING',
+      'GENERATING_AUDIO',
+      0,
+      'Đang tạo đoạn âm thanh 1/3 (Giọng nữ VAIS-1000)...'
+    );
+    expect(loadingHtml).toContain('npc-assistant-panel__voice-meta');
+    expect(loadingHtml).toContain('Đang tạo đoạn âm thanh 1/3...');
+    expect(loadingHtml).not.toContain('VAIS-1000');
+    expect(loadingHtml).not.toContain('Nguồn giọng');
+
+    // 3. Genuine error / subtitle fallback preserves warning banner and `Thử lại âm thanh`
+    const errorHtml = renderPanel(
+      'PRESENTING',
+      'AUDIO_ERROR',
+      1,
+      'Mạng tạm thời gián đoạn — đang hiển thị phụ đề tiếng Việt.'
+    );
+    expect(errorHtml).toContain('npc-assistant-panel__audio-warning');
+    expect(errorHtml).toContain('Thử lại âm thanh');
+    expect(errorHtml).not.toContain('npc-assistant-panel__voice-meta');
+
+    // 4. CC BY 4.0 attribution remains intact in public credits file & exported constant
+    expect(PIPER_VOICE_ATTRIBUTION_NOTICE).toContain('CC BY 4.0');
+    const attributionPath = path.resolve(__dirname, '../../public/tts/ATTRIBUTION.txt');
+    expect(fs.existsSync(attributionPath)).toBe(true);
+    expect(fs.readFileSync(attributionPath, 'utf8')).toContain('CC BY 4.0');
+  });
+
+  it('V25.10 — removes the left icon medallion from all 6 booth signboards, reclaims title width without clipping, and disposes textures cleanly', () => {
+    const sceneTexturesSrc = fs.readFileSync(
+      path.resolve(__dirname, '../scene/sceneTextures.ts'),
+      'utf8'
+    );
+    const fnStart = sceneTexturesSrc.indexOf('export function createBoothSignTexture(');
+    const fnEnd = sceneTexturesSrc.indexOf('export function createBoothFasciaTexture(');
+    expect(fnStart).toBeGreaterThan(0);
+    expect(fnEnd).toBeGreaterThan(fnStart);
+
+    const signFnBody = sceneTexturesSrc.slice(fnStart, fnEnd);
+    // Left emblem box (34, 34, 172, 172) and pal.icon draw call must be completely removed (not hidden with opacity)
+    expect(signFnBody).not.toContain('34, 34, 172, 172');
+    expect(signFnBody).not.toContain('pal.icon');
+    expect(signFnBody).toContain('const titleLeftX = 58');
+    expect(signFnBody).toContain('const maxTitleWidth = 1148');
+
+    const baseline = getActiveCanvasTextureCount();
+    const createdTextures = DEFAULT_BOOTHS.map((booth) => {
+      const enterpriseTitle = (booth.companyName || booth.name).toUpperCase();
+      const fitted = fitEnterpriseTitleLines(null, enterpriseTitle, 1148, 62, 36);
+      expect(fitted.lines.join(' ')).toBe(enterpriseTitle);
+      expect(fitted.lines.join(' ')).not.toContain('...');
+      expect(fitted.lines.join(' ')).not.toContain('…');
+
+      return createBoothSignTexture({
+        name: booth.companyName || booth.name,
+        category: `${booth.name} · ${booth.category}`,
+        productCount: 6,
+        color: booth.color,
+        active: false,
+        theme: resolveBoothTheme(booth),
+      });
+    });
+
+    expect(createdTextures.length).toBe(6);
+    expect(getActiveCanvasTextureCount()).toBe(baseline + 6);
+
+    for (const tex of createdTextures) {
+      tex.dispose();
+    }
+    expect(getActiveCanvasTextureCount()).toBe(baseline);
   });
 });

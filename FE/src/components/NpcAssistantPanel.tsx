@@ -6,7 +6,6 @@ import type {
   NpcPresentationStep,
   NpcSessionStatus,
 } from '../services/npcPresentationService';
-import { PIPER_VOICE_ATTRIBUTION_NOTICE } from '../services/hybridTtsAdapter';
 import { formatCurrency } from './ProductPanel';
 
 export interface NpcAssistantPanelProps {
@@ -87,6 +86,34 @@ function getStatusLabel(
   }
 }
 
+function getPreparingVoiceText(
+  audioState: NpcAudioRuntimeState,
+  isMuted: boolean,
+  voiceNotice?: string | null
+): string | null {
+  if (isMuted || !isAudioPreparing(audioState)) {
+    return null;
+  }
+
+  const cleanedNotice = voiceNotice
+    ? voiceNotice
+        .replace(/\s*\((?:Giọng[^)]*|VAIS-1000[^)]*|Piper[^)]*|Korva[^)]*)\)/gi, '')
+        .trim()
+    : '';
+
+  if (cleanedNotice && (cleanedNotice.startsWith('Đang ') || cleanedNotice.startsWith('⏳'))) {
+    return cleanedNotice.startsWith('⏳') ? cleanedNotice : `⏳ ${cleanedNotice}`;
+  }
+
+  if (audioState === 'MODEL_LOADING') {
+    return '⏳ Đang tải và khởi tạo mô hình giọng nói tiếng Việt...';
+  }
+  if (audioState === 'AUDIO_READY') {
+    return '⏳ Âm thanh đã sẵn sàng, bắt đầu phát...';
+  }
+  return '⏳ Đang tạo đoạn âm thanh tư vấn tiếng Việt...';
+}
+
 export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
   ({
     plan,
@@ -95,7 +122,6 @@ export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
     voiceNotice,
     currentStepIndex,
     isMuted,
-    hasVietnameseVoice,
     onPause,
     onResume,
     onPrevious,
@@ -132,34 +158,7 @@ export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
     const isWarningState =
       audioState === 'NO_VI_VOICE' || audioState === 'AUDIO_ERROR' || audioState === 'ERROR';
 
-    const isPiperVoiceActive = Boolean(
-      voiceNotice && (voiceNotice.includes('VAIS-1000') || voiceNotice.includes('Piper'))
-    );
-
-    let voiceStatusText: string;
-    if (isMuted || audioState === 'MUTED') {
-      voiceStatusText = '🔇 Đang tắt tiếng (Chỉ hiển thị phụ đề)';
-    } else if (isAudioActivelyPlaying(audioState)) {
-      voiceStatusText = `🔊 Đang phát giọng đọc: ${voiceNotice || 'Tiếng Việt (vi-VN)'}`;
-    } else if (audioState === 'MODEL_LOADING') {
-      voiceStatusText =
-        voiceNotice || '⏳ Đang tải và khởi tạo mô hình giọng nói tiếng Việt...';
-    } else if (audioState === 'GENERATING_AUDIO' || audioState === 'CHECKING_VOICE') {
-      voiceStatusText =
-        voiceNotice || '⏳ Đang tạo đoạn âm thanh tư vấn tiếng Việt...';
-    } else if (audioState === 'AUDIO_READY') {
-      voiceStatusText = '🔊 Âm thanh đã sẵn sàng, bắt đầu phát...';
-    } else if (audioState === 'ENDED') {
-      voiceStatusText = '✅ Đã phát xong phần giới thiệu gian hàng';
-    } else if (audioState === 'NO_VI_VOICE') {
-      voiceStatusText = '⚠️ Chưa thể phát giọng đọc — Đang chạy phụ đề tiếng Việt tự động';
-    } else if (audioState === 'AUDIO_ERROR' || audioState === 'ERROR') {
-      voiceStatusText = '⚠️ Không thể phát giọng đọc — Đang chạy phụ đề tiếng Việt tự động';
-    } else if (hasVietnameseVoice) {
-      voiceStatusText = '🔊 Hỗ trợ giọng đọc Tiếng Việt (vi-VN)';
-    } else {
-      voiceStatusText = '📝 Chế độ phụ đề Tiếng Việt tự động';
-    }
+    const preparingVoiceText = getPreparingVoiceText(audioState, isMuted, voiceNotice);
 
     return (
       <aside
@@ -261,15 +260,11 @@ export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
           <p className="npc-assistant-panel__subtitle-text">
             “{currentStep?.text || ''}”
           </p>
-          <div className="npc-assistant-panel__voice-meta">
-            <span>{voiceStatusText}</span>
-            {currentStep?.slotLabel && (
-              <span>· Kệ: {currentStep.slotLabel}</span>
-            )}
-            {isPiperVoiceActive && (
-              <span title={PIPER_VOICE_ATTRIBUTION_NOTICE}>· Nguồn giọng: VAIS-1000 (CC BY 4.0)</span>
-            )}
-          </div>
+          {preparingVoiceText && (
+            <div className="npc-assistant-panel__voice-meta">
+              <span>{preparingVoiceText}</span>
+            </div>
+          )}
         </div>
 
         {/* Highlighted Product Preview Card (when presenting a specific product) */}
