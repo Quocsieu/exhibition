@@ -39,6 +39,7 @@ import {
   concatenatePcm16WavBuffers,
   escapeSsmlXml,
   expandNumbersForKorvaVietnamese,
+  isServerKorvaWorkerDisabled,
   isValidWavBuffer,
   normalizeTextForVietnameseTts,
   numberToVietnameseWords,
@@ -1882,5 +1883,50 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
     expect(await meRes.json()).toEqual({ authenticated: true, username: 'admin' });
 
     resetAdminLoginRateLimitForTests();
+  });
+
+  it('V25.8 — skips spawning KorvaTTS worker on Render/client-only TTS mode while still serving verified dynamic speech manifests', async () => {
+    const saved = {
+      TTS_PROVIDER: process.env.TTS_PROVIDER,
+      KORVATTS_ENABLED: process.env.KORVATTS_ENABLED,
+      RENDER: process.env.RENDER,
+      KORVATTS_PYTHON_PATH: process.env.KORVATTS_PYTHON_PATH,
+      KORVATTS_WORKER_SCRIPT: process.env.KORVATTS_WORKER_SCRIPT,
+    };
+
+    try {
+      process.env.TTS_PROVIDER = 'browser-piper';
+      expect(isServerKorvaWorkerDisabled()).toBe(true);
+
+      const svc = appInstance.locals.expoService as ExpoService;
+      svc.prewarmTtsWorker();
+      expect(svc.getTtsWorkerState()).not.toBe('starting');
+
+      const manifestRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          boothId: 'booth-solaris-energy',
+          stepType: 'PRODUCT',
+          slotId: 'slot_01',
+          productId: 'prod-solaris-pack-10kw',
+          mode: 'manifest',
+        }),
+      });
+      expect(manifestRes.status).toBe(200);
+      const manifestJson = (await manifestRes.json()) as {
+        workerState: string;
+        fullText: string;
+        totalChunks: number;
+      };
+      expect(manifestJson.workerState).toBe('failed');
+      expect(manifestJson.fullText).toContain('Solaris PowerWall');
+      expect(manifestJson.totalChunks).toBeGreaterThanOrEqual(1);
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 });

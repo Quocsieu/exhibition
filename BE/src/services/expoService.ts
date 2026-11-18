@@ -906,6 +906,31 @@ export function resolveKorvaWorkerScript(): string {
   return path.resolve(BE_SERVICE_ROOT, 'src', 'services', 'korvaTtsWorker.py');
 }
 
+export function isServerKorvaWorkerDisabled(): boolean {
+  const rawProvider = (process.env.TTS_PROVIDER || '').trim().toLowerCase();
+  if (
+    rawProvider === 'browser-piper' ||
+    rawProvider === 'client-piper' ||
+    rawProvider === 'none'
+  ) {
+    return true;
+  }
+  if ((process.env.KORVATTS_ENABLED || '').trim().toLowerCase() === 'false') {
+    return true;
+  }
+  if ((process.env.RENDER || '').trim().toLowerCase() === 'true') {
+    const hasExplicitPython = Boolean((process.env.KORVATTS_PYTHON_PATH || '').trim());
+    const hasExplicitScript = Boolean((process.env.KORVATTS_WORKER_SCRIPT || '').trim());
+    if (!hasExplicitPython && !hasExplicitScript) {
+      const resolvedPy = resolveKorvaPythonExecutable();
+      if (resolvedPy === 'python' || resolvedPy === 'python3') {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function isValidWavBuffer(buf: Buffer): boolean {
   if (!buf || buf.byteLength <= 44) return false;
   return (
@@ -966,6 +991,17 @@ class KorvaTtsWorkerManager {
   }
 
   prewarm(): void {
+    if (isServerKorvaWorkerDisabled()) {
+      this.state = 'failed';
+      return;
+    }
+    const pythonExe = resolveKorvaPythonExecutable();
+    const workerScript = resolveKorvaWorkerScript();
+    const assetsDir = (process.env.KORVATTS_ASSETS_DIR || '').trim();
+    const currentSignature = `${pythonExe}|${workerScript}|${assetsDir}`;
+    if (this.state === 'failed' && this.spawnedConfigSignature === currentSignature) {
+      return;
+    }
     this.ensureProcessStarted().catch(() => undefined);
   }
 
@@ -1539,7 +1575,7 @@ export class ExpoService {
 
   prewarmTtsWorker(): void {
     const cfg = resolveBackendTtsConfig();
-    if (cfg.provider === 'korvatts') {
+    if (cfg.provider === 'korvatts' && !isServerKorvaWorkerDisabled()) {
       this.korvaWorker.prewarm();
     }
   }
@@ -2246,7 +2282,8 @@ export class ExpoService {
     const cfg = resolveBackendTtsConfig();
     const { speechText, protectedPhrases } = this.buildVerifiedNpcStepPlan(params, cfg.provider);
 
-    if (cfg.provider === 'korvatts') {
+    const korvaDisabled = cfg.provider === 'korvatts' && isServerKorvaWorkerDisabled();
+    if (cfg.provider === 'korvatts' && !korvaDisabled) {
       this.korvaWorker.prewarm();
     }
 
@@ -2267,7 +2304,12 @@ export class ExpoService {
     return {
       provider: cfg.provider,
       voice: cfg.voice,
-      workerState: cfg.provider === 'korvatts' ? this.korvaWorker.getState() : 'ready',
+      workerState:
+        cfg.provider === 'korvatts'
+          ? korvaDisabled
+            ? 'failed'
+            : this.korvaWorker.getState()
+          : 'ready',
       totalChunks: chunks.length,
       fullText: speechText,
       chunks,

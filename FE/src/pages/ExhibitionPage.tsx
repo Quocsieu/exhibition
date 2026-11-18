@@ -34,6 +34,13 @@ import {
   EXPO_DATA_SYNC_CHANNEL,
   EXPO_DATA_UPDATED_STORAGE_KEY,
 } from '../services/api';
+import {
+  buildPiperStepPlanFromDisplayText,
+  checkBrowserPiperCapability,
+  piperBrowserTts,
+  resolveTtsProviderConfig,
+  type PiperProgressEvent,
+} from '../services/hybridTtsAdapter';
 
 const AVATAR_COLORS = [
   '#0ea5e9',
@@ -245,6 +252,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
   const closeNpcSession = useCallback(() => {
     cancelNpcAudioAndTimers();
+    piperBrowserTts.scheduleIdleRelease();
     setNpcPlan(null);
     setNpcStatus('IDLE');
     setNpcAudioState('IDLE');
@@ -271,10 +279,11 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     };
   }, []);
 
-  // Ensure speech & timers are always stopped on unmount
+  // Ensure speech, timers, and browser TTS worker are always cleaned up on unmount
   useEffect(() => {
     return () => {
       cancelNpcAudioAndTimers();
+      void piperBrowserTts.disposeWorker();
     };
   }, [cancelNpcAudioAndTimers]);
 
@@ -857,8 +866,8 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         }
       };
 
-      // Primary Path: Backend Vietnamese Female TTS (`POST /api/npc/tts`) with Early First-Chunk Playback
-      // While preparing audio, NPC stays in natural `IDLE` pose (never lip-syncs before real audio starts)
+      // Hybrid TTS Path (`local-korvatts` on Localhost | `browser-piper` WASM on Production/Cloud)
+      // While preparing audio, NPC stays in natural `IDLE` pose (never enters TALKING before real audio plays)
       setNpcAudioState('GENERATING_AUDIO');
       setNpcVoiceNotice('Đang chuẩn bị đoạn âm thanh đầu tiên...');
       setNpcAnimation('IDLE');
@@ -875,7 +884,9 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
           voice: string;
         }>
       >();
+      const preloadedAudios = new Map<number, { audio: HTMLAudioElement; objectUrl: string }>();
       let sessionCancelled = false;
+      let lastChunkEndedAtMs = 0;
 
       const manifestCtrl = new AbortController();
       ttsAbortControllerRef.current = manifestCtrl;
@@ -886,6 +897,24 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
           // ignore
         }
       }, 15_000);
+
+      const disposePreloadedAudioEntry = (entry: { audio: HTMLAudioElement; objectUrl: string }) => {
+        entry.audio.onplay = null;
+        entry.audio.onended = null;
+        entry.audio.onerror = null;
+        try {
+          entry.audio.pause();
+          entry.audio.removeAttribute('src');
+          entry.audio.load();
+        } catch {
+          // ignore
+        }
+        try {
+          URL.revokeObjectURL(entry.objectUrl);
+        } catch {
+          // ignore
+        }
+      };
 
       const cleanupAllChunkRequests = () => {
         sessionCancelled = true;
@@ -902,9 +931,37 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
           }
         }
         chunkControllers.clear();
+        for (const entry of preloadedAudios.values()) {
+          disposePreloadedAudioEntry(entry);
+        }
+        preloadedAudios.clear();
       };
 
-      const ensureChunkRequest = (
+      const preloadDecodedAudioIfNeeded = (
+        chunkIdx: number,
+        p: Promise<{ blob: Blob; cacheStatus: string; provider: string; voice: string }>
+      ) => {
+        void p
+          .then((res) => {
+            if (utteranceTokenRef.current !== token || sessionCancelled) return;
+            if (preloadedAudios.has(chunkIdx)) return;
+            // Pre-decode WAV in HTMLAudioElement while previous chunk is still playing to minimize inter-chunk gap
+            const objectUrl = URL.createObjectURL(res.blob);
+            const preAudio = new Audio(objectUrl);
+            preAudio.preload = 'auto';
+            preAudio.load();
+            preloadedAudios.set(chunkIdx, { audio: preAudio, objectUrl });
+          })
+          .catch(() => undefined);
+      };
+
+      let activeMode: 'local-korvatts' | 'browser-piper' =
+        resolveTtsProviderConfig().preferredInitial;
+      let piperChunks: string[] = [];
+
+      const formatMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
+
+      const ensureServerKorvaChunkRequest = (
         chunkIdx: number,
         priority: 'ACTIVE_PLAYBACK' | 'NEXT_CHUNK' | 'PREFETCH'
       ) => {
@@ -956,10 +1013,83 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
             chunkControllers.delete(chunkIdx);
           });
 
-        // Prevent unhandled rejection for background NEXT_CHUNK pipeline promises
         p.catch(() => undefined);
         chunkPromises.set(chunkIdx, p);
+        if (priority === 'NEXT_CHUNK') {
+          preloadDecodedAudioIfNeeded(chunkIdx, p);
+        }
         return p;
+      };
+
+      const ensureBrowserPiperChunkRequest = (
+        chunkIdx: number,
+        totalChunks: number,
+        isCurrentForeground: boolean
+      ) => {
+        const existing = chunkPromises.get(chunkIdx);
+        if (existing) return existing;
+
+        const ctrl = new AbortController();
+        chunkControllers.set(chunkIdx, ctrl);
+        const normalizedChunkText = piperChunks[chunkIdx] || '';
+
+        const onProgress = isCurrentForeground
+          ? (ev: PiperProgressEvent) => {
+              if (utteranceTokenRef.current !== token || sessionCancelled) return;
+              // Never overwrite PLAYING banner if audio is already speaking
+              if (audioElementRef.current && !audioElementRef.current.paused) return;
+
+              if (ev.stage === 'downloading') {
+                setNpcAudioState('MODEL_LOADING');
+                const pctText = ev.percent !== null ? ` (${ev.percent}%)` : '';
+                setNpcVoiceNotice(
+                  `Đang tải gói giọng nữ tiếng Việt lần đầu: ${formatMb(ev.loadedBytes)} / ${formatMb(ev.totalBytes)} MB${pctText}...`
+                );
+              } else if (ev.stage === 'initializing') {
+                setNpcAudioState('MODEL_LOADING');
+                setNpcVoiceNotice('Đang khởi tạo bộ đọc giọng nữ trên trình duyệt...');
+              } else {
+                setNpcAudioState('GENERATING_AUDIO');
+                setNpcVoiceNotice(
+                  totalChunks > 1
+                    ? `Đang tạo đoạn âm thanh ${chunkIdx + 1}/${totalChunks} (Giọng nữ VAIS-1000)...`
+                    : 'Đang tạo âm thanh giọng nữ tiếng Việt (VAIS-1000)...'
+                );
+              }
+            }
+          : undefined;
+
+        const p = piperBrowserTts
+          .synthesizeNormalizedChunk({
+            normalizedText: normalizedChunkText,
+            signal: ctrl.signal,
+            onProgress,
+          })
+          .finally(() => {
+            chunkControllers.delete(chunkIdx);
+          });
+
+        p.catch(() => undefined);
+        chunkPromises.set(chunkIdx, p);
+        if (!isCurrentForeground) {
+          preloadDecodedAudioIfNeeded(chunkIdx, p);
+        }
+        return p;
+      };
+
+      const ensureChunkRequest = (
+        chunkIdx: number,
+        priority: 'ACTIVE_PLAYBACK' | 'NEXT_CHUNK' | 'PREFETCH',
+        totalChunks: number
+      ) => {
+        if (activeMode === 'browser-piper') {
+          return ensureBrowserPiperChunkRequest(
+            chunkIdx,
+            totalChunks,
+            priority === 'ACTIVE_PLAYBACK'
+          );
+        }
+        return ensureServerKorvaChunkRequest(chunkIdx, priority);
       };
 
       let playChunkAtFn: (chunkIdx: number, totalChunks: number) => void = () => undefined;
@@ -985,12 +1115,12 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         if (sessionObj.paused) return;
 
         // Kick off current chunk (ACTIVE_PLAYBACK) and immediately pipeline chunkIdx + 1 (NEXT_CHUNK)
-        const currentPromise = ensureChunkRequest(chunkIdx, 'ACTIVE_PLAYBACK');
+        const currentPromise = ensureChunkRequest(chunkIdx, 'ACTIVE_PLAYBACK', totalChunks);
         if (chunkIdx + 1 < totalChunks) {
-          ensureChunkRequest(chunkIdx + 1, 'NEXT_CHUNK');
+          ensureChunkRequest(chunkIdx + 1, 'NEXT_CHUNK', totalChunks);
         }
 
-        if (chunkIdx > 0) {
+        if (chunkIdx > 0 && !preloadedAudios.has(chunkIdx)) {
           setNpcAudioState((prev) =>
             prev === 'PLAYING' || prev === 'SPEAKING' ? 'GENERATING_AUDIO' : prev
           );
@@ -1027,11 +1157,20 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
             }
 
             setNpcAudioState('AUDIO_READY');
-            const objectUrl = URL.createObjectURL(ttsResult.blob);
-            activeObjectUrlRef.current = objectUrl;
+            const preloaded = preloadedAudios.get(chunkIdx);
+            let audio: HTMLAudioElement;
+            let objectUrl: string;
+            if (preloaded) {
+              preloadedAudios.delete(chunkIdx);
+              audio = preloaded.audio;
+              objectUrl = preloaded.objectUrl;
+            } else {
+              objectUrl = URL.createObjectURL(ttsResult.blob);
+              audio = new Audio(objectUrl);
+              audio.preload = 'auto';
+            }
 
-            const audio = new Audio(objectUrl);
-            audio.preload = 'auto';
+            activeObjectUrlRef.current = objectUrl;
             audio.volume = 1.0;
             audio.playbackRate = 1.0;
             audio.defaultPlaybackRate = 1.0;
@@ -1041,13 +1180,21 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
             const voiceDisplay =
               ttsResult.voice === 'phuong_linh' ? 'Phương Linh' : ttsResult.voice;
+            const providerBadge =
+              ttsResult.provider === 'browser-piper'
+                ? 'Piper WASM'
+                : ttsResult.provider.toUpperCase();
             const voiceLabel =
               totalChunks > 1
                 ? `Giọng nữ ${voiceDisplay} · Đoạn ${chunkIdx + 1}/${totalChunks}`
-                : `Giọng nữ ${voiceDisplay} (${ttsResult.provider.toUpperCase()})`;
+                : `Giọng nữ ${voiceDisplay} (${providerBadge})`;
 
             audio.onplay = () => {
               if (utteranceTokenRef.current !== token || sessionCancelled) return;
+              if (chunkIdx > 0 && lastChunkEndedAtMs > 0 && typeof window !== 'undefined') {
+                (window as Window & { __lastNpcInterChunkGapMs?: number }).__lastNpcInterChunkGapMs =
+                  Math.max(0, Math.round(performance.now() - lastChunkEndedAtMs));
+              }
               setHasVietnameseVoice(true);
               setNpcAudioState(npcMutedRef.current ? 'MUTED' : 'PLAYING');
               setNpcVoiceNotice(voiceLabel);
@@ -1057,7 +1204,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
                 setNpcAnimation('TALKING');
               }
 
-              // Pipeline lookahead: while the final chunk of this step plays, prefetch chunk 0 of stepIdx + 1 at lowest priority
+              // Pipeline lookahead: while the final chunk of this step plays, prefetch chunk 0 of stepIdx + 1
               if (chunkIdx === totalChunks - 1) {
                 const nextStep = plan.steps[stepIdx + 1];
                 if (nextStep && !npcMutedRef.current) {
@@ -1070,25 +1217,40 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
                   }
                   const prefetchCtrl = new AbortController();
                   ttsPrefetchAbortRef.current = prefetchCtrl;
-                  void apiClient
-                    .synthesizeNpcSpeech(
-                      {
-                        boothId: plan.booth.id,
-                        stepType: nextStep.type,
-                        slotId: nextStep.slotId,
-                        productId: nextStep.product?.id ?? null,
-                        chunkIndex: 0,
-                        priority: 'PREFETCH',
-                      },
-                      prefetchCtrl.signal
-                    )
-                    .catch(() => undefined);
+
+                  if (activeMode === 'browser-piper') {
+                    const nextPiperPlan = buildPiperStepPlanFromDisplayText(nextStep.text);
+                    const firstNextChunk = nextPiperPlan.chunks[0];
+                    if (firstNextChunk) {
+                      void piperBrowserTts
+                        .synthesizeNormalizedChunk({
+                          normalizedText: firstNextChunk,
+                          signal: prefetchCtrl.signal,
+                        })
+                        .catch(() => undefined);
+                    }
+                  } else {
+                    void apiClient
+                      .synthesizeNpcSpeech(
+                        {
+                          boothId: plan.booth.id,
+                          stepType: nextStep.type,
+                          slotId: nextStep.slotId,
+                          productId: nextStep.product?.id ?? null,
+                          chunkIndex: 0,
+                          priority: 'PREFETCH',
+                        },
+                        prefetchCtrl.signal
+                      )
+                      .catch(() => undefined);
+                  }
                 }
               }
             };
 
             audio.onended = () => {
               if (utteranceTokenRef.current !== token || sessionCancelled) return;
+              lastChunkEndedAtMs = performance.now();
               if (activeObjectUrlRef.current === objectUrl) {
                 try {
                   URL.revokeObjectURL(objectUrl);
@@ -1106,7 +1268,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
                 if (stepTimerRef.current !== null) {
                   window.clearTimeout(stepTimerRef.current);
                 }
-                stepTimerRef.current = window.setTimeout(advanceToNext, 340);
+                stepTimerRef.current = window.setTimeout(advanceToNext, 280);
               }
             };
 
@@ -1142,6 +1304,44 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
           });
       };
 
+      const startBrowserPiperMode = () => {
+        window.clearTimeout(manifestTimer);
+        ttsAbortControllerRef.current = null;
+
+        const cap = checkBrowserPiperCapability();
+        if (!cap.supported) {
+          cleanupAllChunkRequests();
+          runFallbackOrSubtitleMode(
+            cap.reason ||
+              'Trình duyệt không hỗ trợ bộ đọc giọng nói WASM — Đang hiển thị phụ đề tiếng Việt.'
+          );
+          return;
+        }
+
+        activeMode = 'browser-piper';
+        piperBrowserTts.cancelIdleRelease();
+        const built = buildPiperStepPlanFromDisplayText(step.text);
+        piperChunks = built.chunks;
+        totalResolvedChunks = Math.max(1, piperChunks.length);
+
+        setNpcAudioState('GENERATING_AUDIO');
+        setNpcVoiceNotice(
+          totalResolvedChunks > 1
+            ? `Đang chuẩn bị đoạn âm thanh 1/${totalResolvedChunks} (Giọng nữ VAIS-1000)...`
+            : 'Đang chuẩn bị giọng nữ tiếng Việt (VAIS-1000)...'
+        );
+
+        playChunkAtFn(0, totalResolvedChunks);
+      };
+
+      const providerDecision = resolveTtsProviderConfig();
+      if (providerDecision.preferredInitial === 'browser-piper') {
+        startBrowserPiperMode();
+        return;
+      }
+
+      // Localhost (`local-korvatts` preferred): Use Backend KorvaTTS (`phuong_linh`), falling over to
+      // `browser-piper` in `auto` mode only if local KorvaTTS worker is unavailable/failed.
       void apiClient
         .getNpcSpeechManifest(
           {
@@ -1157,6 +1357,12 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
           if (utteranceTokenRef.current !== token || sessionCancelled) return;
           ttsAbortControllerRef.current = null;
 
+          if (manifest.workerState === 'failed' && providerDecision.configured === 'auto') {
+            startBrowserPiperMode();
+            return;
+          }
+
+          activeMode = 'local-korvatts';
           totalResolvedChunks = Math.max(1, manifest.totalChunks || 1);
           const firstCached = Boolean(manifest.chunks?.[0]?.cached);
 
@@ -1185,6 +1391,12 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
           if (utteranceTokenRef.current !== token || sessionCancelled) return;
           if (err?.name === 'AbortError') return;
           ttsAbortControllerRef.current = null;
+
+          if (providerDecision.configured === 'auto') {
+            startBrowserPiperMode();
+            return;
+          }
+
           cleanupAllChunkRequests();
           runFallbackOrSubtitleMode(
             err?.message ||
@@ -1194,6 +1406,34 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     },
     [cancelNpcAudioAndTimers]
   );
+
+  // Keep active NPC consultation plan synchronized when Admin updates booth/product/slot data in real time
+  useEffect(() => {
+    if (!npcPlan || npcStatus === 'IDLE') return;
+    const latestBooth = booths.find((b) => b.id === npcPlan.booth.id);
+    if (!latestBooth) return;
+
+    const refreshedPlan = buildBoothPresentationPlan(
+      latestBooth,
+      slotsByBooth[latestBooth.id],
+      products
+    );
+    const prevSignature = npcPlan.steps.map((s) => s.text).join('\n');
+    const nextSignature = refreshedPlan.steps.map((s) => s.text).join('\n');
+    if (prevSignature === nextSignature) return;
+
+    const clampedIdx = Math.min(Math.max(0, npcStepIndex), refreshedPlan.steps.length - 1);
+    const currentStepChanged =
+      (npcPlan.steps[npcStepIndex]?.text || '') !== (refreshedPlan.steps[clampedIdx]?.text || '');
+
+    setNpcPlan(refreshedPlan);
+    if (
+      currentStepChanged &&
+      (npcStatus === 'GREETING' || npcStatus === 'PRESENTING')
+    ) {
+      playNpcStep(refreshedPlan, clampedIdx);
+    }
+  }, [booths, npcPlan, npcStatus, npcStepIndex, playNpcStep, products, slotsByBooth]);
 
   const handleActivateNpc = useCallback(
     (booth: Booth) => {

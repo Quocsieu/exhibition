@@ -98,6 +98,19 @@ import {
   selectVietnameseVoice,
   verifyNpcPlacementSafety,
 } from '../services/npcPresentationService';
+import {
+  chunkNormalizedSpeechForPiper,
+  normalizeVietnameseForPiper,
+  numberToVietnameseWordsClient,
+} from '../services/piperSpeechNormalizer';
+import {
+  PIPER_VOICE_ATTRIBUTION_NOTICE,
+  PiperBrowserTtsManager,
+  buildPiperStepPlanFromDisplayText,
+  checkBrowserPiperCapability,
+  computePiperWavCacheKey,
+  resolveTtsProviderConfig,
+} from '../services/hybridTtsAdapter';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -1375,5 +1388,282 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     selfTag.dispose();
     remoteTag.dispose();
     expect(getActiveCanvasTextureCount()).toBe(texBase);
+  });
+
+  it('V25.8 — normalizes Vietnamese + English product/price/unit speech for Piper WASM without mutating displayText or breaking clause boundaries', () => {
+    expect(numberToVietnameseWordsClient(590000)).toBe('năm trăm chín mươi nghìn');
+    expect(numberToVietnameseWordsClient(1550)).toBe('một nghìn năm trăm năm mươi');
+    expect(numberToVietnameseWordsClient(54000000)).toBe('năm mươi tư triệu');
+
+    // Mandatory Phase 4.2 cases
+    expect(normalizeVietnameseForPiper('Sản phẩm có giá 590.000đ')).toContain(
+      'năm trăm chín mươi nghìn đồng'
+    );
+    expect(normalizeVietnameseForPiper('Thu hoạch chín 100% ở độ cao 1.550m')).toContain(
+      'một trăm phần trăm ở độ cao một nghìn năm trăm năm mươi mét'
+    );
+    expect(
+      normalizeVietnameseForPiper('Cà Phê Đặc Sản Cầu Đất Arabica Honey Process (1kg)')
+    ).toContain('A ra bi ca Hăn ni Pờ rô xét, một ki lô gam');
+    expect(
+      normalizeVietnameseForPiper('Pin Solaris PowerWall 10kWh hiệu suất 98.4%, <42dB, ±5mm')
+    ).toContain('Sô la rít Pao ơ Uôn mười ki lô oát giờ hiệu suất chín mươi tám phẩy bốn phần trăm');
+    expect(
+      normalizeVietnameseForPiper('Cụm Camera AI Kinetix EyePro tốc độ 120 sản phẩm/phút')
+    ).toContain('ây ai Ki nê tích Ai Pờ rô tốc độ một trăm hai mươi sản phẩm trên phút');
+
+    // Newly added Admin CamelCase brand stems (e.g. EcoSmart SolarMax)
+    expect(normalizeVietnameseForPiper('Pin EcoSmart SolarMax 20kWh')).toContain(
+      'Ê cô Xờ mát Sô la Mắc hai mươi ki lô oát giờ'
+    );
+
+    // Lowercase Vietnamese words ("ai", "ca", "in") must never be corrupted by uppercase acronym rules
+    expect(normalizeVietnameseForPiper('Không ai pha ca cà phê như vậy')).toBe(
+      'Không ai pha ca cà phê như vậy.'
+    );
+
+    // Strict separation between displayText (subtitle) and speechText (Piper TTS) + intact chunking
+    const ecoBooth = DEFAULT_BOOTHS.find((b) => b.id === 'booth-ecovita-craft')!;
+    const ecoSlots = buildBoothSlotViews(ecoBooth.id, DEFAULT_PRODUCTS, FALLBACK_SLOT_ASSIGNMENTS);
+    const plan = buildBoothPresentationPlan(ecoBooth, ecoSlots, DEFAULT_PRODUCTS);
+    const prodStep = plan.steps.find((s) => s.type === 'PRODUCT')!;
+
+    // Subtitle keeps exact English spelling & formatted VND digits
+    expect(prodStep.text).toContain('Arabica Honey Process (1kg)');
+    expect(prodStep.text).toContain('590.000 đồng');
+
+    const piperStep = buildPiperStepPlanFromDisplayText(prodStep.text);
+    expect(piperStep.displayText).toBe(prodStep.text);
+    expect(piperStep.speechText).toContain('A ra bi ca Hăn ni Pờ rô xét');
+    expect(piperStep.speechText).toContain('năm trăm chín mươi nghìn đồng');
+    expect(piperStep.chunks.length).toBeGreaterThanOrEqual(2);
+    expect(piperStep.chunks.some((c) => c.includes('năm trăm chín mươi nghìn đồng'))).toBe(true);
+
+    // Ensure chunking never cuts mid-price or mid-unit
+    const longNormalized = normalizeVietnameseForPiper(
+      'Dạ xin chào quý khách, hôm nay em xin giới thiệu mẫu Pin Lưu Trữ Điện Mặt Trời Solaris PowerWall 10kWh hiện có mức giá 54.000.000đ, tuổi thọ hơn 6.000 chu kỳ sạc xả ở mức 80% DoD, chuẩn kháng nước IP65.'
+    );
+    const splitChunks = chunkNormalizedSpeechForPiper(longNormalized, 65, 135);
+    expect(splitChunks.length).toBeGreaterThanOrEqual(2);
+    expect(splitChunks.some((c) => c.includes('năm mươi tư triệu đồng'))).toBe(true);
+    expect(splitChunks.some((c) => c.includes('mười ki lô oát giờ'))).toBe(true);
+    expect(PIPER_VOICE_ATTRIBUTION_NOTICE).toContain('CC BY 4.0');
+  });
+
+  it('V25.8 — enforces Hybrid TTS provider selection, capability/RAM guards, WAV LRU caching, Admin invalidation, timeout/crash recovery, and Worker disposal', async () => {
+    // 1. Provider resolution rules
+    expect(resolveTtsProviderConfig({ rawEnvValue: '', hostname: 'localhost' }).preferredInitial).toBe(
+      'local-korvatts'
+    );
+    expect(
+      resolveTtsProviderConfig({ rawEnvValue: '', hostname: 'exhibition-demo.vercel.app' })
+        .preferredInitial
+    ).toBe('browser-piper');
+    expect(
+      resolveTtsProviderConfig({
+        rawEnvValue: '',
+        hostname: 'localhost',
+        search: '?tts=browser-piper',
+      }).preferredInitial
+    ).toBe('browser-piper');
+    // Production safety: accidental VITE_TTS_PROVIDER=local-korvatts on Vercel never calls Render KorvaTTS
+    const misconfiguredProd = resolveTtsProviderConfig({
+      rawEnvValue: 'local-korvatts',
+      hostname: 'exhibition-prod.vercel.app',
+    });
+    expect(misconfiguredProd.preferredInitial).toBe('browser-piper');
+    expect(misconfiguredProd.configWarning).toBeTruthy();
+
+    const invalidCfg = resolveTtsProviderConfig({
+      rawEnvValue: 'unknown-engine',
+      hostname: 'exhibition-prod.vercel.app',
+    });
+    expect(invalidCfg.preferredInitial).toBe('browser-piper');
+    expect(invalidCfg.configWarning).toContain('không hợp lệ');
+
+    // 2. Browser capability & deviceMemory advisory checks
+    expect(
+      checkBrowserPiperCapability({ hasWebAssembly: false, hasWorker: true }).supported
+    ).toBe(false);
+    expect(
+      checkBrowserPiperCapability({ hasWebAssembly: true, hasWorker: true, deviceMemory: 0.5 })
+        .supported
+    ).toBe(false);
+    const lowRamCap = checkBrowserPiperCapability({
+      hasWebAssembly: true,
+      hasWorker: true,
+      deviceMemory: 2,
+    });
+    expect(lowRamCap.supported).toBe(true);
+    expect(lowRamCap.lowMemoryDevice).toBe(true);
+
+    // 3. Singleton Worker lifecycle, progress events, WAV cache HIT/MISS, Admin edit invalidation, crash recovery & disposal
+    let workerSpawnCount = 0;
+    let workerSynthesizeCalls = 0;
+    let simulateMode: 'ok' | 'init_fail' | 'crash' = 'ok';
+
+    const makeValidMockWav = (tag: string): ArrayBuffer => {
+      const pcmLen = 200;
+      const ab = new ArrayBuffer(44 + pcmLen);
+      const view = new DataView(ab);
+      const writeStr = (off: number, s: string) => {
+        for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+      };
+      writeStr(0, 'RIFF');
+      view.setUint32(4, 36 + pcmLen, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, 22050, true);
+      view.setUint32(28, 44100, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeStr(36, 'data');
+      view.setUint32(40, pcmLen, true);
+      view.setUint8(44, tag.charCodeAt(0) || 65);
+      return ab;
+    };
+
+    const mockWorkerFactory = () => {
+      workerSpawnCount += 1;
+      let terminated = false;
+      const fakeWorker = {
+        onmessage: null as ((ev: MessageEvent) => void) | null,
+        onerror: null as ((ev: ErrorEvent) => void) | null,
+        onmessageerror: null as (() => void) | null,
+        postMessage(msg: { id: number; type: string; text?: string }) {
+          if (terminated) return;
+          setTimeout(() => {
+            if (terminated) return;
+            if (msg.type === 'ping') {
+              fakeWorker.onmessage?.({ data: { id: msg.id, type: 'pong' } } as MessageEvent);
+              return;
+            }
+            if (msg.type === 'dispose') {
+              fakeWorker.onmessage?.({ data: { id: msg.id, type: 'disposed' } } as MessageEvent);
+              return;
+            }
+            if (msg.type === 'init') {
+              if (simulateMode === 'init_fail') {
+                fakeWorker.onmessage?.({
+                  data: { id: msg.id, type: 'error', message: 'HTTP 503 tải model lỗi' },
+                } as MessageEvent);
+                return;
+              }
+              fakeWorker.onmessage?.({
+                data: {
+                  id: msg.id,
+                  type: 'progress',
+                  stage: 'downloading',
+                  loadedBytes: 35_000_000,
+                  totalBytes: 70_000_000,
+                },
+              } as MessageEvent);
+              fakeWorker.onmessage?.({
+                data: {
+                  id: msg.id,
+                  type: 'ready',
+                  downloadMs: 120,
+                  initMs: 80,
+                  fromCache: false,
+                  modelBytes: 63201294,
+                  sampleRate: 22050,
+                },
+              } as MessageEvent);
+              return;
+            }
+            if (msg.type === 'synthesize') {
+              if (simulateMode === 'crash') {
+                fakeWorker.onerror?.({ message: 'Out of memory in WASM' } as ErrorEvent);
+                return;
+              }
+              workerSynthesizeCalls += 1;
+              fakeWorker.onmessage?.({
+                data: {
+                  id: msg.id,
+                  type: 'audio',
+                  wavBuffer: makeValidMockWav(msg.text || 'A'),
+                  synthMs: 42,
+                  durationSec: 1.8,
+                  sampleRate: 22050,
+                },
+              } as MessageEvent);
+            }
+          }, 5);
+        },
+        terminate() {
+          terminated = true;
+        },
+      };
+      return fakeWorker as unknown as Worker;
+    };
+
+    const originalWorker = (globalThis as Record<string, unknown>).Worker;
+    (globalThis as Record<string, unknown>).Worker = function DummyWorker() {};
+    try {
+      const mgr = new PiperBrowserTtsManager(mockWorkerFactory);
+      const progressEvents: number[] = [];
+
+      // Cold synthesis -> MISS, forwards progress, spawns exactly 1 singleton Worker
+      const res1 = await mgr.synthesizeNormalizedChunk({
+        normalizedText: 'Xin chào quý khách.',
+        onProgress: (ev) => {
+          if (ev.percent !== null) progressEvents.push(ev.percent);
+        },
+      });
+      expect(res1.cacheStatus).toBe('MISS');
+      expect(res1.blob.size).toBe(244);
+      expect(progressEvents).toContain(50);
+      expect(workerSpawnCount).toBe(1);
+      expect(workerSynthesizeCalls).toBe(1);
+
+      // Repeat identical text -> instant WAV LRU Cache HIT (0 extra worker calls)
+      const resHit = await mgr.synthesizeNormalizedChunk({
+        normalizedText: 'Xin chào quý khách.',
+      });
+      expect(resHit.cacheStatus).toBe('HIT');
+      expect(workerSynthesizeCalls).toBe(1);
+
+      // Admin edits product price -> new cache key -> MISS & new synthesis
+      const keyOld = computePiperWavCacheKey('Sản phẩm giá năm trăm nghìn đồng.');
+      const keyNew = computePiperWavCacheKey('Sản phẩm giá sáu trăm năm mươi nghìn đồng.');
+      expect(keyOld).not.toBe(keyNew);
+      const resUpdated = await mgr.synthesizeNormalizedChunk({
+        normalizedText: 'Sản phẩm giá sáu trăm năm mươi nghìn đồng.',
+      });
+      expect(resUpdated.cacheStatus).toBe('MISS');
+      expect(workerSynthesizeCalls).toBe(2);
+
+      // Worker crash -> rejects cleanly without hanging, then recovers cleanly with a fresh Worker on retry
+      simulateMode = 'crash';
+      await expect(
+        mgr.synthesizeNormalizedChunk({ normalizedText: 'Câu thử lỗi crash.' })
+      ).rejects.toThrow(/sự cố/i);
+
+      simulateMode = 'ok';
+      const recovered = await mgr.synthesizeNormalizedChunk({
+        normalizedText: 'Câu thử khôi phục sau crash.',
+      });
+      expect(recovered.cacheStatus).toBe('MISS');
+      expect(workerSpawnCount).toBe(2);
+
+      // Init/Download failure -> rejects cleanly without infinite retry loop
+      await mgr.disposeWorker();
+      expect(mgr.getCacheStats().workerAlive).toBe(false);
+      simulateMode = 'init_fail';
+      await expect(
+        mgr.synthesizeNormalizedChunk({ normalizedText: 'Câu thử tải model lỗi.' })
+      ).rejects.toThrow(/HTTP 503/);
+
+      await mgr.disposeWorker();
+    } finally {
+      if (originalWorker === undefined) {
+        delete (globalThis as Record<string, unknown>).Worker;
+      } else {
+        (globalThis as Record<string, unknown>).Worker = originalWorker;
+      }
+    }
   });
 });

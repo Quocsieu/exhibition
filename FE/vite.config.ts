@@ -1,9 +1,35 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Socket } from 'node:net';
+
+const FE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const localPiperPhonemize = path.resolve(
+  FE_DIR,
+  'node_modules/@mintplex-labs/piper-tts-web/dist/piper-o91UDS6e.js'
+);
+const workspacePiperPhonemize = path.resolve(
+  FE_DIR,
+  '../node_modules/@mintplex-labs/piper-tts-web/dist/piper-o91UDS6e.js'
+);
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      '@piper-phonemize-internal': fs.existsSync(localPiperPhonemize)
+        ? localPiperPhonemize
+        : workspacePiperPhonemize,
+    },
+  },
+  worker: {
+    format: 'es',
+  },
+  optimizeDeps: {
+    exclude: ['onnxruntime-web', '@mintplex-labs/piper-tts-web'],
+  },
   server: {
     port: 5173,
     proxy: {
