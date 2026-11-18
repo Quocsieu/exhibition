@@ -28,9 +28,11 @@ import {
   KORVATTS_DEFAULT_STEPS,
   KORVATTS_DEFAULT_VOICE,
   KORVATTS_MODEL_VERSION,
-  type ExpoService,
+  ExpoService,
   buildAzureVietnameseSsml,
+  chunkVietnameseConsultationSpeech,
   computeTtsCacheKey,
+  concatenatePcm16WavBuffers,
   escapeSsmlXml,
   expandNumbersForKorvaVietnamese,
   isValidWavBuffer,
@@ -1453,4 +1455,324 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       }
     }
   }, 15000);
+
+  it('V25.5 — splits Vietnamese consultation speech safely without breaking brands/prices/units, persists atomic WAV disk cache across Backend restarts, enforces 3-tier priority queue, cancels aborted queued jobs, and recovers worker after crash', async () => {
+    // 1. Verify chunkVietnameseConsultationSpeech never splits inside protected brands, products, prices, units, decimals, or abbreviations
+    const complexConsultation =
+      'Dạ xin chào quý khách, em là Bảo Trân, tư vấn viên tại gian hàng Solaris Clean Energy thuộc thương hiệu Solaris Green Energy Group tại TP. Hồ Chí Minh. Mở đầu là mẫu pin lưu trữ điện mặt trời Solaris PowerWall mười ki lô oát giờ, hiện có mức giá năm mươi tư triệu đồng, hiệu suất chín mươi tám phẩy năm phần trăm do Dr. Nam phát triển.';
+    const chunks = chunkVietnameseConsultationSpeech(
+      complexConsultation,
+      [
+        'Bảo Trân',
+        'Solaris Clean Energy',
+        'Solaris Green Energy Group',
+        'pin lưu trữ điện mặt trời Solaris PowerWall mười ki lô oát giờ',
+        'năm mươi tư triệu đồng',
+      ],
+      70,
+      120
+    );
+    expect(chunks.length).toBeGreaterThanOrEqual(3);
+    const joined = chunks.join(' ');
+    expect(joined).toContain('Solaris Clean Energy');
+    expect(joined).toContain('Solaris Green Energy Group');
+    expect(joined).toContain('TP. Hồ Chí Minh');
+    expect(joined).toContain('Dr. Nam');
+    expect(joined).toContain('Solaris PowerWall mười ki lô oát giờ');
+    expect(joined).toContain('năm mươi tư triệu đồng');
+    expect(joined).toContain('chín mươi tám phẩy năm phần trăm');
+
+    // Every protected phrase must appear intact inside at least one single chunk (never torn across chunk boundary)
+    for (const mustStayIntact of [
+      'Solaris Clean Energy',
+      'Solaris Green Energy Group',
+      'TP. Hồ Chí Minh',
+      'Dr. Nam',
+      'Solaris PowerWall mười ki lô oát giờ',
+      'năm mươi tư triệu đồng',
+      'chín mươi tám phẩy năm phần trăm',
+    ]) {
+      expect(chunks.some((c) => c.includes(mustStayIntact))).toBe(true);
+    }
+
+    const savedEnv = {
+      TTS_PROVIDER: process.env.TTS_PROVIDER,
+      KORVATTS_PYTHON_PATH: process.env.KORVATTS_PYTHON_PATH,
+      KORVATTS_WORKER_SCRIPT: process.env.KORVATTS_WORKER_SCRIPT,
+      KORVATTS_MAX_QUEUE: process.env.KORVATTS_MAX_QUEUE,
+      TTS_TIMEOUT_MS: process.env.TTS_TIMEOUT_MS,
+      KORVATTS_WORKER_HANG_MS: process.env.KORVATTS_WORKER_HANG_MS,
+      TTS_DISK_CACHE_DIR: process.env.TTS_DISK_CACHE_DIR,
+      TTS_DISK_CACHE_MAX_FILES: process.env.TTS_DISK_CACHE_MAX_FILES,
+      TTS_RATE_LIMIT_PER_MIN: process.env.TTS_RATE_LIMIT_PER_MIN,
+    };
+
+    const tmpDiskCacheDir = path.join(
+      os.tmpdir(),
+      `v255-disk-cache-test-${process.pid}-${Date.now()}`
+    );
+    const tmpWorkerLogFile = path.join(
+      os.tmpdir(),
+      `v255-worker-log-${process.pid}-${Date.now()}.log`
+    );
+    const tmpWorkerFile = path.join(
+      os.tmpdir(),
+      `v255-korva-mock-${process.pid}-${Date.now()}.cjs`
+    );
+
+    const mockWorkerCode = `
+      const fs = require('node:fs');
+      const readline = require('node:readline');
+      const logFile = process.env.V255_WORKER_LOG || '';
+
+      function makeWavBuffer(text) {
+        const payload = Buffer.from(text, 'utf8');
+        const pcmBytes = Math.max(200, payload.length * 2 + (payload.length % 2));
+        const buf = Buffer.alloc(44 + pcmBytes, 0);
+        buf.write('RIFF', 0, 'ascii');
+        buf.writeUInt32LE(36 + pcmBytes, 4);
+        buf.write('WAVE', 8, 'ascii');
+        buf.write('fmt ', 12, 'ascii');
+        buf.writeUInt32LE(16, 16);
+        buf.writeUInt16LE(1, 20);
+        buf.writeUInt16LE(1, 22);
+        buf.writeUInt32LE(44100, 24);
+        buf.writeUInt32LE(88200, 28);
+        buf.writeUInt16LE(2, 32);
+        buf.writeUInt16LE(16, 34);
+        buf.write('data', 36, 'ascii');
+        buf.writeUInt32LE(pcmBytes, 40);
+        payload.copy(buf, 44, 0, Math.min(payload.length, pcmBytes));
+        return buf;
+      }
+
+      process.stdout.write(JSON.stringify({
+        type: 'ready',
+        pid: process.pid,
+        korvaVersion: '0.1.3',
+        checkpoint: 'e5c8c218',
+        sampleRate: 44100,
+        voices: ['phuong_linh']
+      }) + '\\n');
+
+      const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+      rl.on('line', (line) => {
+        if (!line.trim()) return;
+        const msg = JSON.parse(line);
+        if (msg.type === 'shutdown') {
+          process.stdout.write(JSON.stringify({ type: 'shutdown_ack', id: msg.id }) + '\\n');
+          process.exit(0);
+        }
+        if (msg.type === 'synthesize') {
+          if (logFile) {
+            fs.appendFileSync(logFile, msg.text + '\\n', 'utf8');
+          }
+          if (logFile && fs.existsSync(logFile + '.trigger_crash')) {
+            fs.unlinkSync(logFile + '.trigger_crash');
+            process.exit(1);
+          }
+          const delayMs = Number(process.env.V255_SYNTH_DELAY_MS || '90');
+          setTimeout(() => {
+            const wav = makeWavBuffer(msg.voice + '|' + msg.text);
+            process.stdout.write(JSON.stringify({
+              id: msg.id,
+              type: 'result',
+              ok: true,
+              mimeType: 'audio/wav',
+              sampleRate: 44100,
+              durationSec: 2.0,
+              audioBase64: wav.toString('base64')
+            }) + '\\n');
+          }, delayMs);
+        }
+      });
+    `;
+    fs.writeFileSync(tmpWorkerFile, mockWorkerCode, 'utf8');
+
+    try {
+      delete process.env.TTS_PROVIDER;
+      process.env.KORVATTS_PYTHON_PATH = process.execPath;
+      process.env.KORVATTS_WORKER_SCRIPT = tmpWorkerFile;
+      process.env.TTS_DISK_CACHE_DIR = tmpDiskCacheDir;
+      process.env.TTS_RATE_LIMIT_PER_MIN = '200';
+      process.env.KORVATTS_MAX_QUEUE = '8';
+      process.env.V255_WORKER_LOG = tmpWorkerLogFile;
+      process.env.V255_SYNTH_DELAY_MS = '90';
+
+      // 2. Manifest + Chunked synthesis + Disk Cache persistence across simulated Backend restart
+      const manifestRes = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          boothId: 'booth-solaris-energy',
+          stepType: 'GREETING',
+          mode: 'manifest',
+        }),
+      });
+      expect(manifestRes.status).toBe(200);
+      const manifestJson = (await manifestRes.json()) as {
+        provider: string;
+        voice: string;
+        totalChunks: number;
+        chunks: Array<{ chunkIndex: number; cached: boolean }>;
+      };
+      expect(manifestJson.provider).toBe('korvatts');
+      expect(manifestJson.voice).toBe('phuong_linh');
+      expect(manifestJson.totalChunks).toBeGreaterThanOrEqual(2);
+      expect(manifestJson.chunks[0].cached).toBe(false);
+
+      const chunk0Res = await fetch(`${baseUrl}/api/npc/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          boothId: 'booth-solaris-energy',
+          stepType: 'GREETING',
+          chunkIndex: 0,
+          priority: 'ACTIVE_PLAYBACK',
+        }),
+      });
+      expect(chunk0Res.status).toBe(200);
+      expect(chunk0Res.headers.get('x-tts-cache')).toBe('MISS');
+      expect(chunk0Res.headers.get('x-tts-chunk-index')).toBe('0');
+      expect(chunk0Res.headers.get('x-tts-total-chunks')).toBe(String(manifestJson.totalChunks));
+      const chunk0Buf = Buffer.from(await chunk0Res.arrayBuffer());
+      expect(isValidWavBuffer(chunk0Buf)).toBe(true);
+
+      // Verify atomic disk file exists with zero leftover .tmp files
+      const diskFiles = fs.readdirSync(tmpDiskCacheDir);
+      expect(diskFiles.some((f) => f.endsWith('.wav'))).toBe(true);
+      expect(diskFiles.some((f) => f.endsWith('.tmp'))).toBe(false);
+
+      // Simulate full Backend restart: brand-new ExpoService with empty RAM cache serves HIT from disk!
+      const restartedService = new ExpoService(db);
+      expect(restartedService.getTtsCacheStats().entries).toBe(0);
+      const logLinesBeforeDiskHit = fs.readFileSync(tmpWorkerLogFile, 'utf8').trim().split('\n').length;
+      const diskHitResult = await restartedService.synthesizeNpcStepAudio({
+        boothId: 'booth-solaris-energy',
+        stepType: 'GREETING',
+        chunkIndex: 0,
+      });
+      expect(diskHitResult.cacheStatus).toBe('HIT');
+      expect(diskHitResult.audioBuffer.equals(chunk0Buf)).toBe(true);
+      const logLinesAfterDiskHit = fs.readFileSync(tmpWorkerLogFile, 'utf8').trim().split('\n').length;
+      expect(logLinesAfterDiskHit).toBe(logLinesBeforeDiskHit); // 0 worker calls on disk cache HIT!
+
+      // 3. Verify 3-tier priority ordering (ACTIVE_PLAYBACK > NEXT_CHUNK > PREFETCH) & cancellation of queued aborted requests
+      fs.writeFileSync(tmpWorkerLogFile, '', 'utf8');
+      process.env.V255_SYNTH_DELAY_MS = '140';
+
+      // Start job 0 on worker so subsequent arrivals wait in pendingQueue
+      const busyLeadPromise = restartedService.synthesizeNpcStepAudio({
+        boothId: 'booth-aether-tech',
+        stepType: 'CLOSING',
+        chunkIndex: 0,
+        priority: 'ACTIVE_PLAYBACK',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Enqueue: (a) aborted job, (b) PREFETCH job, (c) NEXT_CHUNK job, (d) ACTIVE_PLAYBACK job
+      const abortCtrl = new AbortController();
+      const cancelledPromise = restartedService
+        .synthesizeNpcStepAudio({
+          boothId: 'booth-ecovita-craft',
+          stepType: 'GREETING',
+          chunkIndex: 0,
+          priority: 'ACTIVE_PLAYBACK',
+          signal: abortCtrl.signal,
+        })
+        .catch((e) => e);
+      await new Promise((r) => setTimeout(r, 10));
+      abortCtrl.abort(); // Cancel while waiting in queue!
+
+      const prefetchPromise = restartedService.synthesizeNpcStepAudio({
+        boothId: 'booth-lumina-design',
+        stepType: 'GREETING',
+        chunkIndex: 0,
+        priority: 'PREFETCH',
+      });
+      const nextChunkPromise = restartedService.synthesizeNpcStepAudio({
+        boothId: 'booth-nordic-living',
+        stepType: 'GREETING',
+        chunkIndex: 0,
+        priority: 'NEXT_CHUNK',
+      });
+      const activePriorityPromise = restartedService.synthesizeNpcStepAudio({
+        boothId: 'booth-kinetix-robotics',
+        stepType: 'GREETING',
+        chunkIndex: 0,
+        priority: 'ACTIVE_PLAYBACK',
+      });
+
+      const cancelledErr = await cancelledPromise;
+      expect((cancelledErr as { code?: string }).code).toBe('TTS_CANCELLED');
+
+      await Promise.all([busyLeadPromise, prefetchPromise, nextChunkPromise, activePriorityPromise]);
+
+      const executedLines = fs
+        .readFileSync(tmpWorkerLogFile, 'utf8')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      // Aborted EcoVita greeting must NOT have been synthesized by the worker
+      expect(executedLines.some((l) => l.includes('Thảo Vy'))).toBe(false);
+
+      // Among the 3 queued jobs, ACTIVE_PLAYBACK (Khánh Linh) ran BEFORE NEXT_CHUNK (Minh Châu), which ran BEFORE PREFETCH (Phương Nghi)!
+      const idxActive = executedLines.findIndex((l) => l.includes('Khánh Linh'));
+      const idxNextChunk = executedLines.findIndex((l) => l.includes('Minh Châu'));
+      const idxPrefetch = executedLines.findIndex((l) => l.includes('Phương Nghi'));
+      expect(idxActive).toBeGreaterThan(0);
+      expect(idxActive).toBeLessThan(idxNextChunk);
+      expect(idxNextChunk).toBeLessThan(idxPrefetch);
+
+      // 4. Verify auto-recovery after unexpected worker crash
+      fs.writeFileSync(`${tmpWorkerLogFile}.trigger_crash`, '1', 'utf8');
+      await expect(
+        restartedService.synthesizeNpcStepAudio({
+          boothId: 'booth-ecovita-craft',
+          stepType: 'GREETING',
+          chunkIndex: 0,
+        })
+      ).rejects.toMatchObject({ code: 'TTS_SYNTHESIS_FAILED' });
+
+      // Next request automatically spawns a fresh worker and succeeds!
+      const recoveredRes = await restartedService.synthesizeNpcStepAudio({
+        boothId: 'booth-ecovita-craft',
+        stepType: 'GREETING',
+        chunkIndex: 0,
+      });
+      expect(isValidWavBuffer(recoveredRes.audioBuffer)).toBe(true);
+
+      // Verify PCM16 WAV concatenation produces a valid combined RIFF WAVE
+      const concatenated = concatenatePcm16WavBuffers([chunk0Buf, recoveredRes.audioBuffer], 100);
+      expect(isValidWavBuffer(concatenated)).toBe(true);
+      expect(concatenated.byteLength).toBeGreaterThan(
+        chunk0Buf.byteLength + recoveredRes.audioBuffer.byteLength - 44
+      );
+
+      await restartedService.shutdown();
+    } finally {
+      delete process.env.V255_WORKER_LOG;
+      delete process.env.V255_SYNTH_DELAY_MS;
+      delete process.env.V255_CRASH_ONCE;
+      for (const f of [tmpWorkerFile, tmpWorkerLogFile, `${tmpWorkerLogFile}.crashed`]) {
+        try {
+          if (fs.existsSync(f)) fs.unlinkSync(f);
+        } catch {
+          // ignore
+        }
+      }
+      try {
+        if (fs.existsSync(tmpDiskCacheDir)) {
+          fs.rmSync(tmpDiskCacheDir, { recursive: true, force: true });
+        }
+      } catch {
+        // ignore
+      }
+      for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }, 20000);
 });

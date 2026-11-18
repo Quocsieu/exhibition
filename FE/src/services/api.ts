@@ -257,7 +257,7 @@ export const apiClient = {
     return res;
   },
 
-  async synthesizeNpcSpeech(
+  async getNpcSpeechManifest(
     params: {
       boothId: string;
       stepType: 'GREETING' | 'PRODUCT' | 'CLOSING';
@@ -266,10 +266,105 @@ export const apiClient = {
     },
     signal?: AbortSignal
   ): Promise<{
+    provider: string;
+    voice: string;
+    workerState: 'stopped' | 'starting' | 'ready' | 'failed';
+    totalChunks: number;
+    fullText: string;
+    chunks: Array<{ chunkIndex: number; charLength: number; cached: boolean }>;
+  }> {
+    const normalizedPath = '/api/npc/tts';
+    const primaryUrl = buildApiUrl(normalizedPath);
+    const fetchOptions: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ...params, mode: 'manifest' }),
+      signal,
+    };
+
+    const isLocalHost =
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    const candidateUrls = isLocalHost
+      ? Array.from(
+          new Set([primaryUrl, normalizedPath, `http://localhost:4000${normalizedPath}`].filter(Boolean))
+        )
+      : Array.from(new Set([primaryUrl, normalizedPath].filter(Boolean)));
+
+    let response: Response | null = null;
+    let lastError: unknown = null;
+
+    for (let i = 0; i < candidateUrls.length; i++) {
+      const url = candidateUrls[i];
+      try {
+        const res = await fetch(url, fetchOptions);
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        const isHtmlFallback404 = res.status === 404 && contentType.includes('text/html');
+        // Never retry on structured JSON business responses from Backend
+        const isDeadDevProxy =
+          isLocalHost &&
+          (res.status === 502 || res.status === 504) &&
+          !contentType.includes('application/json');
+
+        if ((isHtmlFallback404 || isDeadDevProxy) && i < candidateUrls.length - 1) {
+          continue;
+        }
+        response = res;
+        break;
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError') {
+          throw err;
+        }
+        lastError = err;
+      }
+    }
+
+    if (!response) {
+      throw lastError || new Error('Không thể kết nối tới dịch vụ âm thanh TTS.');
+    }
+
+    if (!response.ok) {
+      const errData = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+      };
+      const error = new Error(
+        errData.error || `Không thể chuẩn bị lời thoại từ máy chủ (HTTP ${response.status})`
+      ) as Error & { code?: string; status?: number };
+      error.code = errData.code || `HTTP_${response.status}`;
+      error.status = response.status;
+      throw error;
+    }
+
+    return (await response.json()) as {
+      provider: string;
+      voice: string;
+      workerState: 'stopped' | 'starting' | 'ready' | 'failed';
+      totalChunks: number;
+      fullText: string;
+      chunks: Array<{ chunkIndex: number; charLength: number; cached: boolean }>;
+    };
+  },
+
+  async synthesizeNpcSpeech(
+    params: {
+      boothId: string;
+      stepType: 'GREETING' | 'PRODUCT' | 'CLOSING';
+      slotId?: string | null;
+      productId?: string | null;
+      chunkIndex?: number;
+      priority?: 'ACTIVE_PLAYBACK' | 'NEXT_CHUNK' | 'PREFETCH';
+    },
+    signal?: AbortSignal
+  ): Promise<{
     blob: Blob;
     cacheStatus: string;
     provider: string;
     voice: string;
+    chunkIndex?: number;
+    totalChunks?: number;
   }> {
     const normalizedPath = '/api/npc/tts';
     const primaryUrl = buildApiUrl(normalizedPath);
@@ -302,11 +397,17 @@ export const apiClient = {
       const url = candidateUrls[i];
       try {
         const res = await fetch(url, fetchOptions);
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
         const isHtmlFallback404 =
-          res.status === 404 && (res.headers.get('content-type') || '').includes('text/html');
-        const isProxyBadGateway = isLocalHost && (res.status === 502 || res.status === 504);
+          res.status === 404 && contentType.includes('text/html');
+        // ONLY fallback if Vite dev proxy itself returned a non-JSON 502/504 gateway error;
+        // NEVER retry when Backend returned a JSON business error (TTS_TIMEOUT, TTS_SYNTHESIS_FAILED, TTS_BUSY)!
+        const isDeadDevProxy =
+          isLocalHost &&
+          (res.status === 502 || res.status === 504) &&
+          !contentType.includes('application/json');
 
-        if ((isHtmlFallback404 || isProxyBadGateway) && i < candidateUrls.length - 1) {
+        if ((isHtmlFallback404 || isDeadDevProxy) && i < candidateUrls.length - 1) {
           continue;
         }
         response = res;
@@ -345,11 +446,16 @@ export const apiClient = {
       throw error;
     }
 
+    const rawChunkIdx = response.headers.get('X-TTS-Chunk-Index');
+    const rawTotalChunks = response.headers.get('X-TTS-Total-Chunks');
+
     return {
       blob,
       cacheStatus: response.headers.get('X-TTS-Cache') || 'MISS',
       provider: response.headers.get('X-TTS-Provider') || 'cloud',
       voice: response.headers.get('X-TTS-Voice') || 'vi-female',
+      chunkIndex: rawChunkIdx !== null ? Number(rawChunkIdx) : params.chunkIndex,
+      totalChunks: rawTotalChunks !== null ? Number(rawTotalChunks) : undefined,
     };
   },
 };

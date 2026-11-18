@@ -156,12 +156,28 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   const activeObjectUrlRef = useRef<string | null>(null);
   const ttsAbortControllerRef = useRef<AbortController | null>(null);
   const ttsPrefetchAbortRef = useRef<AbortController | null>(null);
+  const chunkSessionRef = useRef<{
+    token: number;
+    stepIdx: number;
+    paused: boolean;
+    nextChunkIndex: number;
+    abortAll: () => void;
+    resumePendingChunk: () => void;
+  } | null>(null);
   const stepTimerRef = useRef<number | null>(null);
   const animTimerRef = useRef<number | null>(null);
   const voiceWatchdogTimerRef = useRef<number | null>(null);
 
   const cancelNpcAudioAndTimers = useCallback(() => {
     utteranceTokenRef.current += 1;
+    if (chunkSessionRef.current) {
+      try {
+        chunkSessionRef.current.abortAll();
+      } catch {
+        // ignore abort errors
+      }
+      chunkSessionRef.current = null;
+    }
     if (ttsAbortControllerRef.current) {
       try {
         ttsAbortControllerRef.current.abort();
@@ -692,7 +708,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
       if (stepIdx < 0 || stepIdx >= plan.steps.length) {
         setNpcStatus('COMPLETED');
-        setNpcAudioState('IDLE');
+        setNpcAudioState('ENDED');
         setNpcAnimation('IDLE');
         return;
       }
@@ -725,7 +741,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
           playNpcStep(plan, stepIdx + 1);
         } else {
           setNpcStatus('COMPLETED');
-          setNpcAudioState('IDLE');
+          setNpcAudioState('ENDED');
           setNpcAnimation('IDLE');
         }
       };
@@ -844,103 +860,338 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         }
       };
 
-      // Primary Path: Backend Vietnamese Female TTS (`POST /api/npc/tts`) -> HTMLAudioElement
-      // Phase 5: While loading audio, NPC remains in waiting state (`IDLE` animation, `CHECKING_VOICE`)
-      setNpcAudioState('CHECKING_VOICE');
-      setNpcVoiceNotice('Đang tải âm thanh giọng nữ Tiếng Việt từ máy chủ...');
+      // Primary Path: Backend Vietnamese Female TTS (`POST /api/npc/tts`) with Early First-Chunk Playback
+      // While preparing audio, NPC stays in natural `IDLE` pose (never lip-syncs before real audio starts)
+      setNpcAudioState('GENERATING_AUDIO');
+      setNpcVoiceNotice('Đang chuẩn bị đoạn âm thanh đầu tiên...');
       setNpcAnimation('IDLE');
 
-      const abortController = new AbortController();
-      ttsAbortControllerRef.current = abortController;
+      const CHUNK_UX_TIMEOUT_MS = 48_000;
+      const chunkControllers = new Map<number, AbortController>();
+      const chunkTimers = new Map<number, number>();
+      const chunkPromises = new Map<
+        number,
+        Promise<{
+          blob: Blob;
+          cacheStatus: string;
+          provider: string;
+          voice: string;
+        }>
+      >();
+      let sessionCancelled = false;
+
+      const manifestCtrl = new AbortController();
+      ttsAbortControllerRef.current = manifestCtrl;
+      const manifestTimer = window.setTimeout(() => {
+        try {
+          manifestCtrl.abort();
+        } catch {
+          // ignore
+        }
+      }, 15_000);
+
+      const cleanupAllChunkRequests = () => {
+        sessionCancelled = true;
+        window.clearTimeout(manifestTimer);
+        for (const t of chunkTimers.values()) {
+          window.clearTimeout(t);
+        }
+        chunkTimers.clear();
+        for (const ctrl of chunkControllers.values()) {
+          try {
+            ctrl.abort();
+          } catch {
+            // ignore
+          }
+        }
+        chunkControllers.clear();
+      };
+
+      const ensureChunkRequest = (
+        chunkIdx: number,
+        priority: 'ACTIVE_PLAYBACK' | 'NEXT_CHUNK' | 'PREFETCH'
+      ) => {
+        const existing = chunkPromises.get(chunkIdx);
+        if (existing) return existing;
+
+        const ctrl = new AbortController();
+        chunkControllers.set(chunkIdx, ctrl);
+        let didUxTimeout = false;
+
+        const uxTimer = window.setTimeout(() => {
+          didUxTimeout = true;
+          try {
+            ctrl.abort();
+          } catch {
+            // ignore
+          }
+        }, CHUNK_UX_TIMEOUT_MS);
+        chunkTimers.set(chunkIdx, uxTimer);
+
+        const p = apiClient
+          .synthesizeNpcSpeech(
+            {
+              boothId: plan.booth.id,
+              stepType: step.type,
+              slotId: step.slotId,
+              productId: step.product?.id ?? null,
+              chunkIndex: chunkIdx,
+              priority,
+            },
+            ctrl.signal
+          )
+          .catch((err: Error & { code?: string }) => {
+            if (didUxTimeout && !sessionCancelled) {
+              const timeoutErr = new Error(
+                'Quá trình tổng hợp âm thanh trên CPU mất nhiều thời gian hơn dự kiến — Đang hiển thị phụ đề tiếng Việt. Bạn có thể nhấn "🔄 Thử lại âm thanh" sau ít giây.'
+              ) as Error & { code?: string };
+              timeoutErr.code = 'TTS_UX_TIMEOUT';
+              throw timeoutErr;
+            }
+            throw err;
+          })
+          .finally(() => {
+            const timerId = chunkTimers.get(chunkIdx);
+            if (timerId !== undefined) {
+              window.clearTimeout(timerId);
+              chunkTimers.delete(chunkIdx);
+            }
+            chunkControllers.delete(chunkIdx);
+          });
+
+        // Prevent unhandled rejection for background NEXT_CHUNK pipeline promises
+        p.catch(() => undefined);
+        chunkPromises.set(chunkIdx, p);
+        return p;
+      };
+
+      let playChunkAtFn: (chunkIdx: number, totalChunks: number) => void = () => undefined;
+
+      const sessionObj = {
+        token,
+        stepIdx,
+        paused: false,
+        nextChunkIndex: 0,
+        abortAll: cleanupAllChunkRequests,
+        resumePendingChunk: () => {
+          if (utteranceTokenRef.current !== token || sessionCancelled) return;
+          sessionObj.paused = false;
+          playChunkAtFn(sessionObj.nextChunkIndex, totalResolvedChunks);
+        },
+      };
+      chunkSessionRef.current = sessionObj;
+      let totalResolvedChunks = 1;
+
+      playChunkAtFn = (chunkIdx: number, totalChunks: number) => {
+        if (utteranceTokenRef.current !== token || sessionCancelled) return;
+        sessionObj.nextChunkIndex = chunkIdx;
+        if (sessionObj.paused) return;
+
+        // Kick off current chunk (ACTIVE_PLAYBACK) and immediately pipeline chunkIdx + 1 (NEXT_CHUNK)
+        const currentPromise = ensureChunkRequest(chunkIdx, 'ACTIVE_PLAYBACK');
+        if (chunkIdx + 1 < totalChunks) {
+          ensureChunkRequest(chunkIdx + 1, 'NEXT_CHUNK');
+        }
+
+        if (chunkIdx > 0) {
+          setNpcAudioState((prev) =>
+            prev === 'PLAYING' || prev === 'SPEAKING' ? 'GENERATING_AUDIO' : prev
+          );
+          setNpcAnimation('IDLE');
+          setNpcVoiceNotice(`Đang chuẩn bị tiếp đoạn ${chunkIdx + 1}/${totalChunks}...`);
+        }
+
+        void currentPromise
+          .then(async (ttsResult) => {
+            if (utteranceTokenRef.current !== token || sessionCancelled) return;
+            if (sessionObj.paused) return;
+
+            // Clean up previous chunk audio element & object URL before starting current chunk
+            if (audioElementRef.current) {
+              const prevAudio = audioElementRef.current;
+              prevAudio.onplay = null;
+              prevAudio.onended = null;
+              prevAudio.onerror = null;
+              try {
+                prevAudio.pause();
+                prevAudio.removeAttribute('src');
+              } catch {
+                // ignore
+              }
+              audioElementRef.current = null;
+            }
+            if (activeObjectUrlRef.current) {
+              try {
+                URL.revokeObjectURL(activeObjectUrlRef.current);
+              } catch {
+                // ignore
+              }
+              activeObjectUrlRef.current = null;
+            }
+
+            setNpcAudioState('AUDIO_READY');
+            const objectUrl = URL.createObjectURL(ttsResult.blob);
+            activeObjectUrlRef.current = objectUrl;
+
+            const audio = new Audio(objectUrl);
+            audio.preload = 'auto';
+            audio.volume = 1.0;
+            audio.playbackRate = 1.0;
+            audio.defaultPlaybackRate = 1.0;
+            (audio as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = true;
+            audio.muted = npcMutedRef.current;
+            audioElementRef.current = audio;
+
+            const voiceDisplay =
+              ttsResult.voice === 'phuong_linh' ? 'Phương Linh' : ttsResult.voice;
+            const voiceLabel =
+              totalChunks > 1
+                ? `Giọng nữ ${voiceDisplay} · Đoạn ${chunkIdx + 1}/${totalChunks}`
+                : `Giọng nữ ${voiceDisplay} (${ttsResult.provider.toUpperCase()})`;
+
+            audio.onplay = () => {
+              if (utteranceTokenRef.current !== token || sessionCancelled) return;
+              setHasVietnameseVoice(true);
+              setNpcAudioState(npcMutedRef.current ? 'MUTED' : 'PLAYING');
+              setNpcVoiceNotice(voiceLabel);
+              if (chunkIdx === 0) {
+                triggerActiveStepAnimation();
+              } else {
+                setNpcAnimation('TALKING');
+              }
+
+              // Pipeline lookahead: while the final chunk of this step plays, prefetch chunk 0 of stepIdx + 1 at lowest priority
+              if (chunkIdx === totalChunks - 1) {
+                const nextStep = plan.steps[stepIdx + 1];
+                if (nextStep && !npcMutedRef.current) {
+                  if (ttsPrefetchAbortRef.current) {
+                    try {
+                      ttsPrefetchAbortRef.current.abort();
+                    } catch {
+                      // ignore
+                    }
+                  }
+                  const prefetchCtrl = new AbortController();
+                  ttsPrefetchAbortRef.current = prefetchCtrl;
+                  void apiClient
+                    .synthesizeNpcSpeech(
+                      {
+                        boothId: plan.booth.id,
+                        stepType: nextStep.type,
+                        slotId: nextStep.slotId,
+                        productId: nextStep.product?.id ?? null,
+                        chunkIndex: 0,
+                        priority: 'PREFETCH',
+                      },
+                      prefetchCtrl.signal
+                    )
+                    .catch(() => undefined);
+                }
+              }
+            };
+
+            audio.onended = () => {
+              if (utteranceTokenRef.current !== token || sessionCancelled) return;
+              if (activeObjectUrlRef.current === objectUrl) {
+                try {
+                  URL.revokeObjectURL(objectUrl);
+                } catch {
+                  // ignore
+                }
+                activeObjectUrlRef.current = null;
+              }
+              audioElementRef.current = null;
+
+              if (chunkIdx + 1 < totalChunks) {
+                playChunkAtFn(chunkIdx + 1, totalChunks);
+              } else {
+                chunkSessionRef.current = null;
+                if (stepTimerRef.current !== null) {
+                  window.clearTimeout(stepTimerRef.current);
+                }
+                stepTimerRef.current = window.setTimeout(advanceToNext, 340);
+              }
+            };
+
+            audio.onerror = () => {
+              if (utteranceTokenRef.current !== token || sessionCancelled) return;
+              cleanupAllChunkRequests();
+              runFallbackOrSubtitleMode(
+                'Không thể giải mã dữ liệu âm thanh trình duyệt — Đang hiển thị phụ đề tiếng Việt.'
+              );
+            };
+
+            try {
+              await audio.play();
+            } catch (playErr) {
+              if (utteranceTokenRef.current !== token || sessionCancelled) return;
+              cleanupAllChunkRequests();
+              const errName = (playErr as Error)?.name || '';
+              const msg =
+                errName === 'NotAllowedError'
+                  ? 'Trình duyệt chặn tự động phát âm thanh — Hãy nhấn "🔄 Thử lại âm thanh" để nghe.'
+                  : 'Không thể phát âm thanh trên trình duyệt — Đang hiển thị phụ đề tiếng Việt.';
+              runFallbackOrSubtitleMode(msg);
+            }
+          })
+          .catch((err: Error & { code?: string }) => {
+            if (utteranceTokenRef.current !== token || sessionCancelled) return;
+            if (err?.name === 'AbortError') return;
+            cleanupAllChunkRequests();
+            runFallbackOrSubtitleMode(
+              err?.message ||
+                'Dịch vụ giọng đọc hiện chưa khả dụng — Đang hiển thị phụ đề tiếng Việt.'
+            );
+          });
+      };
 
       void apiClient
-        .synthesizeNpcSpeech(
+        .getNpcSpeechManifest(
           {
             boothId: plan.booth.id,
             stepType: step.type,
             slotId: step.slotId,
             productId: step.product?.id ?? null,
           },
-          abortController.signal
+          manifestCtrl.signal
         )
-        .then(async (ttsResult) => {
-          if (utteranceTokenRef.current !== token) return;
+        .then((manifest) => {
+          window.clearTimeout(manifestTimer);
+          if (utteranceTokenRef.current !== token || sessionCancelled) return;
           ttsAbortControllerRef.current = null;
 
-          const objectUrl = URL.createObjectURL(ttsResult.blob);
-          activeObjectUrlRef.current = objectUrl;
+          totalResolvedChunks = Math.max(1, manifest.totalChunks || 1);
+          const firstCached = Boolean(manifest.chunks?.[0]?.cached);
 
-          const audio = new Audio(objectUrl);
-          audio.preload = 'auto';
-          audio.volume = 1.0;
-          audio.playbackRate = 1.0;
-          audio.defaultPlaybackRate = 1.0;
-          (audio as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = true;
-          audio.muted = npcMutedRef.current;
-          audioElementRef.current = audio;
-
-          const voiceLabel = `Giọng nữ Tiếng Việt (${ttsResult.provider.toUpperCase()} · ${ttsResult.voice})`;
-
-          audio.onplay = () => {
-            if (utteranceTokenRef.current !== token) return;
-            setHasVietnameseVoice(true);
-            setNpcAudioState(npcMutedRef.current ? 'MUTED' : 'SPEAKING');
-            setNpcVoiceNotice(voiceLabel);
-            triggerActiveStepAnimation();
-
-            // Warm Backend LRU cache for the immediate next step while current audio plays
-            const nextStep = plan.steps[stepIdx + 1];
-            if (nextStep && !npcMutedRef.current) {
-              const prefetchCtrl = new AbortController();
-              ttsPrefetchAbortRef.current = prefetchCtrl;
-              void apiClient
-                .synthesizeNpcSpeech(
-                  {
-                    boothId: plan.booth.id,
-                    stepType: nextStep.type,
-                    slotId: nextStep.slotId,
-                    productId: nextStep.product?.id ?? null,
-                  },
-                  prefetchCtrl.signal
-                )
-                .catch(() => undefined);
-            }
-          };
-
-          audio.onended = () => {
-            if (utteranceTokenRef.current !== token) return;
-            if (stepTimerRef.current !== null) {
-              window.clearTimeout(stepTimerRef.current);
-            }
-            stepTimerRef.current = window.setTimeout(advanceToNext, 380);
-          };
-
-          audio.onerror = () => {
-            if (utteranceTokenRef.current !== token) return;
-            runFallbackOrSubtitleMode(
-              'Không thể giải mã dữ liệu âm thanh trình duyệt — Đang hiển thị phụ đề tiếng Việt.'
+          if (
+            !firstCached &&
+            (manifest.workerState === 'starting' || manifest.workerState === 'stopped')
+          ) {
+            setNpcAudioState('MODEL_LOADING');
+            setNpcVoiceNotice('Đang khởi tạo mô hình giọng nữ Phương Linh trên máy chủ...');
+          } else if (firstCached) {
+            setNpcAudioState('GENERATING_AUDIO');
+            setNpcVoiceNotice('Đang nạp âm thanh có sẵn từ bộ nhớ đệm...');
+          } else {
+            setNpcAudioState('GENERATING_AUDIO');
+            setNpcVoiceNotice(
+              totalResolvedChunks > 1
+                ? `Đang tạo đoạn âm thanh 1/${totalResolvedChunks} (Giọng nữ Phương Linh)...`
+                : 'Đang tạo âm thanh giọng nữ Phương Linh...'
             );
-          };
-
-          try {
-            await audio.play();
-          } catch (playErr) {
-            if (utteranceTokenRef.current !== token) return;
-            const errName = (playErr as Error)?.name || '';
-            const msg =
-              errName === 'NotAllowedError'
-                ? 'Trình duyệt chặn tự động phát âm thanh — Hãy nhấn "🔄 Thử lại âm thanh" để nghe.'
-                : 'Không thể phát âm thanh trên trình duyệt — Đang hiển thị phụ đề tiếng Việt.';
-            runFallbackOrSubtitleMode(msg);
           }
+
+          playChunkAtFn(0, totalResolvedChunks);
         })
         .catch((err: Error & { code?: string }) => {
-          if (utteranceTokenRef.current !== token) return;
+          window.clearTimeout(manifestTimer);
+          if (utteranceTokenRef.current !== token || sessionCancelled) return;
           if (err?.name === 'AbortError') return;
           ttsAbortControllerRef.current = null;
+          cleanupAllChunkRequests();
           runFallbackOrSubtitleMode(
             err?.message ||
-              'Dịch vụ giọng đọc đám mây hiện chưa khả dụng — Đang hiển thị phụ đề tiếng Việt.'
+              'Dịch vụ giọng đọc hiện chưa khả dụng — Đang hiển thị phụ đề tiếng Việt.'
           );
         });
     },
@@ -974,13 +1225,8 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
   const handleNpcPause = useCallback(() => {
     if (!npcPlan) return;
-    if (ttsAbortControllerRef.current) {
-      try {
-        ttsAbortControllerRef.current.abort();
-      } catch {
-        // ignore
-      }
-      ttsAbortControllerRef.current = null;
+    if (chunkSessionRef.current) {
+      chunkSessionRef.current.paused = true;
     }
     if (stepTimerRef.current !== null) {
       window.clearTimeout(stepTimerRef.current);
@@ -1017,19 +1263,31 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
 
   const handleNpcResume = useCallback(() => {
     if (!npcPlan) return;
-    // 1. If HTMLAudioElement is paused mid-clip, resume directly from current timestamp
+    // 1. If HTMLAudioElement is paused mid-chunk, resume directly from current timestamp (and continue remaining chunks onended)
     if (
       audioElementRef.current &&
       audioElementRef.current.paused &&
       !audioElementRef.current.ended &&
       audioElementRef.current.currentTime > 0
     ) {
+      if (chunkSessionRef.current) {
+        chunkSessionRef.current.paused = false;
+      }
       setNpcStatus(npcStepIndex === 0 ? 'GREETING' : 'PRESENTING');
-      setNpcAudioState(npcMutedRef.current ? 'MUTED' : 'SPEAKING');
+      setNpcAudioState(npcMutedRef.current ? 'MUTED' : 'PLAYING');
       setNpcAnimation('TALKING');
       void audioElementRef.current.play().catch(() => {
         playNpcStep(npcPlan, npcStepIndex);
       });
+      return;
+    }
+
+    // 1b. If paused while waiting for an in-flight chunk synthesis, resume the chunk pipeline seamlessly
+    if (chunkSessionRef.current && chunkSessionRef.current.stepIdx === npcStepIndex) {
+      setNpcStatus(npcStepIndex === 0 ? 'GREETING' : 'PRESENTING');
+      setNpcAudioState('GENERATING_AUDIO');
+      setNpcAnimation('IDLE');
+      chunkSessionRef.current.resumePendingChunk();
       return;
     }
 
@@ -1118,7 +1376,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       !audioElementRef.current.ended
     ) {
       audioElementRef.current.muted = nextMuted;
-      setNpcAudioState(nextMuted ? 'MUTED' : 'SPEAKING');
+      setNpcAudioState(nextMuted ? 'MUTED' : 'PLAYING');
       return;
     }
 

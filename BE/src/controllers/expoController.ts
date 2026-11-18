@@ -31,6 +31,9 @@ const NpcTtsBodySchema = z.object({
   stepType: z.enum(['GREETING', 'PRODUCT', 'CLOSING']),
   slotId: z.string().max(64).nullable().optional(),
   productId: z.string().max(120).nullable().optional(),
+  mode: z.enum(['audio', 'manifest']).optional(),
+  chunkIndex: z.number().int().min(0).max(32).optional(),
+  priority: z.enum(['ACTIVE_PLAYBACK', 'NEXT_CHUNK', 'PREFETCH']).optional(),
 });
 
 export type DataMutationCallback = (payload: {
@@ -348,14 +351,44 @@ export class ExpoController {
       req.socket?.remoteAddress ||
       'anonymous';
 
+    const disconnectAbort = new AbortController();
+    const onResponseClosed = () => {
+      if (!res.writableEnded) {
+        disconnectAbort.abort();
+      }
+    };
+    res.once('close', onResponseClosed);
+
     try {
+      const cleanBoothId = parsed.data.boothId.trim();
+      const cleanSlotId = parsed.data.slotId ? parsed.data.slotId.trim() : null;
+      const cleanProductId = parsed.data.productId ? parsed.data.productId.trim() : null;
+
+      if (parsed.data.mode === 'manifest') {
+        const manifest = this.service.getNpcStepManifest({
+          boothId: cleanBoothId,
+          stepType: parsed.data.stepType,
+          slotId: cleanSlotId,
+          productId: cleanProductId,
+        });
+        res.status(200).json(manifest);
+        return;
+      }
+
       const result = await this.service.synthesizeNpcStepAudio({
-        boothId: parsed.data.boothId.trim(),
+        boothId: cleanBoothId,
         stepType: parsed.data.stepType,
-        slotId: parsed.data.slotId ? parsed.data.slotId.trim() : null,
-        productId: parsed.data.productId ? parsed.data.productId.trim() : null,
+        slotId: cleanSlotId,
+        productId: cleanProductId,
+        chunkIndex: parsed.data.chunkIndex,
+        priority: parsed.data.priority,
+        signal: disconnectAbort.signal,
         clientIp,
       });
+
+      if (disconnectAbort.signal.aborted || res.writableEnded) {
+        return;
+      }
 
       res.setHeader('Content-Type', result.mimeType);
       res.setHeader('Content-Length', String(result.audioBuffer.byteLength));
@@ -363,12 +396,21 @@ export class ExpoController {
       res.setHeader('X-TTS-Cache', result.cacheStatus);
       res.setHeader('X-TTS-Provider', result.provider);
       res.setHeader('X-TTS-Voice', result.voice);
+      if (typeof result.chunkIndex === 'number') {
+        res.setHeader('X-TTS-Chunk-Index', String(result.chunkIndex));
+      }
+      if (typeof result.totalChunks === 'number') {
+        res.setHeader('X-TTS-Total-Chunks', String(result.totalChunks));
+      }
       res.setHeader(
         'Access-Control-Expose-Headers',
-        'X-TTS-Cache, X-TTS-Provider, X-TTS-Voice, Content-Type'
+        'X-TTS-Cache, X-TTS-Provider, X-TTS-Voice, X-TTS-Chunk-Index, X-TTS-Total-Chunks, Content-Type'
       );
       res.status(200).send(result.audioBuffer);
     } catch (err) {
+      if (disconnectAbort.signal.aborted || res.writableEnded) {
+        return;
+      }
       if (err instanceof TtsServiceError) {
         res.status(err.statusCode).json({
           error: err.message,
@@ -380,6 +422,8 @@ export class ExpoController {
         error: 'Không thể tổng hợp giọng đọc tại thời điểm này. Đang hiển thị phụ đề.',
         code: 'TTS_INTERNAL_ERROR',
       });
+    } finally {
+      res.off('close', onResponseClosed);
     }
   };
 }

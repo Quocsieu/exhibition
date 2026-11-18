@@ -22,10 +22,16 @@ export type NpcSessionStatus =
 export type NpcAudioRuntimeState =
   | 'IDLE'
   | 'CHECKING_VOICE'
+  | 'MODEL_LOADING'
+  | 'GENERATING_AUDIO'
+  | 'AUDIO_READY'
+  | 'PLAYING'
   | 'SPEAKING'
   | 'PAUSED'
+  | 'ENDED'
   | 'MUTED'
   | 'NO_VI_VOICE'
+  | 'ERROR'
   | 'AUDIO_ERROR';
 
 export type NpcAnimationClipName = 'IDLE' | 'WAVE' | 'TALKING' | 'PRESENT';
@@ -69,7 +75,7 @@ export interface NpcPresentationPlan {
   totalProducts: number;
 }
 
-export const NPC_GLB_URL = `${import.meta.env?.BASE_URL || '/'}models/npc/untitled.glb`;
+export const NPC_GLB_URL = `${import.meta.env?.BASE_URL || '/'}models/npc/untitled.glb?v=25.5`;
 export const TARGET_NPC_HEIGHT_METERS = 1.7;
 
 export interface NormalizedNpcBoundsResult {

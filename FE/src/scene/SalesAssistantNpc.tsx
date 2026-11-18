@@ -150,7 +150,7 @@ function classifyBodyComponent(stats: {
  * binding all primitives to a 9-bone `THREE.Skeleton` so both arms rest naturally by her sides
  * and support smooth Idle, Greeting Wave, Talking, and Product Presentation animations.
  */
-function buildRiggedAndColoredNpcScene(rawScene: THREE.Group): THREE.Group {
+export function buildRiggedAndColoredNpcScene(rawScene: THREE.Group): THREE.Group {
   rawScene.updateMatrixWorld(true);
   const rawBox = new THREE.Box3().setFromObject(rawScene);
 
@@ -290,6 +290,14 @@ function buildRiggedAndColoredNpcScene(rawScene: THREE.Group): THREE.Group {
     metalness: 0.02,
     side: THREE.DoubleSide,
   });
+  const faceSkinVertexColoredMat = new THREE.MeshStandardMaterial({
+    name: 'NpcFaceSkin',
+    color: '#ffffff',
+    vertexColors: true,
+    roughness: 0.52,
+    metalness: 0.01,
+    side: THREE.DoubleSide,
+  });
 
   const sourceMeshes: THREE.Mesh[] = [];
   rawScene.traverse((obj) => {
@@ -308,16 +316,21 @@ function buildRiggedAndColoredNpcScene(rawScene: THREE.Group): THREE.Group {
     const geom = srcMesh.geometry.clone();
     const meshMatrix = new THREE.Matrix4().multiplyMatrices(worldToNormalized, srcMesh.matrixWorld);
     geom.applyMatrix4(meshMatrix);
-    geom.computeVertexNormals();
+    if (!geom.hasAttribute('normal')) {
+      geom.computeVertexNormals();
+    } else {
+      geom.normalizeNormals();
+    }
 
     const posAttr = geom.getAttribute('position') as THREE.BufferAttribute;
+    const bakedColorAttr = geom.getAttribute('color') as THREE.BufferAttribute | undefined;
     const vertCount = posAttr.count;
     const rawMatName = ((srcMesh.material as THREE.Material | undefined)?.name || '').toLowerCase();
 
     const skinIndices = new Uint16Array(vertCount * 4);
     const skinWeights = new Float32Array(vertCount * 4);
 
-    let assignedMaterial: THREE.Material = bodyVertexColoredMat;
+    let assignedMaterial: THREE.Material | THREE.Material[] = bodyVertexColoredMat;
 
     if (
       rawMatName.includes('eye') &&
@@ -337,6 +350,9 @@ function buildRiggedAndColoredNpcScene(rawScene: THREE.Group): THREE.Group {
       for (let i = 0; i < vertCount; i++) {
         skinIndices[i * 4] = 2;
         skinWeights[i * 4] = 1.0;
+      }
+      if (geom.hasAttribute('color')) {
+        geom.deleteAttribute('color');
       }
     } else {
       // Connected-component topological segmentation for `mat_skin`
@@ -430,20 +446,28 @@ function buildRiggedAndColoredNpcScene(rawScene: THREE.Group): THREE.Group {
             break;
           }
           case 'head': {
+            if (bakedColorAttr && bakedColorAttr.count === vertCount) {
+              // Preserve baked COLOR_0 facial colors from refined GLB (rose lips, peach blush, soft skin shading)
+              tmpColor.setRGB(
+                bakedColorAttr.getX(i),
+                bakedColorAttr.getY(i),
+                bakedColorAttr.getZ(i)
+              );
+              break;
+            }
             tmpColor.copy(PALETTE.skinFace);
-            // Natural rose lips around mouth center (x = 0, y = 1.4665m, z >= 0.118m)
-            if (vz > 0.116 && vy > 1.454 && vy < 1.479 && ax < 0.022) {
-              const ellip = Math.hypot(ax / 0.0195, (vy - 1.4665) / 0.0085);
-              const zFactor = smoothstep(0.116, 0.128, vz);
-              const lipAlpha = (1 - smoothstep(0.45, 1.0, ellip)) * zFactor * 0.85;
+            // Fallback procedural lips & blush aligned to normalized Z coordinates (mouth z ≈ 0.075..0.104m)
+            if (vz > 0.073 && vy > 1.450 && vy < 1.476 && ax < 0.022) {
+              const ellip = Math.hypot(ax / 0.021, (vy - 1.463) / 0.011);
+              const zFactor = smoothstep(0.073, 0.085, vz);
+              const lipAlpha = (1 - smoothstep(0.55, 1.0, ellip)) * zFactor * 0.78;
               if (lipAlpha > 0.001) {
                 tmpColor.lerp(PALETTE.lipRose, lipAlpha);
               }
             }
-            // Subtle warm cheek blush around (|x| = 0.040m, y = 1.496m, z > 0.092m)
-            if (vz > 0.09 && vy > 1.472 && vy < 1.522 && ax > 0.018 && ax < 0.065) {
-              const distCheek = Math.hypot((ax - 0.04) / 0.022, (vy - 1.496) / 0.019);
-              const blushAlpha = (1 - smoothstep(0.2, 1.0, distCheek)) * 0.14;
+            if (vz > 0.056 && vy > 1.472 && vy < 1.522 && ax > 0.018 && ax < 0.065) {
+              const distCheek = Math.hypot((ax - 0.041) / 0.023, (vy - 1.494) / 0.019);
+              const blushAlpha = (1 - smoothstep(0.15, 1.0, distCheek)) * 0.24;
               if (blushAlpha > 0.001) {
                 tmpColor.lerp(PALETTE.cheekBlush, blushAlpha);
               }
@@ -577,6 +601,37 @@ function buildRiggedAndColoredNpcScene(rawScene: THREE.Group): THREE.Group {
       }
 
       geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+      // Partition face ('head') triangles into their own material group so ONLY face skin uses
+      // silky roughness (0.52) while hair, blazer, skirt, blouse & shoes keep exact 0.64 roughness.
+      if (indexAttr) {
+        const bodyTris: number[] = [];
+        const headTris: number[] = [];
+        const totalIdx = indexAttr.count;
+        for (let i = 0; i < totalIdx; i += 3) {
+          const ia = indexAttr.getX(i);
+          const ib = indexAttr.getX(i + 1);
+          const ic = indexAttr.getX(i + 2);
+          if (compStats.get(find(ia))?.category === 'head') {
+            headTris.push(ia, ib, ic);
+          } else {
+            bodyTris.push(ia, ib, ic);
+          }
+        }
+        if (headTris.length > 0 && bodyTris.length > 0) {
+          const orderedIndices =
+            vertCount > 65535
+              ? new Uint32Array(bodyTris.length + headTris.length)
+              : new Uint16Array(bodyTris.length + headTris.length);
+          orderedIndices.set(bodyTris, 0);
+          orderedIndices.set(headTris, bodyTris.length);
+          geom.setIndex(new THREE.BufferAttribute(orderedIndices, 1));
+          geom.clearGroups();
+          geom.addGroup(0, bodyTris.length, 0);
+          geom.addGroup(bodyTris.length, headTris.length, 1);
+          assignedMaterial = [bodyVertexColoredMat, faceSkinVertexColoredMat];
+        }
+      }
     }
 
     geom.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndices, 4));
@@ -894,8 +949,8 @@ export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
         }
         if ((obj as THREE.Mesh).isMesh) {
           const mesh = obj as THREE.Mesh;
-          const mat = mesh.material as THREE.Material | undefined;
-          if (mat && mat.name === 'NpcBrandAccent') {
+          const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+          if (mat && !Array.isArray(mat) && mat.name === 'NpcBrandAccent') {
             mesh.material = boothAccentMat;
           }
         }

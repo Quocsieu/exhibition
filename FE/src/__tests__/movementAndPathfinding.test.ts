@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   DEFAULT_BOOTHS,
   DEFAULT_PRODUCTS,
@@ -37,7 +37,7 @@ import {
   createSkyDomeTexture,
   getActiveCanvasTextureCount,
 } from '../scene/sceneTextures';
-import { buildBoothSlotViews } from '../services/api';
+import { apiClient, buildBoothSlotViews } from '../services/api';
 import {
   GLB_ASSET_PATHS,
   type GlbAssetId,
@@ -1147,6 +1147,142 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
       const rightBayRightEdgeLocalX = BACKDROP_RIGHT_BAY_LOCAL_POS[0] + 0.75;
       // Nameplate sits well to the right of the Right Backdrop Bay in booth local space
       expect(badgeLeftEdgeLocalX).toBeGreaterThan(rightBayRightEdgeLocalX + 0.25);
+    }
+  });
+
+  it('V25.5 — busts NPC GLB cache (?v=25.5), embeds refined COLOR_0 facial vertex colors & smooth normals in untitled.glb, and prevents duplicate TTS POST retries on Backend JSON 502/504 errors', async () => {
+    // 1. Verify cache-busting query on NPC_GLB_URL & refined untitled.glb facial attributes
+    expect(NPC_GLB_URL).toContain('models/npc/untitled.glb?v=25.5');
+    const untitledPath = path.resolve(__dirname, '../../public/models/npc/untitled.glb');
+    const glbBuf = fs.readFileSync(untitledPath);
+    expect(glbBuf.byteLength).toBeGreaterThan(1_150_000); // V25.2/V25.5 refined model (~1.22 MB vs legacy 944 KB)
+
+    const jsonLen = glbBuf.readUInt32LE(12);
+    const gltf = JSON.parse(glbBuf.subarray(20, 20 + jsonLen).toString('utf8')) as {
+      meshes?: Array<{
+        name?: string;
+        primitives: Array<{ attributes: Record<string, number>; material?: number }>;
+      }>;
+      materials?: Array<{ name?: string }>;
+      animations?: Array<{ name?: string }>;
+    };
+
+    const matNames = (gltf.materials ?? []).map((m) => m.name);
+    expect(matNames).toEqual(
+      expect.arrayContaining(['mat_skin', 'mat_eye', 'mat_iris', 'mat_cornea', 'mat_eyebrow'])
+    );
+
+    // Verify head mesh carries baked COLOR_0 + smooth NORMAL attributes on mat_skin primitive
+    const skinMatIdx = matNames.indexOf('mat_skin');
+    const headMesh = (gltf.meshes ?? []).find((m) =>
+      m.primitives.some(
+        (p) => p.material === skinMatIdx && p.attributes.COLOR_0 !== undefined
+      )
+    );
+    expect(headMesh).toBeDefined();
+    const skinPrim = headMesh!.primitives.find((p) => p.material === skinMatIdx)!;
+    expect(skinPrim.attributes.COLOR_0).toBeTypeOf('number');
+    expect(skinPrim.attributes.NORMAL).toBeTypeOf('number');
+
+    // Verify all multi-material primitives (skin, sclera, iris, cornea, eyebrow, hair, attire) remain intact
+    expect(headMesh!.primitives.length).toBeGreaterThanOrEqual(4);
+
+    // 2. Verify apiClient NEVER fires a duplicate retry POST when Backend returns JSON 504 TTS_TIMEOUT or 502 TTS_SYNTHESIS_FAILED
+    const originalFetch = globalThis.fetch;
+    const originalWindow = (globalThis as { window?: unknown }).window;
+    try {
+      (globalThis as { window?: unknown }).window = {
+        location: { hostname: 'localhost', origin: 'http://localhost:5173' },
+      };
+
+      const fetch504Spy = vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            error: 'Quá trình tổng hợp giọng nói vượt quá thời gian chờ.',
+            code: 'TTS_TIMEOUT',
+          }),
+          {
+            status: 504,
+            headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          }
+        );
+      });
+      globalThis.fetch = fetch504Spy as unknown as typeof fetch;
+
+      await expect(
+        apiClient.synthesizeNpcSpeech({
+          boothId: 'booth-solaris-energy',
+          stepType: 'GREETING',
+          chunkIndex: 0,
+          priority: 'ACTIVE_PLAYBACK',
+        })
+      ).rejects.toMatchObject({ code: 'TTS_TIMEOUT', status: 504 });
+      expect(fetch504Spy).toHaveBeenCalledTimes(1); // Strictly 1 call — NO duplicate retry!
+
+      const fetch502JsonSpy = vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            error: 'Lỗi tổng hợp KorvaTTS.',
+            code: 'TTS_SYNTHESIS_FAILED',
+          }),
+          {
+            status: 502,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      });
+      globalThis.fetch = fetch502JsonSpy as unknown as typeof fetch;
+
+      await expect(
+        apiClient.getNpcSpeechManifest({
+          boothId: 'booth-solaris-energy',
+          stepType: 'GREETING',
+        })
+      ).rejects.toMatchObject({ code: 'TTS_SYNTHESIS_FAILED', status: 502 });
+      expect(fetch502JsonSpy).toHaveBeenCalledTimes(1); // Strictly 1 call!
+
+      // 3. Conversely, if Vite dev proxy itself returns non-JSON 502 text/plain, fallback to localhost:4000 still works
+      let callCount = 0;
+      const proxyFallbackSpy = vi.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return new Response('Bad Gateway (Vite proxy)', {
+            status: 502,
+            headers: { 'Content-Type': 'text/plain' },
+          });
+        }
+        const wavBytes = new Uint8Array(128);
+        return new Response(wavBytes, {
+          status: 200,
+          headers: {
+            'Content-Type': 'audio/wav',
+            'X-TTS-Cache': 'HIT',
+            'X-TTS-Provider': 'korvatts',
+            'X-TTS-Voice': 'phuong_linh',
+            'X-TTS-Chunk-Index': '0',
+            'X-TTS-Total-Chunks': '3',
+          },
+        });
+      });
+      globalThis.fetch = proxyFallbackSpy as unknown as typeof fetch;
+
+      const okRes = await apiClient.synthesizeNpcSpeech({
+        boothId: 'booth-solaris-energy',
+        stepType: 'GREETING',
+        chunkIndex: 0,
+      });
+      expect(proxyFallbackSpy).toHaveBeenCalledTimes(2);
+      expect(okRes.provider).toBe('korvatts');
+      expect(okRes.voice).toBe('phuong_linh');
+      expect(okRes.chunkIndex).toBe(0);
+      expect(okRes.totalChunks).toBe(3);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalWindow === undefined) {
+        delete (globalThis as { window?: unknown }).window;
+      } else {
+        (globalThis as { window?: unknown }).window = originalWindow;
+      }
     }
   });
 });

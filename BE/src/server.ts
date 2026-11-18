@@ -97,6 +97,8 @@ if (isMain) {
 
   httpServer.listen(PORT, () => {
     console.log(`[Virtual Expo BE] Running on http://localhost:${PORT}`);
+    const svc = app.locals.expoService as ExpoService | undefined;
+    svc?.prewarmTtsWorker();
   });
 
   const gracefulShutdown = () => {
