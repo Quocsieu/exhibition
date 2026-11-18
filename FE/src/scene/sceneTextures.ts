@@ -475,49 +475,73 @@ export function createBoothPosterTexture(options: {
   return registerTrackedTexture(canvas);
 }
 
+export const AVATAR_NAMETAG_CANVAS_SIZE: [number, number] = [384, 96];
+
 export function createAvatarNametagTexture(options: {
   name: string;
   color: string;
   isSelf: boolean;
   activeBoothName?: string | null;
 }): THREE.CanvasTexture {
-  const canvas = createCanvasElement(512, 128);
+  const [cw, ch] = AVATAR_NAMETAG_CANVAS_SIZE;
+  const canvas = createCanvasElement(cw, ch);
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, cw, ch);
 
     const hasSub = Boolean(options.activeBoothName);
-    const boxY = hasSub ? 10 : 24;
-    const boxH = hasSub ? 108 : 80;
+    const displayLabel = options.isSelf
+      ? `${truncateText(options.name, 16)} (Bạn)`
+      : truncateText(options.name, 20);
+    const subLabel = options.activeBoothName
+      ? `🛍️ ${truncateText(options.activeBoothName, 22)}`
+      : '';
 
-    createRoundRectPath(ctx, 20, boxY, 472, boxH, 40);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    ctx.font = '600 20px Inter, Segoe UI, Arial, sans-serif';
+    const measuredMain = ctx.measureText?.(displayLabel)?.width || displayLabel.length * 10.5;
+    let measuredSub = 0;
+    if (hasSub) {
+      ctx.font = '500 14px Inter, Segoe UI, Arial, sans-serif';
+      measuredSub = ctx.measureText?.(subLabel)?.width || subLabel.length * 7.5;
+    }
+
+    const contentWidth = Math.max(measuredMain, measuredSub);
+    const pillW = Math.min(cw - 16, Math.max(148, Math.ceil(contentWidth + 48)));
+    const pillH = hasSub ? 64 : 44;
+    const pillX = Math.round((cw - pillW) / 2);
+    const pillY = Math.round((ch - pillH) / 2);
+    const radius = Math.round(pillH / 2);
+
+    createRoundRectPath(ctx, pillX, pillY, pillW, pillH, radius);
+    ctx.fillStyle = options.isSelf ? 'rgba(15, 23, 42, 0.78)' : 'rgba(15, 23, 42, 0.84)';
     ctx.fill();
-    ctx.lineWidth = options.isSelf ? 6 : 4;
-    ctx.strokeStyle = options.isSelf ? '#38bdf8' : 'rgba(226, 232, 240, 0.45)';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = options.isSelf
+      ? 'rgba(56, 189, 248, 0.72)'
+      : 'rgba(226, 232, 240, 0.38)';
     ctx.stroke();
 
+    const dotX = pillX + 20;
+    const dotY = hasSub ? pillY + 23 : pillY + pillH / 2;
     ctx.beginPath();
-    ctx.arc(66, hasSub ? 50 : 64, 14, 0, Math.PI * 2);
+    ctx.arc(dotX, dotY, 6.5, 0, Math.PI * 2);
     ctx.fillStyle = options.color || '#0ea5e9';
     ctx.fill();
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 1.5;
     ctx.strokeStyle = '#ffffff';
     ctx.stroke();
 
-    const displayLabel = options.isSelf
-      ? `${truncateText(options.name, 16)} (Bạn)`
-      : truncateText(options.name, 22);
-    ctx.font = '700 30px Inter, Segoe UI, Arial, sans-serif';
+    const textX = pillX + 34;
+    ctx.font = '600 20px Inter, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(displayLabel, 96, hasSub ? 60 : 74);
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillText(displayLabel, textX, hasSub ? pillY + 30 : pillY + 29);
 
-    if (options.activeBoothName) {
-      ctx.font = '600 20px Inter, Segoe UI, Arial, sans-serif';
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillText(`🛍️ ${truncateText(options.activeBoothName, 24)}`, 96, 96);
+    if (hasSub) {
+      ctx.font = '500 14px Inter, Segoe UI, Arial, sans-serif';
+      ctx.fillStyle = '#7dd3fc';
+      ctx.fillText(subLabel, textX, pillY + 51);
     }
   }
 

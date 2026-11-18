@@ -69,7 +69,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const formIdPrefix = useId();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
-  const [username, setUsername] = useState('admin');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -635,9 +635,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             </div>
 
             <div className="form-field">
-              <label htmlFor={`${formIdPrefix}-pass`}>
-                Mật khẩu <span className="field-hint">(Mặc định PoC: expo-admin-2026)</span>
-              </label>
+              <label htmlFor={`${formIdPrefix}-pass`}>Mật khẩu quản trị</label>
               <input
                 id={`${formIdPrefix}-pass`}
                 name="password"

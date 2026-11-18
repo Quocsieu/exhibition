@@ -88,7 +88,56 @@ const HAIR_TOP_GEOM = new THREE.CapsuleGeometry(0.092, 0.16, 8, 14);
 const HAIR_FRINGE_GEOM = new THREE.CapsuleGeometry(0.066, 0.2, 8, 14);
 const HAIR_SIDE_GEOM = new THREE.CapsuleGeometry(0.05, 0.11, 6, 10);
 
-const NAMETAG_PLANE_GEOM = new THREE.PlaneGeometry(2.5, 0.62);
+export const AVATAR_NAMETAG_SIZE: [number, number] = [1.04, 0.26];
+export const AVATAR_NAMETAG_OFFSET_Y = 2.02;
+
+const NAMETAG_PLANE_GEOM = new THREE.PlaneGeometry(
+  AVATAR_NAMETAG_SIZE[0],
+  AVATAR_NAMETAG_SIZE[1]
+);
+
+/**
+ * Computes bounded distance-aware scale and opacity for visitor nametags so they stay
+ * legible up close, subtle for the local player, and compact/non-cluttered when far away.
+ */
+export function computeAvatarNametagVisualState(
+  cameraDistance: number,
+  isSelf: boolean,
+  isOrthographic = false,
+  orthoZoom = 34
+): { scale: number; opacity: number } {
+  if (isOrthographic) {
+    const zoomNorm = THREE.MathUtils.clamp((orthoZoom - 14) / (46 - 14), 0, 1);
+    const base = isSelf ? 0.84 : 0.9;
+    const scale = Number((base * THREE.MathUtils.lerp(0.74, 1.0, zoomNorm)).toFixed(3));
+    const opacity = Number(
+      (orthoZoom < 22 ? 0.56 : isSelf ? 0.82 : 0.9).toFixed(3)
+    );
+    return { scale, opacity };
+  }
+
+  const d = Math.max(1, Number.isFinite(cameraDistance) ? cameraDistance : 6);
+  const nearBase = isSelf ? 0.85 : 0.96;
+
+  if (d <= 7) {
+    return {
+      scale: nearBase,
+      opacity: isSelf ? 0.84 : 0.94,
+    };
+  }
+  if (d <= 22) {
+    const t = (d - 7) / (22 - 7);
+    return {
+      scale: Number(THREE.MathUtils.lerp(nearBase, 0.78, t).toFixed(3)),
+      opacity: Number(THREE.MathUtils.lerp(isSelf ? 0.84 : 0.94, 0.84, t).toFixed(3)),
+    };
+  }
+  const farT = THREE.MathUtils.clamp((d - 22) / (42 - 22), 0, 1);
+  return {
+    scale: Number(THREE.MathUtils.lerp(0.78, 0.62, farT).toFixed(3)),
+    opacity: Number(THREE.MathUtils.lerp(0.84, 0.42, farT).toFixed(3)),
+  };
+}
 
 // ============================================================================
 // Shared Module-Level Materials across all players
@@ -186,6 +235,8 @@ export const AvatarCharacter: React.FC<AvatarProps> = React.memo(
     const leftArmPivotRef = useRef<THREE.Group>(null);
     const rightArmPivotRef = useRef<THREE.Group>(null);
     const contactShadowRef = useRef<THREE.Mesh>(null);
+    const nametagGroupRef = useRef<THREE.Group>(null);
+    const nametagMatRef = useRef<THREE.MeshBasicMaterial>(null);
 
     const initialLive = liveTransform?.();
     const startX = initialLive ? initialLive.x : position[0];
@@ -225,7 +276,7 @@ export const AvatarCharacter: React.FC<AvatarProps> = React.memo(
       };
     }, [nametagTexture]);
 
-    useFrame(({ clock }, delta) => {
+    useFrame(({ camera, clock }, delta) => {
       if (!groupRef.current) return;
 
       const live = liveTransform?.();
@@ -332,6 +383,15 @@ export const AvatarCharacter: React.FC<AvatarProps> = React.memo(
         if (contactShadowRef.current) {
           contactShadowRef.current.scale.set(1, 1, 1);
         }
+      }
+
+      if (nametagGroupRef.current && nametagMatRef.current) {
+        const isOrtho = Boolean((camera as THREE.OrthographicCamera).isOrthographicCamera);
+        const orthoZoom = isOrtho ? (camera as THREE.OrthographicCamera).zoom : 34;
+        const camDist = camera.position.distanceTo(groupRef.current.position);
+        const visual = computeAvatarNametagVisualState(camDist, isSelf, isOrtho, orthoZoom);
+        nametagGroupRef.current.scale.setScalar(visual.scale);
+        nametagMatRef.current.opacity = visual.opacity;
       }
     });
 
@@ -672,11 +732,19 @@ export const AvatarCharacter: React.FC<AvatarProps> = React.memo(
           </group>
         </group>
 
-        {/* 3D Floating Billboard Nametag */}
-        <Billboard position={[0, 2.24, 0]}>
-          <mesh geometry={NAMETAG_PLANE_GEOM}>
-            <meshBasicMaterial map={nametagTexture} transparent depthWrite={false} />
-          </mesh>
+        {/* Compact 3D Floating Billboard Nametag */}
+        <Billboard position={[0, AVATAR_NAMETAG_OFFSET_Y, 0]}>
+          <group ref={nametagGroupRef}>
+            <mesh geometry={NAMETAG_PLANE_GEOM} raycast={() => null}>
+              <meshBasicMaterial
+                ref={nametagMatRef}
+                map={nametagTexture}
+                transparent
+                opacity={isSelf ? 0.84 : 0.94}
+                depthWrite={false}
+              />
+            </mesh>
+          </group>
         </Billboard>
       </group>
     );

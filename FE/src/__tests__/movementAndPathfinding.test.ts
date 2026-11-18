@@ -26,6 +26,7 @@ import {
   wrapProductTitleLines,
   createProductTagTexture,
   createAvatarNametagTexture,
+  AVATAR_NAMETAG_CANVAS_SIZE,
   createPlazaTileTexture,
   createPlazaTileBumpTexture,
   createPlazaMedallionTexture,
@@ -57,12 +58,21 @@ import {
   NPC_NAMEPLATE_SIZE,
 } from '../scene/SalesAssistantNpc';
 import {
+  CAMERA_DRAG_THRESHOLD_PX,
+  TOUCH_DRAG_THRESHOLD_PX,
   MIN_CAMERA_PITCH,
   MAX_CAMERA_PITCH,
+  applyCameraDragDelta,
   applyPointerLockMouseDelta,
+  classifyPointerGesture,
   computeShopShowcaseCameraTargets,
   computeThirdPersonCameraTargets,
 } from '../scene/ExhibitionScene';
+import {
+  AVATAR_NAMETAG_OFFSET_Y,
+  AVATAR_NAMETAG_SIZE,
+  computeAvatarNametagVisualState,
+} from '../scene/LocalPlayer';
 import {
   ALL_TREES,
   CENTRAL_PLANTER_ISLANDS,
@@ -1284,5 +1294,86 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
         (globalThis as { window?: unknown }).window = originalWindow;
       }
     }
+  });
+
+  it('V25.6 — separates click-to-move from left-mouse-drag camera rotation without Pointer Lock, hides Controls Guide & Admin button for Guests, and shrinks visitor nametags with distance scaling', () => {
+    // 1. TASK B: Click vs Drag gesture threshold & smooth clamped yaw/pitch drag without Pointer Lock
+    expect(CAMERA_DRAG_THRESHOLD_PX).toBe(6);
+    expect(TOUCH_DRAG_THRESHOLD_PX).toBe(8);
+
+    // Sub-threshold movement is treated as a normal click (click-to-move / booth / product click)
+    expect(classifyPointerGesture(400, 300, 403, 304, 'mouse').isDrag).toBe(false);
+    expect(classifyPointerGesture(200, 200, 205, 205, 'touch').isDrag).toBe(false);
+
+    // Exceeding threshold enters camera drag-rotate mode (suppressing trailing click-to-move)
+    expect(classifyPointerGesture(400, 300, 412, 302, 'mouse').isDrag).toBe(true);
+    expect(classifyPointerGesture(200, 200, 215, 205, 'touch').isDrag).toBe(true);
+
+    const dragRight = applyCameraDragDelta(Math.PI, 0, 80, 0, 'mouse');
+    expect(dragRight.yaw).toBeLessThan(Math.PI);
+    expect(dragRight.pitch).toBeCloseTo(0, 5);
+
+    const dragLeft = applyCameraDragDelta(Math.PI, 0, -80, 0, 'mouse');
+    expect(dragLeft.yaw).toBeGreaterThan(Math.PI);
+    expect(dragLeft.pitch).toBeCloseTo(0, 5);
+
+    const dragUpClamp = applyCameraDragDelta(0, 0.3, 0, -500, 'mouse');
+    expect(dragUpClamp.pitch).toBeCloseTo(MAX_CAMERA_PITCH, 5);
+
+    const dragDownClamp = applyCameraDragDelta(0, -0.3, 0, 500, 'touch');
+    expect(dragDownClamp.pitch).toBeCloseTo(MIN_CAMERA_PITCH, 5);
+
+    // Ensure Pointer Lock is completely removed from ExhibitionScene & ExhibitionPage and cursor is never hidden
+    const sceneSrc = fs.readFileSync(path.resolve(__dirname, '../scene/ExhibitionScene.tsx'), 'utf8');
+    const pageSrc = fs.readFileSync(path.resolve(__dirname, '../pages/ExhibitionPage.tsx'), 'utf8');
+    const adminSrc = fs.readFileSync(path.resolve(__dirname, '../pages/AdminPage.tsx'), 'utf8');
+    const cssSrc = fs.readFileSync(path.resolve(__dirname, '../styles.css'), 'utf8');
+
+    expect(sceneSrc.includes('requestPointerLock')).toBe(false);
+    expect(sceneSrc.includes('pointerlockchange')).toBe(false);
+    expect(pageSrc.includes('Khóa chuột 3D')).toBe(false);
+    expect(cssSrc.includes('cursor: none')).toBe(false);
+
+    // 2. TASK C: Controls Guide & Admin button hidden on Visitor HUD; Admin login form does not leak PoC password
+    expect(pageSrc.includes('useState(false)')).toBe(true);
+    expect(pageSrc.includes('❓ Hướng dẫn')).toBe(false);
+    expect(pageSrc.includes('Quản trị (Dashboard)')).toBe(false);
+    expect(adminSrc.includes('expo-admin-2026')).toBe(false);
+
+    // 3. TASK D: Compact Visitor Nametag dimensions (>55% smaller width & height vs legacy 2.5m x 0.62m) & distance scaling
+    expect(AVATAR_NAMETAG_CANVAS_SIZE).toEqual([384, 96]);
+    expect(AVATAR_NAMETAG_SIZE[0]).toBeLessThanOrEqual(1.1);
+    expect(AVATAR_NAMETAG_SIZE[1]).toBeLessThanOrEqual(0.28);
+    const nametagBottomY = AVATAR_NAMETAG_OFFSET_Y - AVATAR_NAMETAG_SIZE[1] / 2;
+    expect(nametagBottomY).toBeGreaterThan(1.85); // Clears 1.835m avatar hair peak -> zero face occlusion
+
+    const nearSelf = computeAvatarNametagVisualState(5.2, true, false);
+    const nearRemote = computeAvatarNametagVisualState(5.2, false, false);
+    const farRemote = computeAvatarNametagVisualState(38, false, false);
+    const zoomedOutOverview = computeAvatarNametagVisualState(32, false, true, 18);
+
+    expect(nearSelf.scale).toBeLessThan(nearRemote.scale); // Self nametag is calmer in 3rd-person view
+    expect(nearRemote.scale).toBeLessThanOrEqual(1.0);
+    expect(farRemote.scale).toBeLessThan(nearRemote.scale);
+    expect(farRemote.opacity).toBeLessThan(nearRemote.opacity);
+    expect(zoomedOutOverview.opacity).toBeLessThan(0.7);
+
+    // Verify compact nametag texture creation & deterministic GPU disposal
+    const texBase = getActiveCanvasTextureCount();
+    const selfTag = createAvatarNametagTexture({
+      name: 'Khách #859',
+      color: '#10b981',
+      isSelf: true,
+    });
+    const remoteTag = createAvatarNametagTexture({
+      name: 'Khách #412',
+      color: '#0ea5e9',
+      isSelf: false,
+      activeBoothName: 'Solaris Clean Energy',
+    });
+    expect(getActiveCanvasTextureCount()).toBe(texBase + 2);
+    selfTag.dispose();
+    remoteTag.dispose();
+    expect(getActiveCanvasTextureCount()).toBe(texBase);
   });
 });

@@ -11,6 +11,10 @@ import { ExpoDatabase } from '../database/db.js';
 import { createApp } from '../server.js';
 import { attachSocketServer } from '../realtime/socketServer.js';
 import {
+  resetAdminLoginRateLimitForTests,
+  verifyAdminToken,
+} from '../middleware/adminAuth.js';
+import {
   isPrivateOrReservedIp,
   validateExternalUrlSafety,
   extractProductFromHtml,
@@ -1775,4 +1779,108 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       }
     }
   }, 20000);
+
+  it('V25.6 — enforces strict Backend Admin authentication across all mutation/integration endpoints, rejects tampered/expired tokens, and blocks brute-force login attempts', async () => {
+    resetAdminLoginRateLimitForTests();
+
+    // 1. Every Admin mutation & integration endpoint strictly rejects Guest requests (missing or forged Bearer token)
+    const protectedEndpoints: Array<{ method: string; path: string; body?: unknown }> = [
+      { method: 'POST', path: '/api/booths', body: { name: 'Test' } },
+      { method: 'PUT', path: '/api/booths/booth-solaris-energy', body: { name: 'Hack' } },
+      { method: 'DELETE', path: '/api/booths/booth-solaris-energy' },
+      {
+        method: 'PUT',
+        path: '/api/booths/booth-solaris-energy/slots/slot_01',
+        body: { productId: 'prod-solaris-pack-10kw' },
+      },
+      { method: 'DELETE', path: '/api/booths/booth-solaris-energy/slots/slot_01' },
+      { method: 'POST', path: '/api/products', body: { name: 'Fake' } },
+      { method: 'PUT', path: '/api/products/prod-solaris-pack-10kw', body: { price: 1 } },
+      { method: 'DELETE', path: '/api/products/prod-solaris-pack-10kw' },
+      {
+        method: 'POST',
+        path: '/api/integrations/extract-url',
+        body: { url: 'https://example.com/item' },
+      },
+      {
+        method: 'POST',
+        path: '/api/integrations/import-batch',
+        body: { boothId: 'booth-solaris-energy', format: 'json', content: '[]' },
+      },
+    ];
+
+    for (const ep of protectedEndpoints) {
+      const noAuthRes = await fetch(`${baseUrl}${ep.path}`, {
+        method: ep.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: ep.body ? JSON.stringify(ep.body) : undefined,
+      });
+      expect(noAuthRes.status, `Expected 401 on Guest ${ep.method} ${ep.path}`).toBe(401);
+
+      const forgedRes = await fetch(`${baseUrl}${ep.path}`, {
+        method: ep.method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9.forgedsignature',
+        },
+        body: ep.body ? JSON.stringify(ep.body) : undefined,
+      });
+      expect(forgedRes.status, `Expected 401 on Forged ${ep.method} ${ep.path}`).toBe(401);
+    }
+
+    // Verify malformed/non-finite token payloads never pass verifyAdminToken
+    expect(verifyAdminToken('')).toEqual({ valid: false });
+    expect(verifyAdminToken('onlyonepart')).toEqual({ valid: false });
+    expect(verifyAdminToken('a.b.c')).toEqual({ valid: false });
+
+    // 2. Brute-force protection on POST /api/admin/login per IP
+    for (let i = 0; i < 10; i++) {
+      const badRes = await fetch(`${baseUrl}/api/admin/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': '203.0.113.77',
+        },
+        body: JSON.stringify({ username: 'admin', password: `wrong-pass-${i}` }),
+      });
+      expect(badRes.status).toBe(401);
+    }
+
+    const lockedOutRes = await fetch(`${baseUrl}/api/admin/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '203.0.113.77',
+      },
+      body: JSON.stringify({
+        username: 'admin',
+        password: process.env.ADMIN_PASSWORD || 'expo-admin-2026',
+      }),
+    });
+    expect(lockedOutRes.status).toBe(429);
+
+    // 3. Legitimate Admin from a clean IP still logs in & passes /api/admin/me verification
+    const validLoginRes = await fetch(`${baseUrl}/api/admin/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '198.51.100.12',
+      },
+      body: JSON.stringify({
+        username: 'admin',
+        password: process.env.ADMIN_PASSWORD || 'expo-admin-2026',
+      }),
+    });
+    expect(validLoginRes.status).toBe(200);
+    const { token } = (await validLoginRes.json()) as { token: string };
+    expect(typeof token).toBe('string');
+
+    const meRes = await fetch(`${baseUrl}/api/admin/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(meRes.status).toBe(200);
+    expect(await meRes.json()).toEqual({ authenticated: true, username: 'admin' });
+
+    resetAdminLoginRateLimitForTests();
+  });
 });

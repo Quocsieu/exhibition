@@ -104,12 +104,11 @@ function getInitialVisitorSpawn(): {
 
 export interface ExhibitionPageProps {
   initialFocusBoothId?: string | null;
-  onOpenAdmin: () => void;
+  onOpenAdmin?: () => void;
 }
 
 export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   initialFocusBoothId = null,
-  onOpenAdmin,
 }) => {
   const initialIdentity = useMemo(() => getStoredIdentity(), []);
   const initialSpawn = useMemo(() => getInitialVisitorSpawn(), []);
@@ -132,12 +131,10 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   const previousExteriorModeRef = useRef<'overview' | 'explore'>('explore');
   const cameraYawRef = useRef<number | null>(null);
   const [zoom, setZoom] = useState(EXPLORE_DEFAULT_ZOOM);
-  const [showHelp, setShowHelp] = useState(true);
+  const [showHelp, setShowHelp] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [draftName, setDraftName] = useState(playerName);
   const [draftColor, setDraftColor] = useState(playerColor);
-  const [isPointerLocked, setIsPointerLocked] = useState(false);
-  const pointerLockToggleRequestRef = useRef<(() => void) | null>(null);
 
   // NPC Sales Assistant Presentation State Machine & Speech Synthesis Refs
   const [npcPlan, setNpcPlan] = useState<NpcPresentationPlan | null>(null);
@@ -1437,23 +1434,6 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   );
 
   const isBoothShowcaseActive = cameraMode === 'focus' && Boolean(selectedBooth || focusedBooth);
-  const isPointerLockBlocked = Boolean(
-    cameraMode !== 'explore' ||
-      selectedProduct ||
-      editingProfile ||
-      (npcPlan && npcStatus !== 'IDLE')
-  );
-
-  const handleOpenAdminSafe = useCallback(() => {
-    try {
-      if (typeof document !== 'undefined' && document.pointerLockElement) {
-        document.exitPointerLock?.();
-      }
-    } catch {
-      // ignore
-    }
-    onOpenAdmin();
-  }, [onOpenAdmin]);
 
   return (
     <main className="expo-viewport">
@@ -1519,19 +1499,6 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
             >
               <span className="avatar-dot" style={{ backgroundColor: playerColor }} />
               {playerName} ✎
-            </button>
-
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={() => setShowHelp((v) => !v)}
-              aria-expanded={showHelp}
-            >
-              ❓ Hướng dẫn
-            </button>
-
-            <button type="button" className="btn btn--primary btn--sm" onClick={handleOpenAdminSafe}>
-              ⚙️ Quản trị (Dashboard)
             </button>
           </div>
         </header>
@@ -1623,24 +1590,6 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
               🚶 Tham quan
             </button>
 
-            {cameraMode === 'explore' && (
-              <button
-                type="button"
-                className={`camera-mode-btn camera-mode-btn--pointer-lock ${
-                  isPointerLocked ? 'camera-mode-btn--active' : ''
-                }`}
-                onClick={() => pointerLockToggleRequestRef.current?.()}
-                aria-pressed={isPointerLocked}
-                title={
-                  isPointerLocked
-                    ? 'Đang khóa con trỏ chuột kiểu game 3D — Nhấn phím Esc để thoát'
-                    : 'Khóa chuột góc nhìn 3D: Rê chuột tự do để xoay camera 360° không cần giữ nút chuột (Nhấn Esc để thoát)'
-                }
-              >
-                {isPointerLocked ? '🎯 Đang khóa chuột (Esc)' : '🎯 Khóa chuột 3D'}
-              </button>
-            )}
-
             <div className="zoom-controls">
               <button
                 type="button"
@@ -1709,7 +1658,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
               <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> hoặc <strong>Phím mũi tên</strong>: Di chuyển nhân vật theo hướng nhìn camera.
             </li>
             <li>
-              <strong>Click vào khung cảnh 3D</strong> hoặc bấm <strong>🎯 Khóa chuột 3D</strong> (PC): Rê chuột tự do để xoay góc nhìn 360° kiểu game 3D mà không cần giữ nút chuột (<kbd>Esc</kbd> để hiện lại con trỏ); hoặc <strong>Vuốt màn hình</strong> trên điện thoại.
+              <strong>Click trái vào mặt sàn</strong> để nhân vật tự di chuyển đến điểm chọn; <strong>giữ chuột trái và kéo</strong> (hoặc <strong>vuốt màn hình</strong> trên điện thoại) để xoay góc nhìn camera 360°.
             </li>
             <li>
               <strong>Joystick cảm ứng</strong> (Góc dưới trái): Di chuyển nhân vật trên điện thoại/máy tính bảng (hỗ trợ vừa đi vừa vuốt xoay góc nhìn).
@@ -1719,12 +1668,6 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
             </li>
           </ul>
         </aside>
-      )}
-
-      {!isBoothShowcaseActive && cameraMode === 'explore' && isPointerLocked && (
-        <div className="pointer-lock-status-pill" role="status" aria-live="polite">
-          🎯 Đang bật góc nhìn chuột 3D — Rê chuột để xoay camera · Nhấn <kbd>Esc</kbd> để hiện con trỏ
-        </div>
       )}
 
       <LoadingScreen loading={loadingData} warningMessage={dataWarning} />
@@ -1754,9 +1697,6 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         onGroundClick={handleGroundClick}
         zoom={zoom}
         onZoomChange={setZoom}
-        isPointerLockBlocked={isPointerLockBlocked}
-        onPointerLockChange={setIsPointerLocked}
-        pointerLockToggleRequestRef={pointerLockToggleRequestRef}
       />
 
       {!isBoothShowcaseActive && <MobileJoystick onMove={handleJoystickMove} />}

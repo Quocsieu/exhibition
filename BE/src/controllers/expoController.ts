@@ -13,6 +13,8 @@ import {
 } from '../services/expoService.js';
 import {
   authenticateAdminCredentials,
+  checkAdminLoginAllowed,
+  recordAdminLoginOutcome,
   verifyAdminToken,
 } from '../middleware/adminAuth.js';
 
@@ -50,13 +52,29 @@ export class ExpoController {
 
   // Admin Auth
   loginAdmin = (req: Request, res: Response): void => {
+    const forwarded = req.headers['x-forwarded-for'];
+    const clientIp =
+      (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') ||
+      req.ip ||
+      req.socket?.remoteAddress ||
+      'anonymous';
+
+    if (!checkAdminLoginAllowed(clientIp)) {
+      res.status(429).json({
+        error: 'Quá nhiều lần đăng nhập quản trị thất bại. Vui lòng thử lại sau 15 phút.',
+      });
+      return;
+    }
+
     const { username, password } = req.body || {};
     const token = authenticateAdminCredentials(username, password);
     if (!token) {
+      recordAdminLoginOutcome(clientIp, false);
       res.status(401).json({ error: 'Sai tên đăng nhập hoặc mật khẩu quản trị.' });
       return;
     }
-    res.json({ token, username });
+    recordAdminLoginOutcome(clientIp, true);
+    res.json({ token, username: String(username) });
   };
 
   verifyAdmin = (req: Request, res: Response): void => {
