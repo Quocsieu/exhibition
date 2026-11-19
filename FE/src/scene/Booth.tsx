@@ -11,11 +11,14 @@ import {
 import { formatCurrency } from '../components/ProductPanel';
 import {
   type BoothVisualTheme,
+  type ArchitecturalDisplayStyle,
   createBoothSignTexture,
   createEnterpriseBackdropTexture,
   createProductDisplayCardTexture,
+  createArchitecturalProductDisplayTexture,
+  createArchitecturalSignTexture,
 } from './sceneTextures';
-import { cloneCachedAsset, getBoothGlbAssetId } from './assetLoader';
+import { cloneCachedAsset, getBoothGlbAssetId, resolveBoothModelVersion } from './assetLoader';
 import { RooflessBoothShell } from './RooflessBoothShell';
 import { ExteriorAssets, type ExteriorPlacement } from './ExteriorAssets';
 import { SalesAssistantNpc } from './SalesAssistantNpc';
@@ -34,6 +37,8 @@ export interface BoothProps {
   isSelected: boolean;
   onSelect: (booth: BoothType) => void;
   visible?: boolean;
+  showParkPlanters?: boolean;
+  worldVersion?: 'v26' | 'v27_0' | 'v27';
 }
 
 export function resolveBoothTheme(booth: BoothType): BoothVisualTheme {
@@ -312,14 +317,149 @@ class SlotModelErrorBoundary extends React.Component<
   }
 }
 
+interface InSpaceDisplaySlotSpec {
+  mode: 'in-space' | 'backdrop';
+  position: readonly [number, number, number];
+  rotationY: number;
+  scale: number;
+  displayStyle?: ArchitecturalDisplayStyle;
+}
+
+interface V274SignageSpec {
+  position: readonly [number, number, number];
+  backPosition: readonly [number, number, number];
+  width: number;
+  height: number;
+}
+
+/**
+ * V27.4 Phase 3 — Per-Booth Slim Architectural Signage Placement.
+ * Leaves arches (Organic Flow, Gallery Arch), overhead ring (Signature Ring),
+ * and sculpted wave canopy (Wave Pavilion) completely unobstructed.
+ */
+const V27_4_SIGNAGE_CONFIGS: Record<BoothVisualTheme, V274SignageSpec> = {
+  living: { position: [0, 3.64, 2.18], backPosition: [0, 3.64, 1.94], width: 4.95, height: 0.34 },
+  design: { position: [0, 3.74, 2.02], backPosition: [0, 3.74, 1.88], width: 3.85, height: 0.32 },
+  tech: { position: [0, 3.58, 2.18], backPosition: [0, 3.58, 1.66], width: 5.15, height: 0.36 },
+  energy: { position: [-0.55, 3.56, 2.10], backPosition: [-0.55, 3.56, 1.80], width: 4.35, height: 0.32 },
+  coffee: { position: [0, 3.74, 2.04], backPosition: [0, 3.74, 1.90], width: 3.95, height: 0.32 },
+  robotics: { position: [0, 3.56, 2.11], backPosition: [0, 3.56, 1.73], width: 5.05, height: 0.34 },
+};
+
+/**
+ * V27.4 Phase 1 & 2 — Full 6-Slot Architectural Product Display Layouts per Booth.
+ * Each booth uses its own bespoke physical furniture (circular island, pill pedestals,
+ * L-counter, wave bar, gallery island risers, faceted pods, niches, kiosks) and
+ * its matching ArchitecturalDisplayStyle — works cleanly for 0, 1, 3, or 6 products.
+ */
+const V27_4_PRODUCT_DISPLAY_LAYOUTS: Record<BoothVisualTheme, readonly InSpaceDisplaySlotSpec[]> = {
+  // Booth 01 — Signature Ring (Luxury Circular Showroom): Hero center island + flanking round pedestals + right desk + curved arc shelves
+  living: [
+    { mode: 'in-space', position: [0.0, 0.98, 0.15], rotationY: 0.0, scale: 0.72, displayStyle: 'physical-stand' },
+    { mode: 'in-space', position: [-1.25, 0.91, 0.85], rotationY: 0.24, scale: 0.62, displayStyle: 'tabletop-display' },
+    { mode: 'in-space', position: [1.15, 1.11, -0.95], rotationY: -0.22, scale: 0.64, displayStyle: 'gallery-frame' },
+    { mode: 'in-space', position: [2.02, 1.03, 0.62], rotationY: -0.52, scale: 0.56, displayStyle: 'tabletop-display' },
+    { mode: 'in-space', position: [-0.45, 1.22, -1.78], rotationY: 0.16, scale: 0.58, displayStyle: 'gallery-frame' },
+    { mode: 'in-space', position: [-1.32, 1.22, -1.42], rotationY: 0.45, scale: 0.56, displayStyle: 'gallery-frame' },
+  ],
+  // Booth 02 — Organic Flow (Immersive Creative Gallery): Off-axis sculptural pill pedestals + oval desk + S-curve wall
+  design: [
+    { mode: 'in-space', position: [-0.45, 0.96, 0.35], rotationY: 0.28, scale: 0.70, displayStyle: 'gallery-frame' },
+    { mode: 'in-space', position: [0.92, 1.08, -0.65], rotationY: -0.22, scale: 0.66, displayStyle: 'gallery-frame' },
+    { mode: 'in-space', position: [-1.15, 0.82, -0.72], rotationY: 0.32, scale: 0.60, displayStyle: 'physical-stand' },
+    { mode: 'in-space', position: [-2.05, 1.00, 0.65], rotationY: 0.36, scale: 0.56, displayStyle: 'tabletop-display' },
+    { mode: 'in-space', position: [1.95, 1.00, -1.25], rotationY: -0.42, scale: 0.54, displayStyle: 'wall-niche' },
+    { mode: 'in-space', position: [0.15, 1.24, -1.55], rotationY: 0.0, scale: 0.60, displayStyle: 'gallery-frame' },
+  ],
+  // Booth 03 — Grand Portal (Modular Digital Experience): Stepped demo island + L-counter + digital kiosk + rear media wall + blade shelves
+  tech: [
+    { mode: 'in-space', position: [0.55, 0.99, 0.58], rotationY: -0.16, scale: 0.70, displayStyle: 'physical-stand' },
+    { mode: 'in-space', position: [-1.45, 1.01, 0.82], rotationY: 0.18, scale: 0.64, displayStyle: 'tabletop-display' },
+    { mode: 'in-space', position: [1.98, 1.18, -0.38], rotationY: -0.38, scale: 0.66, displayStyle: 'digital-kiosk' },
+    { mode: 'in-space', position: [-0.35, 1.25, -1.78], rotationY: 0.0, scale: 0.72, displayStyle: 'shelf-screen' },
+    { mode: 'in-space', position: [-2.35, 1.00, -1.48], rotationY: 0.14, scale: 0.56, displayStyle: 'shelf-screen' },
+    { mode: 'in-space', position: [1.55, 1.00, -1.48], rotationY: -0.14, scale: 0.56, displayStyle: 'shelf-screen' },
+  ],
+  // Booth 04 — Wave Pavilion (Open Interactive Showcase): Left-center 3-pedestal cluster + depthwise right wave bar + angled promo screen
+  energy: [
+    { mode: 'in-space', position: [-0.92, 0.98, 0.58], rotationY: 0.22, scale: 0.70, displayStyle: 'physical-stand' },
+    { mode: 'in-space', position: [-0.18, 1.08, -0.35], rotationY: 0.08, scale: 0.66, displayStyle: 'tabletop-display' },
+    { mode: 'in-space', position: [1.92, 1.02, 0.42], rotationY: -0.88, scale: 0.60, displayStyle: 'tabletop-display' },
+    { mode: 'in-space', position: [1.92, 1.02, -0.58], rotationY: -0.88, scale: 0.60, displayStyle: 'tabletop-display' },
+    { mode: 'in-space', position: [-1.62, 0.78, 0.12], rotationY: 0.34, scale: 0.58, displayStyle: 'physical-stand' },
+    { mode: 'in-space', position: [-1.86, 1.18, -1.08], rotationY: 0.48, scale: 0.64, displayStyle: 'digital-kiosk' },
+  ],
+  // Booth 05 — Gallery Arch (Boutique Architectural Gallery): Low elongated central island risers + 3 rear recessed arched niches + boutique desk
+  coffee: [
+    { mode: 'in-space', position: [-0.72, 1.02, -0.05], rotationY: 0.14, scale: 0.68, displayStyle: 'gallery-frame' },
+    { mode: 'in-space', position: [0.58, 0.91, -0.05], rotationY: -0.14, scale: 0.66, displayStyle: 'tabletop-display' },
+    { mode: 'in-space', position: [0.0, 1.50, -1.68], rotationY: 0.0, scale: 0.62, displayStyle: 'wall-niche' },
+    { mode: 'in-space', position: [-1.92, 1.50, -1.68], rotationY: 0.12, scale: 0.60, displayStyle: 'wall-niche' },
+    { mode: 'in-space', position: [1.92, 1.50, -1.68], rotationY: -0.12, scale: 0.60, displayStyle: 'wall-niche' },
+    { mode: 'in-space', position: [1.98, 1.01, -0.68], rotationY: -0.42, scale: 0.56, displayStyle: 'tabletop-display' },
+  ],
+  // Booth 06 — Dynamic Frame (Futuristic Modular Lab): Left twin faceted pods + front-right angled counter + digital monolith + floating right shelves
+  robotics: [
+    { mode: 'in-space', position: [-1.35, 0.99, 0.62], rotationY: 0.24, scale: 0.70, displayStyle: 'physical-stand' },
+    { mode: 'in-space', position: [1.35, 1.00, 0.78], rotationY: -0.32, scale: 0.66, displayStyle: 'tabletop-display' },
+    { mode: 'in-space', position: [-0.62, 1.11, -0.65], rotationY: 0.16, scale: 0.66, displayStyle: 'physical-stand' },
+    { mode: 'in-space', position: [-2.12, 1.24, -0.84], rotationY: 0.42, scale: 0.64, displayStyle: 'digital-kiosk' },
+    { mode: 'in-space', position: [2.52, 1.10, 0.28], rotationY: -1.48, scale: 0.54, displayStyle: 'shelf-screen' },
+    { mode: 'in-space', position: [2.52, 1.10, -0.58], rotationY: -1.48, scale: 0.54, displayStyle: 'shelf-screen' },
+  ],
+};
+
+/**
+ * V27.1 Phase 3 — Universal In-Space Architectural Product Showcase Layouts.
+ * Each of the 6 V4 booth archetypes presents real DB products on distinct physical
+ * architectural surfaces (pedestals, curved counters, recessed feature bays) instead of
+ * uniform flat back-wall cards, while keeping 100% of boothId/slotId/Admin data unchanged.
+ */
+const V27_1_IN_SPACE_SHOWCASE_LAYOUTS: Record<
+  BoothVisualTheme,
+  { primary: InSpaceDisplaySlotSpec; secondary: InSpaceDisplaySlotSpec }
+> = {
+  // Booth 01 — Signature Ring (V27.3 Luxury Showroom): Center-right hero pedestal + Front-left curved counter
+  living: {
+    primary: { mode: 'in-space', position: [0.58, 1.04, 0.68], rotationY: -0.18, scale: 0.72 },
+    secondary: { mode: 'in-space', position: [-1.52, 1.04, 0.92], rotationY: 0.16, scale: 0.70 },
+  },
+  // Booth 02 — Organic Flow (V27.3 Creative Gallery): Rear arched gallery bay + Front-right pastel pill plinth
+  design: {
+    primary: { mode: 'backdrop', position: [-0.84, 1.68, -1.83], rotationY: 0, scale: 1.0 },
+    secondary: { mode: 'in-space', position: [0.86, 0.99, 0.56], rotationY: -0.24, scale: 0.70 },
+  },
+  // Booth 03 — Grand Portal (V27.3 Digital Experience): Stepped center-right podium + Rear flagship screen
+  tech: {
+    primary: { mode: 'in-space', position: [0.92, 1.01, 0.58], rotationY: -0.18, scale: 0.74 },
+    secondary: { mode: 'backdrop', position: [-0.86, 1.68, -1.83], rotationY: 0, scale: 1.0 },
+  },
+  // Booth 04 — Wave Pavilion (V27.3 Interactive Showcase): Sweeping wave counter + Orange cluster pedestal
+  energy: {
+    primary: { mode: 'in-space', position: [-1.05, 1.06, 0.84], rotationY: 0.14, scale: 0.74 },
+    secondary: { mode: 'in-space', position: [0.96, 1.01, 0.56], rotationY: -0.24, scale: 0.70 },
+  },
+  // Booth 05 — Gallery Arch (V27.3 Boutique Exhibition): Natural stone hero plinth + Recessed gallery bay
+  coffee: {
+    primary: { mode: 'in-space', position: [0.92, 1.03, 0.58], rotationY: -0.20, scale: 0.72 },
+    secondary: { mode: 'backdrop', position: [-0.88, 1.68, -1.83], rotationY: 0, scale: 1.0 },
+  },
+  // Booth 06 — Dynamic Frame (V27.3 Modern Innovation): Angular violet pedestal + Multi-tier demo counter
+  robotics: {
+    primary: { mode: 'in-space', position: [0.94, 1.02, 0.58], rotationY: -0.24, scale: 0.72 },
+    secondary: { mode: 'in-space', position: [-1.14, 1.05, 0.80], rotationY: 0.18, scale: 0.72 },
+  },
+};
+
 interface SlotProductDisplayProps {
   slotView: BoothSlotView;
   accentColor: string;
   isSelected: boolean;
   brandMat: THREE.Material;
   onSelectProduct?: (product: Product) => void;
-  placementMode?: 'backdrop' | 'shelf';
+  placementMode?: 'backdrop' | 'shelf' | 'in-space';
   backdropLocalPos?: readonly [number, number, number];
+  inSpaceTransform?: InSpaceDisplaySlotSpec;
 }
 
 const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
@@ -331,6 +471,7 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
     onSelectProduct,
     placementMode = 'shelf',
     backdropLocalPos,
+    inSpaceTransform,
   }) => {
     const [hovered, setHovered] = useState(false);
     const { slot, product } = slotView;
@@ -340,6 +481,16 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
       if (!product) return null;
       const priceText = formatCurrency(product.price, product.currency);
       const imageUrl = product.images?.[0] || '';
+      if (inSpaceTransform?.displayStyle) {
+        return createArchitecturalProductDisplayTexture({
+          name: product.name,
+          priceText,
+          imageUrl,
+          accentColor,
+          selected: isSelected,
+          style: inSpaceTransform.displayStyle,
+        });
+      }
       return createProductDisplayCardTexture({
         slotLabel: `${slot.slotId.toUpperCase()} · ${slot.label}`,
         name: product.name,
@@ -361,6 +512,7 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
       slot.label,
       accentColor,
       isSelected,
+      inSpaceTransform?.displayStyle,
     ]);
 
     useEffect(() => {
@@ -418,6 +570,73 @@ const SlotProductDisplay: React.FC<SlotProductDisplayProps> = React.memo(
               <meshBasicMaterial map={cardTexture} toneMapped={false} />
             </mesh>
           )}
+        </group>
+      );
+    }
+
+    // Mode 1B: V27.1 Universal In-Space Architectural Pedestal / Counter Display Stand
+    if (placementMode === 'in-space' && inSpaceTransform) {
+      const s = highlighted ? inSpaceTransform.scale * 1.04 : inSpaceTransform.scale;
+      return (
+        <group
+          position={[
+            inSpaceTransform.position[0],
+            inSpaceTransform.position[1],
+            inSpaceTransform.position[2],
+          ]}
+          rotation={[0, inSpaceTransform.rotationY, 0]}
+          onClick={
+            onSelectProduct
+              ? (e) => {
+                  e.stopPropagation();
+                  onSelectProduct(product);
+                }
+              : undefined
+          }
+          onPointerOver={(e) => {
+            e.stopPropagation();
+            setHovered(true);
+            document.body.style.cursor = 'pointer';
+          }}
+          onPointerOut={(e) => {
+            e.stopPropagation();
+            setHovered(false);
+            document.body.style.cursor = 'auto';
+          }}
+        >
+          <group scale={[s, s, s]}>
+            {/* Weighted Architectural Metallic Display Base */}
+            <mesh position={[0, 0.018, 0]} geometry={SLOT_STAND_BASE_GEOM} material={DARK_NAVY_MAT} />
+            <mesh
+              position={[0, 0.04, 0]}
+              geometry={SLOT_STAND_LED_TRIM_GEOM}
+              material={highlighted ? GOLD_BASIC_MAT : brandMat}
+            />
+            {/* Rear Angled Structural Easel Strut */}
+            <mesh
+              position={[0, 0.24, -0.10]}
+              rotation={[0.26, 0, 0]}
+              geometry={SLOT_STAND_STRUT_GEOM}
+              material={SLATE_DARK_MAT}
+            />
+            {/* Beveled 3D Architectural Display Frame with Real Depth */}
+            <group position={[0, 0.73, 0.02]} rotation={[-0.08, 0, 0]}>
+              <mesh
+                position={[0, 0, -0.006]}
+                geometry={SLOT_CARD_BEZEL_GEOM}
+                material={highlighted ? GOLD_BASIC_MAT : brandMat}
+              />
+              <mesh
+                geometry={SLOT_CARD_FRAME_GEOM}
+                material={highlighted ? GOLD_SHOWCASE_MAT : DARK_NAVY_MAT}
+              />
+              {cardTexture && (
+                <mesh position={[0, 0, 0.026]} geometry={SLOT_CARD_PLANE_GEOM}>
+                  <meshBasicMaterial map={cardTexture} toneMapped={false} />
+                </mesh>
+              )}
+            </group>
+          </group>
         </group>
       );
     }
@@ -528,6 +747,8 @@ export const Booth: React.FC<BoothProps> = React.memo(
     isSelected,
     onSelect,
     visible = true,
+    showParkPlanters = true,
+    worldVersion = 'v26',
   }) => {
     const [hovered, setHovered] = useState(false);
     const beaconRingRef = useRef<THREE.Mesh>(null);
@@ -538,6 +759,12 @@ export const Booth: React.FC<BoothProps> = React.memo(
     const vd = Math.max(d, 4.4);
     const active = hovered || isSelected;
     const theme = useMemo(() => resolveBoothTheme(booth), [booth]);
+    const boothModelVersion = useMemo(
+      () => resolveBoothModelVersion(theme, { worldVersion }),
+      [theme, worldVersion]
+    );
+    const isBoothV274 = boothModelVersion === 'v27_4';
+    const isBoothV4 = boothModelVersion === 'v4' || boothModelVersion === 'v27_3' || isBoothV274;
     const isBoothV2 = true;
     const exteriorShell = useMemo(
       () => cloneCachedAsset(getBoothGlbAssetId(theme)),
@@ -640,22 +867,40 @@ export const Booth: React.FC<BoothProps> = React.memo(
           totalSlots: BOOTH_SLOT_DEFINITIONS.length,
           theme,
         }),
-        idleSignTexture: createBoothSignTexture({
-          name: enterpriseTitle,
-          category: standSubtitle,
-          productCount: occupiedSlotCount || productCount,
-          color: booth.color,
-          active: false,
-          theme,
-        }),
-        activeSignTexture: createBoothSignTexture({
-          name: enterpriseTitle,
-          category: standSubtitle,
-          productCount: occupiedSlotCount || productCount,
-          color: booth.color,
-          active: true,
-          theme,
-        }),
+        idleSignTexture: isBoothV274
+          ? createArchitecturalSignTexture({
+              name: enterpriseTitle,
+              category: standSubtitle,
+              productCount: occupiedSlotCount || productCount,
+              color: booth.color,
+              active: false,
+              theme,
+            })
+          : createBoothSignTexture({
+              name: enterpriseTitle,
+              category: standSubtitle,
+              productCount: occupiedSlotCount || productCount,
+              color: booth.color,
+              active: false,
+              theme,
+            }),
+        activeSignTexture: isBoothV274
+          ? createArchitecturalSignTexture({
+              name: enterpriseTitle,
+              category: standSubtitle,
+              productCount: occupiedSlotCount || productCount,
+              color: booth.color,
+              active: true,
+              theme,
+            })
+          : createBoothSignTexture({
+              name: enterpriseTitle,
+              category: standSubtitle,
+              productCount: occupiedSlotCount || productCount,
+              color: booth.color,
+              active: true,
+              theme,
+            }),
       };
     }, [
       booth.name,
@@ -671,6 +916,7 @@ export const Booth: React.FC<BoothProps> = React.memo(
       occupiedSlotCount,
       productCount,
       theme,
+      isBoothV274,
     ]);
 
     useEffect(() => {
@@ -765,23 +1011,30 @@ export const Booth: React.FC<BoothProps> = React.memo(
           document.body.style.cursor = 'auto';
         }}
       >
-        {/* Architectural Landscaping Decorator (PBR Planter & Shrub Plants) */}
-        <ExteriorAssets id="booth-planter" placements={boothDecorPlacements} />
+        {/* Architectural Landscaping Decorator (Legacy V26 Park Planter Trees only — disabled in V27 Grand Expo Hall) */}
+        {showParkPlanters && <ExteriorAssets id="booth-planter" placements={boothDecorPlacements} />}
         {/* ================================================================
             1. ROOFLESS BLENDER FRAME + ORIGINAL EXHIBITION FLOOR
                (For V2 booths, passes isV2={true} to load bespoke V2 GLBs)
            ================================================================ */}
-        <RooflessBoothShell theme={theme} fallback={exteriorShell} isV2={isBoothV2} />
+        <RooflessBoothShell
+          theme={theme}
+          fallback={exteriorShell}
+          isV2={isBoothV2}
+          worldVersion={worldVersion}
+        />
 
         {/* Active Selection Glow Trim & Interactive Entrance Beacon */}
-        <mesh position={[0, 0.03, 0]}>
-          <boxGeometry args={[vw + 1.38, 0.05, vd + 1.18]} />
-          <meshBasicMaterial
-            color={booth.color}
-            transparent
-            opacity={active ? 0.98 : 0.72}
-          />
-        </mesh>
+        {(!isBoothV4 || active) && (
+          <mesh position={[0, 0.03, 0]}>
+            <boxGeometry args={[vw + 1.38, 0.05, vd + 1.18]} />
+            <meshBasicMaterial
+              color={booth.color}
+              transparent
+              opacity={active ? 0.92 : 0.72}
+            />
+          </mesh>
+        )}
 
         {/* Inner Showroom Rug / Zone Mat (Disabled for V2 because V2 has its own composite deck) */}
         {!isBoothV2 && (
@@ -815,9 +1068,9 @@ export const Booth: React.FC<BoothProps> = React.memo(
                KHU C) SYMMETRIC LEFT & RIGHT 2-TIER SECONDARY SHELVES (slot_03..06)
            ================================================================ */}
 
-        {/* Rear Architectural Showroom Backdrop Wall (Calm spotlight background behind Hero Products) */}
-        {isBoothV2 ? (
-          /* For V2 booths, the solid outer casing & frame are in the GLB at z = -1.95m.
+        {/* Rear Architectural Showroom Backdrop Wall (Omitted for V27.4 so bespoke Blender gallery walls & niches shine!) */}
+        {isBoothV274 ? null : isBoothV2 ? (
+          /* For V2/V3/V4/V27.3 booths, the solid outer casing & frame are in the GLB at z = -1.95m.
              The dynamic backdrop canvas plane is placed facing +Z (front) at z = -1.86m (well in front of the GLB frame) */
           <group position={[0, 1.82, 0]}>
             <mesh position={[0, 0, -1.86]} geometry={BACKDROP_CANVAS_GEOM}>
@@ -1034,57 +1287,101 @@ export const Booth: React.FC<BoothProps> = React.memo(
         )}
 
         {/* ================================================================
-            3. BACKDROP-INTEGRATED PRODUCT DISPLAYS + OVERFLOW SECONDARY SHELVES
+            3. UNIVERSAL PRODUCT DISPLAYS:
+               - V27.4: All 6 slots mapped onto bespoke per-booth architectural furniture with gallery-grade displays
+               - V27.3 / V27.1: Bespoke per-booth In-Space Pedestal/Counter/Wall Showcase
+               - V27.0 / V26.1: Flush Backdrop Display Bays + Overflow Secondary Shelves
            ================================================================ */}
-        {leftBackdropSlot && (
-          <SlotProductDisplay
-            key={`backdrop-left-${leftBackdropSlot.slot.slotId}`}
-            slotView={leftBackdropSlot}
-            accentColor={booth.color}
-            isSelected={Boolean(
-              leftBackdropSlot.product &&
-                (selectedProductId === leftBackdropSlot.product.id ||
-                  npcHighlightedProductId === leftBackdropSlot.product.id)
-            )}
-            brandMat={brandFlatMat}
-            onSelectProduct={onSelectProduct}
-            placementMode="backdrop"
-            backdropLocalPos={leftBayPos}
-          />
-        )}
+        {isBoothV274 ? (
+          resolvedSlots
+            .filter((sv) => Boolean(sv.product))
+            .map((slotView, idx) => {
+              const specs = V27_4_PRODUCT_DISPLAY_LAYOUTS[theme];
+              const spec = specs[idx % specs.length];
+              return (
+                <SlotProductDisplay
+                  key={`v274-slot-${slotView.slot.slotId}`}
+                  slotView={slotView}
+                  accentColor={booth.color}
+                  isSelected={Boolean(
+                    slotView.product &&
+                      (selectedProductId === slotView.product.id ||
+                        npcHighlightedProductId === slotView.product.id)
+                  )}
+                  brandMat={brandFlatMat}
+                  onSelectProduct={onSelectProduct}
+                  placementMode="in-space"
+                  inSpaceTransform={spec}
+                />
+              );
+            })
+        ) : (
+          <>
+            {leftBackdropSlot && (() => {
+              const v271Spec =
+                worldVersion === 'v27' && isBoothV4
+                  ? V27_1_IN_SPACE_SHOWCASE_LAYOUTS[theme].primary
+                  : null;
+              return (
+                <SlotProductDisplay
+                  key={`backdrop-left-${leftBackdropSlot.slot.slotId}`}
+                  slotView={leftBackdropSlot}
+                  accentColor={booth.color}
+                  isSelected={Boolean(
+                    leftBackdropSlot.product &&
+                      (selectedProductId === leftBackdropSlot.product.id ||
+                        npcHighlightedProductId === leftBackdropSlot.product.id)
+                  )}
+                  brandMat={brandFlatMat}
+                  onSelectProduct={onSelectProduct}
+                  placementMode={v271Spec ? v271Spec.mode : 'backdrop'}
+                  backdropLocalPos={v271Spec?.mode === 'backdrop' ? v271Spec.position : leftBayPos}
+                  inSpaceTransform={v271Spec?.mode === 'in-space' ? v271Spec : undefined}
+                />
+              );
+            })()}
 
-        {rightBackdropSlot && (
-          <SlotProductDisplay
-            key={`backdrop-right-${rightBackdropSlot.slot.slotId}`}
-            slotView={rightBackdropSlot}
-            accentColor={booth.color}
-            isSelected={Boolean(
-              rightBackdropSlot.product &&
-                (selectedProductId === rightBackdropSlot.product.id ||
-                  npcHighlightedProductId === rightBackdropSlot.product.id)
-            )}
-            brandMat={brandFlatMat}
-            onSelectProduct={onSelectProduct}
-            placementMode="backdrop"
-            backdropLocalPos={rightBayPos}
-          />
-        )}
+            {rightBackdropSlot && (() => {
+              const v271Spec =
+                worldVersion === 'v27' && isBoothV4
+                  ? V27_1_IN_SPACE_SHOWCASE_LAYOUTS[theme].secondary
+                  : null;
+              return (
+                <SlotProductDisplay
+                  key={`backdrop-right-${rightBackdropSlot.slot.slotId}`}
+                  slotView={rightBackdropSlot}
+                  accentColor={booth.color}
+                  isSelected={Boolean(
+                    rightBackdropSlot.product &&
+                      (selectedProductId === rightBackdropSlot.product.id ||
+                        npcHighlightedProductId === rightBackdropSlot.product.id)
+                  )}
+                  brandMat={brandFlatMat}
+                  onSelectProduct={onSelectProduct}
+                  placementMode={v271Spec ? v271Spec.mode : 'backdrop'}
+                  backdropLocalPos={v271Spec?.mode === 'backdrop' ? v271Spec.position : rightBayPos}
+                  inSpaceTransform={v271Spec?.mode === 'in-space' ? v271Spec : undefined}
+                />
+              );
+            })()}
 
-        {remainingShelfSlots.map((slotView) => (
-          <SlotProductDisplay
-            key={slotView.slot.slotId}
-            slotView={slotView}
-            accentColor={booth.color}
-            isSelected={Boolean(
-              slotView.product &&
-                (selectedProductId === slotView.product.id ||
-                  npcHighlightedProductId === slotView.product.id)
-            )}
-            brandMat={brandFlatMat}
-            onSelectProduct={onSelectProduct}
-            placementMode="shelf"
-          />
-        ))}
+            {remainingShelfSlots.map((slotView) => (
+              <SlotProductDisplay
+                key={slotView.slot.slotId}
+                slotView={slotView}
+                accentColor={booth.color}
+                isSelected={Boolean(
+                  slotView.product &&
+                    (selectedProductId === slotView.product.id ||
+                      npcHighlightedProductId === slotView.product.id)
+                )}
+                brandMat={brandFlatMat}
+                onSelectProduct={onSelectProduct}
+                placementMode="shelf"
+              />
+            ))}
+          </>
+        )}
 
         {/* ================================================================
             3B. VIETNAMESE FEMALE 3D SALES ASSISTANT NPC BESIDE BOOTH ENTRANCE
@@ -1103,16 +1400,46 @@ export const Booth: React.FC<BoothProps> = React.memo(
                 The dynamic canvas plane is placed directly on the front face at z = 3.60m, y = 3.38m)
            ================================================================ */}
         {isBoothV2 ? (
-          <group position={[0, 0, 0]}>
-            <mesh position={[0, 3.38, 3.60]}>
-              <planeGeometry args={[vw + 0.36, 0.68]} />
-              <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
-            </mesh>
-            <mesh position={[0, 3.38, 3.36]} rotation={[0, Math.PI, 0]}>
-              <planeGeometry args={[vw + 0.36, 0.68]} />
-              <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
-            </mesh>
-          </group>
+          isBoothV274 ? (() => {
+            const signCfg = V27_4_SIGNAGE_CONFIGS[theme];
+            return (
+              <group position={[0, 0, 0]}>
+                <mesh position={[signCfg.position[0], signCfg.position[1], signCfg.position[2]]}>
+                  <planeGeometry args={[signCfg.width, signCfg.height]} />
+                  <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+                </mesh>
+                <mesh
+                  position={[signCfg.backPosition[0], signCfg.backPosition[1], signCfg.backPosition[2]]}
+                  rotation={[0, Math.PI, 0]}
+                >
+                  <planeGeometry args={[signCfg.width, signCfg.height]} />
+                  <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+                </mesh>
+              </group>
+            );
+          })() : isBoothV4 ? (
+            <group position={[0, 0, 0]}>
+              <mesh position={[0, 3.43, 2.27]}>
+                <planeGeometry args={worldVersion === 'v27' ? [5.28, 0.46] : [5.76, 0.62]} />
+                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+              </mesh>
+              <mesh position={[0, 3.43, 1.84]} rotation={[0, Math.PI, 0]}>
+                <planeGeometry args={worldVersion === 'v27' ? [5.28, 0.46] : [5.76, 0.62]} />
+                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+              </mesh>
+            </group>
+          ) : (
+            <group position={[0, 0, 0]}>
+              <mesh position={[0, 3.38, 3.60]}>
+                <planeGeometry args={[vw + 0.36, 0.68]} />
+                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+              </mesh>
+              <mesh position={[0, 3.38, 3.36]} rotation={[0, Math.PI, 0]}>
+                <planeGeometry args={[vw + 0.36, 0.68]} />
+                <meshBasicMaterial map={currentSignTexture} transparent toneMapped={false} />
+              </mesh>
+            </group>
+          )
         ) : (
           <>
             {theme === 'tech' && (

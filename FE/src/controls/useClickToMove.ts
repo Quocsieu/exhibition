@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback } from 'react';
 import {
   type Booth,
+  type NavigationWorldOptions,
   type Point2D,
   PLAYER_SPEED,
   CENTRAL_SPAWN_POINT,
@@ -19,6 +20,7 @@ export interface PlayerTransform {
 export interface UseClickToMoveOptions {
   booths: Booth[];
   initialPosition?: { x: number; z: number; rotationY?: number };
+  navOptions?: NavigationWorldOptions;
   disabled?: boolean;
   cameraYawRef?: React.MutableRefObject<number | null>;
   onTransformChange?: (transform: PlayerTransform) => void;
@@ -28,6 +30,7 @@ export interface UseClickToMoveOptions {
 export function useClickToMove({
   booths,
   initialPosition = CENTRAL_SPAWN_POINT,
+  navOptions,
   disabled = false,
   cameraYawRef,
   onTransformChange,
@@ -47,6 +50,8 @@ export function useClickToMove({
   const joystickVecRef = useRef<{ dx: number; dz: number }>({ dx: 0, dz: 0 });
   const boothsRef = useRef<Booth[]>(booths);
   boothsRef.current = booths;
+  const navOptionsRef = useRef<NavigationWorldOptions | undefined>(navOptions);
+  navOptionsRef.current = navOptions;
   const disabledRef = useRef<boolean>(disabled);
   disabledRef.current = disabled;
 
@@ -81,7 +86,15 @@ export function useClickToMove({
 
   const moveToPoint = useCallback((targetX: number, targetZ: number, targetBooth?: Booth) => {
     const current = transformRef.current;
-    const computedPath = findPathAStar(current.x, current.z, targetX, targetZ, boothsRef.current);
+    const computedPath = findPathAStar(
+      current.x,
+      current.z,
+      targetX,
+      targetZ,
+      boothsRef.current,
+      undefined,
+      navOptionsRef.current
+    );
     pathRef.current = computedPath;
     pendingBoothRef.current = targetBooth ?? null;
     setActivePath(
@@ -171,7 +184,9 @@ export function useClickToMove({
           current.z,
           desiredX,
           desiredZ,
-          boothsRef.current
+          boothsRef.current,
+          undefined,
+          navOptionsRef.current
         );
         nextX = resolved.x;
         nextZ = resolved.z;
@@ -190,7 +205,9 @@ export function useClickToMove({
             current.z,
             waypoint.x,
             waypoint.z,
-            boothsRef.current
+            boothsRef.current,
+            undefined,
+            navOptionsRef.current
           );
           nextX = resolved.x;
           nextZ = resolved.z;
@@ -218,7 +235,9 @@ export function useClickToMove({
             current.z,
             desiredX,
             desiredZ,
-            boothsRef.current
+            boothsRef.current,
+            undefined,
+            navOptionsRef.current
           );
           nextX = resolved.x;
           nextZ = resolved.z;

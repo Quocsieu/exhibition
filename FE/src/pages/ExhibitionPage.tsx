@@ -12,6 +12,12 @@ import {
   isPointWalkable,
 } from '../types/expo';
 import { ExhibitionScene, type CameraViewMode } from '../scene/ExhibitionScene';
+import {
+  applyWorldLayoutToBooths,
+  getWorldRuntimeConfig,
+  resolveExpoWorldVersion,
+  type ExpoWorldVersion,
+} from '../scene/worldLayout';
 import { useClickToMove, type PlayerTransform } from '../controls/useClickToMove';
 import { MobileJoystick } from '../controls/MobileJoystick';
 import { BoothPanel } from '../components/BoothPanel';
@@ -70,14 +76,16 @@ function getStoredIdentity(): { name: string; color: string } {
   return { name, color };
 }
 
-function getInitialVisitorSpawn(): {
+function getInitialVisitorSpawn(worldVersion: ExpoWorldVersion): {
   x: number;
   z: number;
   rotationY: number;
   restored: boolean;
 } {
+  const cfg = getWorldRuntimeConfig(worldVersion);
+  const worldDefaultBooths = applyWorldLayoutToBooths(DEFAULT_BOOTHS, worldVersion);
   try {
-    const raw = sessionStorage.getItem('expo_visitor_pos');
+    const raw = sessionStorage.getItem(cfg.storageKey);
     if (raw) {
       const parsed = JSON.parse(raw) as { x?: unknown; z?: unknown; rotationY?: unknown };
       if (
@@ -85,7 +93,7 @@ function getInitialVisitorSpawn(): {
         Number.isFinite(parsed.x) &&
         typeof parsed.z === 'number' &&
         Number.isFinite(parsed.z) &&
-        isPointWalkable(parsed.x, parsed.z, DEFAULT_BOOTHS)
+        isPointWalkable(parsed.x, parsed.z, worldDefaultBooths, undefined, cfg.navOptions)
       ) {
         return {
           x: parsed.x,
@@ -93,18 +101,18 @@ function getInitialVisitorSpawn(): {
           rotationY:
             typeof parsed.rotationY === 'number' && Number.isFinite(parsed.rotationY)
               ? parsed.rotationY
-              : CENTRAL_SPAWN_POINT.rotationY,
+              : cfg.spawnPoint.rotationY,
           restored: true,
         };
       }
     }
   } catch {
-    // Ignore storage read errors and fall back to Central Plaza spawn
+    // Ignore storage read errors and fall back to active world spawn
   }
   return {
-    x: CENTRAL_SPAWN_POINT.x,
-    z: CENTRAL_SPAWN_POINT.z,
-    rotationY: CENTRAL_SPAWN_POINT.rotationY,
+    x: cfg.spawnPoint.x,
+    z: cfg.spawnPoint.z,
+    rotationY: cfg.spawnPoint.rotationY,
     restored: false,
   };
 }
@@ -117,13 +125,17 @@ export interface ExhibitionPageProps {
 export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   initialFocusBoothId = null,
 }) => {
+  const worldVersion = useMemo<ExpoWorldVersion>(() => resolveExpoWorldVersion(), []);
+  const worldConfig = useMemo(() => getWorldRuntimeConfig(worldVersion), [worldVersion]);
   const initialIdentity = useMemo(() => getStoredIdentity(), []);
-  const initialSpawn = useMemo(() => getInitialVisitorSpawn(), []);
+  const initialSpawn = useMemo(() => getInitialVisitorSpawn(worldVersion), [worldVersion]);
   const hasLockedPositionRef = useRef<boolean>(initialSpawn.restored);
   const [playerName, setPlayerName] = useState(initialIdentity.name);
   const [playerColor, setPlayerColor] = useState(initialIdentity.color);
 
-  const [booths, setBooths] = useState<Booth[]>(DEFAULT_BOOTHS);
+  const [booths, setBooths] = useState<Booth[]>(() =>
+    applyWorldLayoutToBooths(DEFAULT_BOOTHS, worldVersion)
+  );
   const [products, setProducts] = useState<Product[]>(DEFAULT_PRODUCTS);
   const [slotAssignments, setSlotAssignments] = useState<BoothSlotAssignment[]>(
     FALLBACK_SLOT_ASSIGNMENTS
@@ -306,20 +318,20 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
           assignments: FALLBACK_SLOT_ASSIGNMENTS,
         })),
       ]);
-      setBooths(fetchedBooths);
+      setBooths(applyWorldLayoutToBooths(fetchedBooths, worldVersion));
       setProducts(fetchedProducts);
       setSlotAssignments(fetchedSlots.assignments);
       setDataWarning(null);
       lastSilentRefreshAtRef.current = Date.now();
     } catch {
-      setBooths(DEFAULT_BOOTHS);
+      setBooths(applyWorldLayoutToBooths(DEFAULT_BOOTHS, worldVersion));
       setProducts(DEFAULT_PRODUCTS);
       setSlotAssignments(FALLBACK_SLOT_ASSIGNMENTS);
       setDataWarning('Đang hiển thị dữ liệu mẫu cục bộ (Chưa kết nối được API Backend).');
     } finally {
       setLoadingData(false);
     }
-  }, []);
+  }, [worldVersion]);
 
   const refreshExpoDataSilently = useCallback(async (force = false) => {
     const now = Date.now();
@@ -337,7 +349,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         apiClient.getProducts(),
         apiClient.getSlots(),
       ]);
-      setBooths(fetchedBooths);
+      setBooths(applyWorldLayoutToBooths(fetchedBooths, worldVersion));
       setProducts(fetchedProducts);
       setSlotAssignments(fetchedSlots.assignments);
       setDataWarning(null);
@@ -350,7 +362,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         void refreshExpoDataSilently(true);
       }
     }
-  }, []);
+  }, [worldVersion]);
 
   const handleRealtimeDataUpdated = useCallback(() => {
     if (socketDebounceTimerRef.current) {
@@ -494,7 +506,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       if (nextTransform.state === 'idle') {
         try {
           sessionStorage.setItem(
-            'expo_visitor_pos',
+            worldConfig.storageKey,
             JSON.stringify({
               x: nextTransform.x,
               z: nextTransform.z,
@@ -513,7 +525,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         activeBoothId: selectedBooth?.id ?? null,
       });
     },
-    [selectedBooth?.id]
+    [selectedBooth?.id, worldConfig.storageKey]
   );
 
   const {
@@ -526,6 +538,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   } = useClickToMove({
     booths,
     initialPosition: initialSpawn,
+    navOptions: worldConfig.navOptions,
     disabled: false,
     cameraYawRef,
     onTransformChange: handleTransformChange,
@@ -542,6 +555,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
   } = useRealtime({
     initialName: initialIdentity.name,
     initialColor: initialIdentity.color,
+    worldVersion,
     getLiveTransform: () =>
       hasLockedPositionRef.current
         ? {
@@ -559,6 +573,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
       }
     },
     onMoveRejected: (x, z) => {
+      // Authoritative server-side collision & bounds enforcement for both V26 and V27
       forcePosition(x, z);
     },
     onDataUpdated: handleRealtimeDataUpdated,
@@ -573,8 +588,8 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     setSelectedBooth(null);
     setSelectedProduct(null);
     setFocusedBooth(null);
-    setZoom(restoredMode === 'overview' ? OVERVIEW_DEFAULT_ZOOM : EXPLORE_DEFAULT_ZOOM);
-  }, [closeNpcSession]);
+    setZoom(restoredMode === 'overview' ? worldConfig.overviewDefaultZoom : EXPLORE_DEFAULT_ZOOM);
+  }, [closeNpcSession, worldConfig.overviewDefaultZoom]);
 
   const handleSwitchToOverview = useCallback(() => {
     closeNpcSession();
@@ -583,8 +598,8 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
     setSelectedBooth(null);
     setSelectedProduct(null);
     setFocusedBooth(null);
-    setZoom(OVERVIEW_DEFAULT_ZOOM);
-  }, [closeNpcSession]);
+    setZoom(worldConfig.overviewDefaultZoom);
+  }, [closeNpcSession, worldConfig.overviewDefaultZoom]);
 
   const handleSwitchToExplore = useCallback(() => {
     closeNpcSession();
@@ -1937,6 +1952,7 @@ export const ExhibitionPage: React.FC<ExhibitionPageProps> = ({
         onGroundClick={handleGroundClick}
         zoom={zoom}
         onZoomChange={setZoom}
+        worldVersion={worldVersion}
       />
 
       {!isBoothShowcaseActive && <MobileJoystick onMove={handleJoystickMove} />}

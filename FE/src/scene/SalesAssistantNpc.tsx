@@ -639,7 +639,7 @@ export function buildRiggedAndColoredNpcScene(rawScene: THREE.Group): THREE.Grou
 
     const skinnedMesh = new THREE.SkinnedMesh(geom, assignedMaterial);
     skinnedMesh.name = srcMesh.name || 'NpcSkinnedPart';
-    skinnedMesh.castShadow = true;
+    skinnedMesh.castShadow = false;
     skinnedMesh.receiveShadow = true;
     skinnedMesh.frustumCulled = false;
     skinnedMesh.bind(skeleton);
@@ -659,21 +659,33 @@ export function buildRiggedAndColoredNpcScene(rawScene: THREE.Group): THREE.Grou
   return riggedRoot;
 }
 
-let cachedMaster: CachedNpcMaster | null = null;
-let loadingPromise: Promise<CachedNpcMaster> | null = null;
+type NpcLodLevel = 0 | 1 | 2;
+
+const NPC_LOD_URLS: Record<NpcLodLevel, string> = {
+  0: NPC_GLB_URL,
+  1: '/models/npc/untitled_lod1.glb?v=27.2',
+  2: '/models/npc/untitled_lod2.glb?v=27.2',
+};
+
+const cachedMasters: Partial<Record<NpcLodLevel, CachedNpcMaster>> = {};
+const loadingPromises: Partial<Record<NpcLodLevel, Promise<CachedNpcMaster>>> = {};
 const gltfLoader = new GLTFLoader();
+const _tmpNpcWorldPos = new THREE.Vector3();
 
-function loadSharedNpcMaster(): Promise<CachedNpcMaster> {
-  if (cachedMaster) {
-    return Promise.resolve(cachedMaster);
+function loadSharedNpcMaster(lod: NpcLodLevel = 0): Promise<CachedNpcMaster> {
+  const existing = cachedMasters[lod];
+  if (existing) {
+    return Promise.resolve(existing);
   }
-  if (loadingPromise) {
-    return loadingPromise;
+  const inFlight = loadingPromises[lod];
+  if (inFlight) {
+    return inFlight;
   }
 
-  loadingPromise = new Promise<CachedNpcMaster>((resolve, reject) => {
+  const url = NPC_LOD_URLS[lod];
+  const promise = new Promise<CachedNpcMaster>((resolve, reject) => {
     gltfLoader.load(
-      NPC_GLB_URL,
+      url,
       (gltf: GLTF) => {
         const animations: Record<NpcAnimationClipName, THREE.AnimationClip | null> = {
           IDLE: null,
@@ -724,7 +736,7 @@ function loadSharedNpcMaster(): Promise<CachedNpcMaster> {
           gltf.scene.traverse((obj) => {
             if ((obj as THREE.Mesh).isMesh) {
               const mesh = obj as THREE.Mesh;
-              mesh.castShadow = true;
+              mesh.castShadow = false;
               mesh.receiveShadow = true;
             }
           });
@@ -732,23 +744,30 @@ function loadSharedNpcMaster(): Promise<CachedNpcMaster> {
           preparedScene = wrapper;
         }
 
-        cachedMaster = {
+        const built: CachedNpcMaster = {
           scene: preparedScene,
           animations,
           hasEmbeddedClips,
           hasProceduralRig,
         };
-        resolve(cachedMaster);
+        cachedMasters[lod] = built;
+        resolve(built);
       },
       undefined,
       (err) => {
-        loadingPromise = null;
+        delete loadingPromises[lod];
+        if (lod !== 0) {
+          // Graceful fallback to LOD0 if LOD1/LOD2 asset is unavailable
+          loadSharedNpcMaster(0).then(resolve, reject);
+          return;
+        }
         reject(err);
       }
     );
   });
 
-  return loadingPromise;
+  loadingPromises[lod] = promise;
+  return promise;
 }
 
 export const NPC_NAMEPLATE_SIZE: readonly [number, number] = [0.68, 0.23];
@@ -840,7 +859,9 @@ function createNpcBadgeTexture(opts: {
 
 export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
   ({ booth, isActiveSession, activeAnimation, onActivate, visible = true }) => {
-    const [master, setMaster] = useState<CachedNpcMaster | null>(() => cachedMaster);
+    const [master, setMaster] = useState<CachedNpcMaster | null>(
+      () => cachedMasters[isActiveSession ? 0 : 2] ?? cachedMasters[0] ?? null
+    );
     const [hovered, setHovered] = useState(false);
 
     const ringRef = useRef<THREE.Mesh>(null);
@@ -869,12 +890,25 @@ export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
       return (sum % 17) * 0.37;
     }, [booth.id]);
 
+    const [activeLod, setActiveLod] = useState<NpcLodLevel>(() => (isActiveSession ? 0 : 2));
+    const activeLodRef = useRef<NpcLodLevel>(activeLod);
+    activeLodRef.current = activeLod;
+    const npcGroupRef = useRef<THREE.Group>(null);
+    const animAccumRef = useRef<number>(0);
+
     const placement = useMemo(() => computeNpcPlacement(booth), [booth]);
     const profile = useMemo(() => getNpcAssistantProfile(booth), [booth]);
 
     useEffect(() => {
+      if (isActiveSession && activeLodRef.current !== 0) {
+        activeLodRef.current = 0;
+        setActiveLod(0);
+      }
+    }, [isActiveSession]);
+
+    useEffect(() => {
       let mounted = true;
-      loadSharedNpcMaster()
+      loadSharedNpcMaster(activeLod)
         .then((loaded) => {
           if (mounted) {
             setMaster(loaded);
@@ -886,7 +920,7 @@ export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
       return () => {
         mounted = false;
       };
-    }, []);
+    }, [activeLod]);
 
     const boothAccentMat = useMemo(
       () =>
@@ -1024,9 +1058,44 @@ export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
       };
     }, [badgeTexture]);
 
-    useFrame(({ clock }, rawDelta) => {
+    useFrame(({ clock, camera }, rawDelta) => {
       if (!visible) return;
       const delta = Math.min(rawDelta, 0.1);
+
+      // Distance + camera-mode LOD selector with ±1.8m hysteresis (LOD0 close/Focus, LOD1 mid, LOD2 far/Overview)
+      if (npcGroupRef.current) {
+        let desiredLod: NpcLodLevel = activeLodRef.current;
+        if (isActiveSession) {
+          desiredLod = 0;
+        } else if ((camera as THREE.OrthographicCamera).isOrthographicCamera) {
+          desiredLod = 2;
+        } else {
+          npcGroupRef.current.getWorldPosition(_tmpNpcWorldPos);
+          const dist = camera.position.distanceTo(_tmpNpcWorldPos);
+          const cur = activeLodRef.current;
+          if (cur === 0) {
+            if (dist > 14.8) desiredLod = dist > 25.0 ? 2 : 1;
+          } else if (cur === 1) {
+            if (dist < 11.4) desiredLod = 0;
+            else if (dist > 25.2) desiredLod = 2;
+          } else {
+            if (dist < 11.4) desiredLod = 0;
+            else if (dist < 21.6) desiredLod = 1;
+          }
+        }
+        if (desiredLod !== activeLodRef.current) {
+          activeLodRef.current = desiredLod;
+          setActiveLod(desiredLod);
+        }
+      }
+
+      // Throttle idle breathing bone math to 15 Hz for distant LOD2 NPCs when not active/hovered
+      if (!isActiveSession && !hovered && activeLodRef.current === 2) {
+        animAccumRef.current += delta;
+        if (animAccumRef.current < 0.066) return;
+        animAccumRef.current = 0;
+      }
+
       const t = clock.getElapsedTime() + phaseOffset;
 
       if (mixerRef.current) {
@@ -1164,6 +1233,7 @@ export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
 
     return (
       <group
+        ref={npcGroupRef}
         visible={visible}
         position={[placement.localX, placement.localY, placement.localZ]}
         rotation={[0, placement.localRotationY, 0]}

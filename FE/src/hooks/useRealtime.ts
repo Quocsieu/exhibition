@@ -13,6 +13,7 @@ import { SOCKET_BASE_URL } from '../config/apiConfig';
 export interface UseRealtimeOptions {
   initialName: string;
   initialColor: string;
+  worldVersion?: 'v26' | 'v27_0' | 'v27';
   getLiveTransform?: () => { x: number; z: number; rotationY: number } | null;
   onWorldInitSelf?: (self: VisitorState) => void;
   onMoveRejected?: (x: number, z: number, reason: string) => void;
@@ -22,6 +23,7 @@ export interface UseRealtimeOptions {
 export function useRealtime({
   initialName,
   initialColor,
+  worldVersion = 'v26',
   getLiveTransform,
   onWorldInitSelf,
   onMoveRejected,
@@ -66,6 +68,7 @@ export function useRealtime({
         cb({
           name: initialName,
           color: initialColor,
+          worldVersion,
           ...(live
             ? {
                 x: live.x,
@@ -192,7 +195,7 @@ export function useRealtime({
       }
       socketRef.current = null;
     };
-  }, [initialName, initialColor]);
+  }, [initialName, initialColor, worldVersion]);
 
   const emitMovement = useCallback((payload: VisitorMovePayload) => {
     const socket = socketRef.current;

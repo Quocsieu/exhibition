@@ -1,10 +1,39 @@
 import { z } from 'zod';
 
+export type ExpoWorldVersion = 'v26' | 'v27_0' | 'v27';
+
+export function normalizeExpoWorldVersion(raw: unknown): ExpoWorldVersion {
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'v27_0' || normalized === 'v27.0') {
+      return 'v27_0';
+    }
+    if (normalized === 'v27' || normalized === 'v27_1' || normalized === 'v27.1') {
+      return 'v27';
+    }
+  }
+  return 'v26';
+}
+
 export const WORLD_BOUNDS = {
   minX: -24,
   maxX: 24,
   minZ: -24,
   maxZ: 24,
+} as const;
+
+export const V27_0_WORLD_BOUNDS = {
+  minX: -18.4,
+  maxX: 18.4,
+  minZ: -17.0,
+  maxZ: 17.0,
+} as const;
+
+export const V27_WORLD_BOUNDS = {
+  minX: -22.8,
+  maxX: 22.8,
+  minZ: -20.8,
+  maxZ: 20.8,
 } as const;
 
 export const PLAYER_RADIUS = 0.55;
@@ -27,6 +56,24 @@ export const CENTRAL_SPAWN_SLOTS: ReadonlyArray<{ x: number; z: number; rotation
   { x: 0, z: -3.8, rotationY: 0 },
 ];
 
+export const V27_0_SPAWN_SLOTS: ReadonlyArray<{ x: number; z: number; rotationY: number }> = [
+  { x: 0, z: 12.2, rotationY: Math.PI },
+  { x: -1.4, z: 12.2, rotationY: Math.PI },
+  { x: 1.4, z: 12.2, rotationY: Math.PI },
+  { x: -2.6, z: 11.8, rotationY: Math.PI },
+  { x: 2.6, z: 11.8, rotationY: Math.PI },
+  { x: 0, z: 10.6, rotationY: Math.PI },
+];
+
+export const V27_SPAWN_SLOTS: ReadonlyArray<{ x: number; z: number; rotationY: number }> = [
+  { x: 0, z: 15.2, rotationY: Math.PI },
+  { x: -1.6, z: 15.2, rotationY: Math.PI },
+  { x: 1.6, z: 15.2, rotationY: Math.PI },
+  { x: -3.0, z: 14.8, rotationY: Math.PI },
+  { x: 3.0, z: 14.8, rotationY: Math.PI },
+  { x: 0, z: 13.4, rotationY: Math.PI },
+];
+
 export interface ObstacleBox {
   id: string;
   minX: number;
@@ -45,6 +92,47 @@ export const STATIC_OBSTACLES: ObstacleBox[] = [
   { id: 'planter-sw', minX: -6.8, maxX: -5.2, minZ: 4.2, maxZ: 5.8, label: 'Bồn cây Tây Nam' },
   { id: 'planter-se', minX: 5.2, maxX: 6.8, minZ: 4.2, maxZ: 5.8, label: 'Bồn cây Đông Nam' },
 ];
+
+export const V27_0_STATIC_OBSTACLES: ObstacleBox[] = [
+  { id: 'v27-wayfinding-left', minX: -7.1, maxX: -6.1, minZ: 13.4, maxZ: 14.3, label: 'Biển chỉ dẫn Trái' },
+  { id: 'v27-wayfinding-right', minX: 6.1, maxX: 7.1, minZ: 13.4, maxZ: 14.3, label: 'Biển chỉ dẫn Phải' },
+  { id: 'v27-entrance-pylon-left', minX: -9.6, maxX: -8.0, minZ: 16.4, maxZ: 18.2, label: 'Cột cổng Trái' },
+  { id: 'v27-entrance-pylon-right', minX: 8.0, maxX: 9.6, minZ: 16.4, maxZ: 18.2, label: 'Cột cổng Phải' },
+];
+
+export const V27_STATIC_OBSTACLES: ObstacleBox[] = [
+  { id: 'v27-welcome-desk', minX: -11.4, maxX: -7.8, minZ: 15.1, maxZ: 17.5, label: 'Quầy Welcome / Information' },
+  { id: 'v27-directory-kiosk', minX: 7.8, maxX: 11.4, minZ: 15.6, maxZ: 17.2, label: 'Bảng Sơ đồ Triển lãm' },
+  { id: 'v27-mini-cafe', minX: -22.2, maxX: -16.2, minZ: 13.0, maxZ: 17.6, label: 'Góc Café Triển lãm' },
+  { id: 'v27-rest-lounge', minX: 16.2, maxX: 21.8, minZ: 13.0, maxZ: 17.4, label: 'Khu Nghỉ Chân' },
+  { id: 'v27-checkin-stage', minX: -3.2, maxX: 3.2, minZ: -21.4, maxZ: -19.2, label: 'Khu Check-in Grand Expo' },
+  { id: 'v27-digital-totem-left', minX: -7.9, maxX: -6.5, minZ: -0.8, maxZ: 0.2, label: 'Màn hình Digital Signage Trái' },
+  { id: 'v27-digital-totem-right', minX: 6.5, maxX: 7.9, minZ: -0.8, maxZ: 0.2, label: 'Màn hình Digital Signage Phải' },
+  { id: 'v27-entrance-pylon-left', minX: -11.6, maxX: -10.0, minZ: 20.9, maxZ: 22.7, label: 'Cột cổng Trái' },
+  { id: 'v27-entrance-pylon-right', minX: 10.0, maxX: 11.6, minZ: 20.9, maxZ: 22.7, label: 'Cột cổng Phải' },
+];
+
+export const V27_0_BOOTH_LAYOUT_BY_ID: Readonly<
+  Record<string, { positionX: number; positionZ: number; rotationY: number }>
+> = {
+  'booth-nordic-living': { positionX: -5.4, positionZ: -13.6, rotationY: 0 },
+  'booth-lumina-design': { positionX: 5.4, positionZ: -13.6, rotationY: 0 },
+  'booth-aether-tech': { positionX: -12.6, positionZ: -5.2, rotationY: Number((Math.PI / 2).toFixed(4)) },
+  'booth-ecovita-craft': { positionX: -12.6, positionZ: 4.8, rotationY: Number((Math.PI / 2).toFixed(4)) },
+  'booth-solaris-energy': { positionX: 12.6, positionZ: -5.2, rotationY: Number((-Math.PI / 2).toFixed(4)) },
+  'booth-kinetix-robotics': { positionX: 12.6, positionZ: 4.8, rotationY: Number((-Math.PI / 2).toFixed(4)) },
+};
+
+export const V27_BOOTH_LAYOUT_BY_ID: Readonly<
+  Record<string, { positionX: number; positionZ: number; rotationY: number }>
+> = {
+  'booth-nordic-living': { positionX: -6.6, positionZ: -16.8, rotationY: 0 },
+  'booth-lumina-design': { positionX: 6.6, positionZ: -16.8, rotationY: 0 },
+  'booth-aether-tech': { positionX: -15.6, positionZ: -6.4, rotationY: Number((Math.PI / 2).toFixed(4)) },
+  'booth-ecovita-craft': { positionX: -15.6, positionZ: 6.0, rotationY: Number((Math.PI / 2).toFixed(4)) },
+  'booth-solaris-energy': { positionX: 15.6, positionZ: -6.4, rotationY: Number((-Math.PI / 2).toFixed(4)) },
+  'booth-kinetix-robotics': { positionX: 15.6, positionZ: 6.0, rotationY: Number((-Math.PI / 2).toFixed(4)) },
+};
 
 export const BoothSchema = z.object({
   id: z.string().min(1).max(64),
@@ -320,24 +408,63 @@ export function getBoothApproachPoint(
   };
 }
 
-const obstacleWeakCache = new WeakMap<BoothFootprint[], ObstacleBox[]>();
-
-export function getAllObstacles(booths: BoothFootprint[]): ObstacleBox[] {
-  const cached = obstacleWeakCache.get(booths);
-  if (cached) {
-    return cached;
+export function projectBoothsForWorld<T extends BoothFootprint>(
+  booths: T[],
+  worldVersion: ExpoWorldVersion = 'v26'
+): T[] {
+  if (worldVersion === 'v26') {
+    return booths;
   }
-  const built = [...STATIC_OBSTACLES, ...booths.map(getBoothObstacleBox)];
-  obstacleWeakCache.set(booths, built);
-  return built;
+  const layoutMap = worldVersion === 'v27_0' ? V27_0_BOOTH_LAYOUT_BY_ID : V27_BOOTH_LAYOUT_BY_ID;
+  return booths.map((b) => {
+    const mapped = layoutMap[b.id];
+    if (!mapped) return b;
+    return {
+      ...b,
+      positionX: mapped.positionX,
+      positionZ: mapped.positionZ,
+      rotationY: mapped.rotationY,
+    };
+  });
 }
 
-export function isWithinWorldBounds(x: number, z: number, margin = PLAYER_RADIUS): boolean {
+const obstacleWeakCache = new WeakMap<BoothFootprint[], ObstacleBox[]>();
+
+export function getAllObstacles(
+  booths: BoothFootprint[],
+  worldVersion: ExpoWorldVersion = 'v26'
+): ObstacleBox[] {
+  if (worldVersion === 'v26') {
+    const cached = obstacleWeakCache.get(booths);
+    if (cached) {
+      return cached;
+    }
+    const built = [...STATIC_OBSTACLES, ...booths.map(getBoothObstacleBox)];
+    obstacleWeakCache.set(booths, built);
+    return built;
+  }
+  const projected = projectBoothsForWorld(booths, worldVersion);
+  const statics = worldVersion === 'v27_0' ? V27_0_STATIC_OBSTACLES : V27_STATIC_OBSTACLES;
+  return [...statics, ...projected.map(getBoothObstacleBox)];
+}
+
+export function isWithinWorldBounds(
+  x: number,
+  z: number,
+  margin = PLAYER_RADIUS,
+  worldVersion: ExpoWorldVersion = 'v26'
+): boolean {
+  const bounds =
+    worldVersion === 'v27'
+      ? V27_WORLD_BOUNDS
+      : worldVersion === 'v27_0'
+        ? V27_0_WORLD_BOUNDS
+        : WORLD_BOUNDS;
   return (
-    x >= WORLD_BOUNDS.minX + margin &&
-    x <= WORLD_BOUNDS.maxX - margin &&
-    z >= WORLD_BOUNDS.minZ + margin &&
-    z <= WORLD_BOUNDS.maxZ - margin
+    x >= bounds.minX + margin &&
+    x <= bounds.maxX - margin &&
+    z >= bounds.minZ + margin &&
+    z <= bounds.maxZ - margin
   );
 }
 
@@ -359,12 +486,13 @@ export function isPointWalkable(
   x: number,
   z: number,
   booths: BoothFootprint[],
-  radius = PLAYER_RADIUS
+  radius = PLAYER_RADIUS,
+  worldVersion: ExpoWorldVersion = 'v26'
 ): boolean {
-  if (!isWithinWorldBounds(x, z, radius)) {
+  if (!isWithinWorldBounds(x, z, radius, worldVersion)) {
     return false;
   }
-  const obstacles = getAllObstacles(booths);
+  const obstacles = getAllObstacles(booths, worldVersion);
   for (const box of obstacles) {
     if (isBoxColliding(x, z, box, radius)) {
       return false;

@@ -13,6 +13,13 @@ import {
 } from '../types/expo';
 import type { PlayerTransform } from '../controls/useClickToMove';
 import { Environment } from './Environment';
+import { GrandExpoHall } from './GrandExpoHall';
+import {
+  type ExpoWorldVersion,
+  V27_0_WORLD_BOUNDS,
+  V27_WORLD_BOUNDS,
+  isGrandHallWorld,
+} from './worldLayout';
 import { Booth } from './Booth';
 import { ShopShowcaseStage } from './ShopShowcaseStage';
 import { LocalPlayer } from './LocalPlayer';
@@ -53,6 +60,7 @@ export interface ExhibitionSceneProps {
   onGroundClick: (x: number, z: number) => void;
   zoom?: number;
   onZoomChange?: (updater: (prevZoom: number) => number) => void;
+  worldVersion?: ExpoWorldVersion;
 }
 
 export interface ShopShowcaseCameraTargets {
@@ -165,7 +173,8 @@ export function computeShopShowcaseCameraTargets(
   booth: Pick<BoothType, 'positionX' | 'positionZ' | 'rotationY' | 'width' | 'depth'>,
   viewportWidth: number,
   viewportHeight: number,
-  isPanelOpen: boolean
+  isPanelOpen: boolean,
+  options?: { worldVersion?: ExpoWorldVersion; boothId?: string }
 ): ShopShowcaseCameraTargets {
   const safeWidth = Math.max(viewportWidth, 320);
   const safeHeight = Math.max(viewportHeight, 320);
@@ -175,12 +184,14 @@ export function computeShopShowcaseCameraTargets(
   const isMobileLandscape = safeWidth <= 960 && safeHeight <= 500 && safeWidth > safeHeight;
   const isDesktopSplit = isPanelOpen && safeWidth > 860 && !isMobileLandscape;
   const isMobileSheet = isPanelOpen && safeWidth <= 860 && !isMobileLandscape;
+  const isV27ThreeQuarter = options?.worldVersion === 'v27' && !isPanelOpen && !isMobileLandscape;
 
   let localCamZ: number;
   let localCamY: number;
   let localLookY: number;
-  const localLookZ = -0.25;
+  let localLookZ = -0.25;
   let panX = 0;
+  let camAngleOffsetX = 0;
 
   if (isMobileLandscape) {
     const halfSpanRequired = Math.max(booth.width, 6.2) * 0.55;
@@ -188,11 +199,8 @@ export function computeShopShowcaseCameraTargets(
     localCamZ = THREE.MathUtils.clamp(Math.max(9.2, distForWidth), 9.2, 13.8);
     localCamY = 2.08;
     localLookY = 1.96;
-    // When compact NPC card is open on bottom-left in landscape, shift camera slightly left (-X)
-    // so the booth & right-side NPC sit comfortably in the center-right open viewport
     panX = isPanelOpen ? -0.65 : 0;
   } else if (isDesktopSplit) {
-    // Drawer occupies min(500px, 44vw) on the right side of the screen
     const drawerFraction = Math.min(500 / safeWidth, 0.44);
     const openFraction = Math.max(0.52, 1 - drawerFraction);
     const halfSpanRequired = Math.max(booth.width, 6.2) * 0.58;
@@ -203,12 +211,9 @@ export function computeShopShowcaseCameraTargets(
     localCamY = 2.12;
     localLookY = 2.06;
 
-    // Shift both camera and lookAt along local +X so the shop sits in the open left viewport
-    // while keeping the sightline 100% perpendicular (0 deg horizontal angle) to the storefront
     const frustumHalfWidthAtCenter = localCamZ * tanHalfFov * aspect;
     panX = drawerFraction * 0.88 * frustumHalfWidthAtCenter;
   } else if (isMobileSheet) {
-    // Bottom sheet occupies up to 62vh on mobile; frame storefront in the upper viewport
     const halfSpanRequired = Math.max(booth.width, 6.2) * 0.58;
     const distForWidth = 1.8 + halfSpanRequired / Math.max(0.24, tanHalfFov * aspect);
     localCamZ = THREE.MathUtils.clamp(Math.max(distForWidth, 11.4), 11.4, 16.8);
@@ -216,15 +221,29 @@ export function computeShopShowcaseCameraTargets(
     localLookY = 1.08;
     panX = 0;
   } else {
-    // Full-screen Product-First Shop Showcase: moves 1.80m closer (z = 9.05m) now that the
-    // duplicate top billboard is removed, framing KHU A Brand Header (y = 3.04..3.72m),
-    // KHU B Hero Center Stage (slot_01 & slot_02), and KHU C Secondary Shelves (slot_03..06)
     const halfSpanRequired = Math.max(booth.width, 6.2) * 0.55;
     const distForWidth =
       2.4 + halfSpanRequired / Math.max(0.22, tanHalfFov * aspect);
     localCamZ = THREE.MathUtils.clamp(Math.max(9.05, distForWidth), 9.05, 15.2);
-    localCamY = 2.12;
-    localLookY = 2.06;
+    if (isV27ThreeQuarter) {
+      // V27.4 Phase 6 — Tailored 3/4 architectural Focus framing revealing interior depth,
+      // custom counters, islands, shelves, products, and NPC with zero wall clipping.
+      const bid = (options?.boothId || '').toLowerCase();
+      if (bid.includes('nordic')) camAngleOffsetX = -1.45;
+      else if (bid.includes('lumina')) camAngleOffsetX = 1.35;
+      else if (bid.includes('aether')) camAngleOffsetX = 1.45;
+      else if (bid.includes('solaris')) camAngleOffsetX = -1.50;
+      else if (bid.includes('ecovita')) camAngleOffsetX = 1.35;
+      else if (bid.includes('kinetix')) camAngleOffsetX = -1.45;
+      else camAngleOffsetX = 1.25;
+      localCamZ = THREE.MathUtils.clamp(localCamZ * 0.96, 8.85, 14.5);
+      localCamY = 2.48;
+      localLookY = 1.76;
+      localLookZ = -0.35;
+    } else {
+      localCamY = 2.12;
+      localLookY = 2.06;
+    }
     panX = 0;
   }
 
@@ -238,9 +257,9 @@ export function computeShopShowcaseCameraTargets(
       booth.positionZ - lx * sinR + lz * cosR
     );
 
-  const cameraPosition = toWorld(panX, localCamY, localCamZ);
+  const cameraPosition = toWorld(panX + camAngleOffsetX, localCamY, localCamZ);
   const lookAtTarget = toWorld(panX, localLookY, localLookZ);
-  const entryPosition = toWorld(panX, localCamY + 0.65, localCamZ + 2.2);
+  const entryPosition = toWorld(panX + camAngleOffsetX * 1.15, localCamY + 0.65, localCamZ + 2.2);
 
   return {
     cameraPosition,
@@ -261,17 +280,36 @@ export function computeThirdPersonCameraTargets(
   cameraYaw: number,
   zoom: number,
   booths: BoothType[],
-  cameraPitch = 0
+  cameraPitch = 0,
+  worldVersion: ExpoWorldVersion = 'v26',
+  isInitialWideFraming = false
 ): ThirdPersonCameraTargets {
+  const isGrandHall = isGrandHallWorld(worldVersion);
+  const activeBounds =
+    worldVersion === 'v27'
+      ? V27_WORLD_BOUNDS
+      : worldVersion === 'v27_0'
+        ? V27_0_WORLD_BOUNDS
+        : WORLD_BOUNDS;
   const clampedZoom = THREE.MathUtils.clamp(zoom, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
   const clampedPitch = THREE.MathUtils.clamp(cameraPitch, -0.42, 0.48);
   const zoomRatio = 34 / clampedZoom;
-  const desiredDist = THREE.MathUtils.clamp(5.2 * zoomRatio, 3.5, 7.4);
-  const baseCamHeight = THREE.MathUtils.clamp(2.26 * zoomRatio, 1.72, 3.05);
+  const desiredDist =
+    isGrandHall && isInitialWideFraming
+      ? worldVersion === 'v27'
+        ? 5.6
+        : 5.0
+      : THREE.MathUtils.clamp(5.2 * zoomRatio, 3.5, 7.4);
+  const baseCamHeight =
+    isGrandHall && isInitialWideFraming
+      ? worldVersion === 'v27'
+        ? 6.15
+        : 5.35
+      : THREE.MathUtils.clamp(2.26 * zoomRatio, 1.72, 3.05);
   const pitchedCamHeight =
     clampedPitch === 0
       ? baseCamHeight
-      : THREE.MathUtils.clamp(baseCamHeight - Math.sin(clampedPitch) * 0.95, 1.32, 3.55);
+      : THREE.MathUtils.clamp(baseCamHeight - Math.sin(clampedPitch) * 0.95, 1.32, 6.45);
 
   const fwdX = Math.sin(cameraYaw);
   const fwdZ = Math.cos(cameraYaw);
@@ -287,10 +325,10 @@ export function computeThirdPersonCameraTargets(
     const tz = playerZ - fwdZ * testDist;
 
     const outOfBounds =
-      tx < WORLD_BOUNDS.minX + 1.0 ||
-      tx > WORLD_BOUNDS.maxX - 1.0 ||
-      tz < WORLD_BOUNDS.minZ + 1.0 ||
-      tz > WORLD_BOUNDS.maxZ - 1.0;
+      tx < activeBounds.minX + 0.6 ||
+      tx > activeBounds.maxX - 0.6 ||
+      tz < activeBounds.minZ + 0.4 ||
+      tz > activeBounds.maxZ + (isGrandHall ? 0.55 : -0.6);
 
     const hitsBooth = obstacleBoxes.some(
       (box) => tx >= box.minX && tx <= box.maxX && tz >= box.minZ && tz <= box.maxZ
@@ -304,22 +342,25 @@ export function computeThirdPersonCameraTargets(
 
   const camX = THREE.MathUtils.clamp(
     playerX - fwdX * safeDist,
-    WORLD_BOUNDS.minX + 0.9,
-    WORLD_BOUNDS.maxX - 0.9
+    activeBounds.minX + 0.5,
+    activeBounds.maxX - 0.5
   );
   const camZ = THREE.MathUtils.clamp(
     playerZ - fwdZ * safeDist,
-    WORLD_BOUNDS.minZ + 0.9,
-    WORLD_BOUNDS.maxZ - 0.9
+    activeBounds.minZ + 0.5,
+    activeBounds.maxZ + (isGrandHall ? 0.45 : -0.5)
   );
   const camY = clampedPitch === 0 ? Math.max(1.65, baseCamHeight) : Math.max(1.32, pitchedCamHeight);
 
-  const lookAheadDist = 3.4;
+  const lookAheadDist =
+    isGrandHall && isInitialWideFraming ? (worldVersion === 'v27' ? 15.8 : 12.5) : 3.4;
   const lookX = playerX + fwdX * lookAheadDist;
   const lookY =
-    clampedPitch === 0
-      ? 1.46
-      : THREE.MathUtils.clamp(1.46 + Math.sin(clampedPitch) * 1.65, 0.45, 3.25);
+    isGrandHall && isInitialWideFraming
+      ? 1.55
+      : clampedPitch === 0
+        ? 1.46
+        : THREE.MathUtils.clamp(1.46 + Math.sin(clampedPitch) * 1.65, 0.45, 3.25);
   const lookZ = playerZ + fwdZ * lookAheadDist;
 
   return {
@@ -356,6 +397,7 @@ interface HybridCameraRigProps {
   focusedBooth: BoothType | null;
   isPanelOpen: boolean;
   zoom: number;
+  worldVersion: ExpoWorldVersion;
 }
 
 const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
@@ -374,6 +416,7 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
   focusedBooth,
   isPanelOpen,
   zoom,
+  worldVersion,
 }) => {
   const size = useThree((state) => state.size);
 
@@ -407,6 +450,7 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
     )
   );
   const wasExploreModeRef = useRef<boolean>(false);
+  const v27HasUserMovedRef = useRef<boolean>(false);
 
   // Mode C: Front-facing Shop Showcase perspective camera state (Focus mode)
   const smoothedShopCamPos = useRef(new THREE.Vector3(0, 2.15, 10));
@@ -446,7 +490,7 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
 
     // 3. Keep Overview isometric target updated
     if (cameraMode === 'overview') {
-      desiredIsoTarget.current.set(0, 0.2, 0.8);
+      desiredIsoTarget.current.set(0, 0.2, worldVersion === 'v27' ? -1.0 : 0.8);
     } else {
       const nextFocusX = THREE.MathUtils.clamp(liveX * 0.9, -18, 18);
       const nextFocusZ = THREE.MathUtils.clamp(liveZ * 0.85 - 1.2, -16, 16);
@@ -476,7 +520,8 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
         focusedBooth,
         size.width,
         size.height,
-        isPanelOpen
+        isPanelOpen,
+        { worldVersion, boothId: focusedBooth.id }
       );
 
       // When newly entering a booth's Shop Showcase, start from a gentle front-entry offset
@@ -506,8 +551,22 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
       const perspCam = perspCamRef.current;
       if (!perspCam) return;
 
-      if (Math.abs(perspCam.fov - THIRD_PERSON_FOV) > 0.1) {
-        perspCam.fov = THIRD_PERSON_FOV;
+      const isGrandHall = isGrandHallWorld(worldVersion);
+      if (isGrandHall && (liveState === 'walk' || orbitStateRef.current.isDragging)) {
+        v27HasUserMovedRef.current = true;
+      }
+      const useV27InitialWide = isGrandHall && !v27HasUserMovedRef.current;
+      const isPortrait = size.width < size.height;
+      const targetExploreFov = useV27InitialWide
+        ? isPortrait
+          ? 70
+          : worldVersion === 'v27'
+            ? 62
+            : 60
+        : THIRD_PERSON_FOV;
+
+      if (Math.abs(perspCam.fov - targetExploreFov) > 0.1) {
+        perspCam.fov = THREE.MathUtils.lerp(perspCam.fov, targetExploreFov, 1 - Math.exp(-8 * delta));
         perspCam.updateProjectionMatrix();
       }
 
@@ -523,7 +582,9 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
           tpCamYawRef.current,
           clampedZoom,
           booths,
-          tpCamPitchRef.current
+          tpCamPitchRef.current,
+          worldVersion,
+          useV27InitialWide
         );
         smoothedTpCamPos.current.copy(initTp.cameraPosition);
         smoothedTpLookAt.current.copy(initTp.lookAtTarget);
@@ -562,7 +623,9 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
         tpCamYawRef.current,
         clampedZoom,
         booths,
-        tpCamPitchRef.current
+        tpCamPitchRef.current,
+        worldVersion,
+        useV27InitialWide
       );
 
       const tpAlpha = 1 - Math.exp(-12 * delta);
@@ -606,6 +669,72 @@ const HybridCameraRig: React.FC<HybridCameraRigProps> = ({
   return null;
 };
 
+/**
+ * V27.2 Phase 3 — Adaptive Quality Controller with Strict Hysteresis.
+ * Monitors rolling frame time after a 2.5s warm-up and smoothly adjusts WebGL pixelRatio
+ * without remounting the Canvas, causing stutter, or reducing product/UI legibility.
+ */
+const AdaptiveQualityController: React.FC<{ isMobile: boolean }> = ({ isMobile }) => {
+  const { gl } = useThree();
+  const tierRef = useRef<'high' | 'medium' | 'low'>(isMobile ? 'medium' : 'high');
+  const warmupRef = useRef<number>(0);
+  const accumTimeRef = useRef<number>(0);
+  const frameCountRef = useRef<number>(0);
+  const lowStreakRef = useRef<number>(0);
+  const highStreakRef = useRef<number>(0);
+
+  useFrame((_, rawDelta) => {
+    const dt = Math.min(rawDelta, 0.25);
+    if (warmupRef.current < 2.5) {
+      warmupRef.current += dt;
+      return;
+    }
+    accumTimeRef.current += dt;
+    frameCountRef.current += 1;
+    if (accumTimeRef.current < 1.5) return;
+
+    const avgMs = (accumTimeRef.current * 1000) / Math.max(1, frameCountRef.current);
+    accumTimeRef.current = 0;
+    frameCountRef.current = 0;
+
+    const nativeDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const cur = tierRef.current;
+
+    if (avgMs > 38) {
+      lowStreakRef.current += 1;
+      highStreakRef.current = 0;
+      if (lowStreakRef.current >= 2) {
+        lowStreakRef.current = 0;
+        if (cur === 'high') {
+          tierRef.current = 'medium';
+          gl.setPixelRatio(Math.min(nativeDpr, 1.0));
+        } else if (cur === 'medium') {
+          tierRef.current = 'low';
+          gl.setPixelRatio(Math.min(nativeDpr, 0.85));
+        }
+      }
+    } else if (avgMs < 21) {
+      highStreakRef.current += 1;
+      lowStreakRef.current = 0;
+      if (highStreakRef.current >= 3) {
+        highStreakRef.current = 0;
+        if (cur === 'low') {
+          tierRef.current = 'medium';
+          gl.setPixelRatio(Math.min(nativeDpr, 1.0));
+        } else if (cur === 'medium' && !isMobile) {
+          tierRef.current = 'high';
+          gl.setPixelRatio(Math.min(nativeDpr, 1.25));
+        }
+      }
+    } else {
+      lowStreakRef.current = 0;
+      highStreakRef.current = 0;
+    }
+  });
+
+  return null;
+};
+
 export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
   ({
     booths,
@@ -632,6 +761,7 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
     onGroundClick,
     zoom = 34,
     onZoomChange,
+    worldVersion = 'v26',
   }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const orthoCamRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -862,6 +992,13 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
       [cameraMode, onZoomChange]
     );
 
+    const isGrandHall = isGrandHallWorld(worldVersion);
+    // Adaptive Mobile Quality: cap DPR to 1 and disable expensive dynamic shadow pass on mobile viewports
+    const isMobilePerfMode =
+      typeof window !== 'undefined' &&
+      (window.innerWidth <= 860 ||
+        (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches));
+
     return (
       <div
         ref={containerRef}
@@ -878,9 +1015,11 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
       >
         <Canvas
           orthographic
-          shadows
-          dpr={[1, 1.5]}
+          shadows={!isMobilePerfMode}
+          dpr={isMobilePerfMode ? 1 : [1, 1.25]}
           gl={{
+            antialias: !isMobilePerfMode,
+            powerPreference: 'high-performance',
             toneMapping: THREE.ACESFilmicToneMapping,
             toneMappingExposure: 1.02,
             outputColorSpace: THREE.SRGBColorSpace,
@@ -892,8 +1031,9 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             far: 320,
           }}
         >
-          <color attach="background" args={['#cfe4f7']} />
-          <fog attach="fog" args={['#cfe4f7', 86, 195]} />
+          <color attach="background" args={[isGrandHall ? '#dce6f2' : '#cfe4f7']} />
+          <fog attach="fog" args={[isGrandHall ? '#dce6f2' : '#cfe4f7', 110, 260]} />
+          <AdaptiveQualityController isMobile={isMobilePerfMode} />
 
           {/* MODE A: Exterior 2.5D Isometric Orthographic Camera (Overview Mode) */}
           <OrthographicCamera
@@ -931,35 +1071,46 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
             focusedBooth={activeFocusedBooth}
             isPanelOpen={Boolean(activeNpcBoothId && activeFocusedBooth?.id === activeNpcBoothId)}
             zoom={zoom}
+            worldVersion={worldVersion}
           />
 
-          {/* Stylized 3D City Daylight & Balanced Architectural Fill Lighting (Phase 2) */}
-          <ambientLight intensity={0.72} />
-          <hemisphereLight args={['#f0f9ff', '#94a3b8', 0.82]} />
+          {/* Balanced Exhibition Daylight & Soft Architectural Fill Lighting */}
+          <ambientLight intensity={isGrandHall ? 0.86 : 0.72} />
+          <hemisphereLight args={['#f8fafc', '#94a3b8', isGrandHall ? 0.80 : 0.82]} />
           <directionalLight
-            position={[26, 42, 22]}
-            intensity={1.38}
-            color="#fffbeb"
-            castShadow
+            position={[28, 46, 24]}
+            intensity={isGrandHall ? 1.24 : 1.38}
+            color="#fffdf7"
+            castShadow={!isMobilePerfMode}
             shadow-mapSize-width={1024}
             shadow-mapSize-height={1024}
-            shadow-camera-left={-34}
-            shadow-camera-right={34}
-            shadow-camera-top={34}
-            shadow-camera-bottom={-34}
+            shadow-camera-left={worldVersion === 'v27' ? -42 : -34}
+            shadow-camera-right={worldVersion === 'v27' ? 42 : 34}
+            shadow-camera-top={worldVersion === 'v27' ? 42 : 34}
+            shadow-camera-bottom={worldVersion === 'v27' ? -42 : -34}
             shadow-camera-near={1}
-            shadow-camera-far={125}
+            shadow-camera-far={140}
             shadow-bias={-0.00025}
             shadow-radius={2.5}
           />
-          <directionalLight position={[-22, 28, -18]} intensity={0.68} color="#bae6fd" />
-          <directionalLight position={[0, 26, 28]} intensity={0.38} color="#fff7ed" />
-          <pointLight position={[0, 5.2, 0]} intensity={0.88} distance={22} color="#fde68a" />
+          <directionalLight position={[-22, 28, -18]} intensity={0.68} color="#dbeafe" />
+          <directionalLight position={[0, 26, 28]} intensity={0.44} color="#fff7ed" />
+          {worldVersion === 'v26' && (
+            <pointLight position={[0, 5.2, 0]} intensity={0.88} distance={22} color="#fde68a" />
+          )}
 
-          <Environment
-            onGroundClick={handleEnvironmentGroundClick}
-            clickMarker={clickMarker}
-          />
+          {isGrandHall ? (
+            <GrandExpoHall
+              onGroundClick={handleEnvironmentGroundClick}
+              clickMarker={clickMarker}
+              worldVersion={worldVersion}
+            />
+          ) : (
+            <Environment
+              onGroundClick={handleEnvironmentGroundClick}
+              clickMarker={clickMarker}
+            />
+          )}
 
           {!isShopShowcase && linePoints.length >= 2 && (
             <Line
@@ -993,19 +1144,34 @@ export const ExhibitionScene: React.FC<ExhibitionSceneProps> = React.memo(
                 (cameraMode === 'focus' && activeFocusedBooth?.id === booth.id)
               }
               visible={!isShopShowcase || activeFocusedBooth?.id === booth.id}
+              showParkPlanters={worldVersion === 'v26'}
+              worldVersion={worldVersion}
               onSelect={handleBoothSelect}
             />
           ))}
 
-          {/* Conditionally Mounted Shop Showcase 3D Stage (Only active when viewing a booth) */}
+          {/* Conditionally Mounted Shop Showcase 3D Stage:
+              - In V26.1 Park World: mounts legacy storefront courtyard & lanterns
+              - In V27 / V27.1 Grand Expo World: clean 3-point architectural gallery lighting ONLY (zero low-poly flowers/lanterns!) */}
           {isShopShowcase && activeFocusedBooth && onSelectProduct && (
-            <ShopShowcaseStage
-              booth={activeFocusedBooth}
-              products={activeBoothProducts}
-              slots={slotsByBooth?.[activeFocusedBooth.id]}
-              selectedProductId={selectedProductId}
-              onSelectProduct={handleProductSelect}
-            />
+            isGrandHall ? (
+              <group
+                position={[activeFocusedBooth.positionX, 0, activeFocusedBooth.positionZ]}
+                rotation={[0, activeFocusedBooth.rotationY || 0, 0]}
+              >
+                <pointLight position={[0, 2.6, 2.4]} color="#fffdf7" intensity={1.35} distance={12} />
+                <pointLight position={[-2.6, 2.2, 2.2]} color="#f8fafc" intensity={0.85} distance={9} />
+                <pointLight position={[2.6, 2.2, 2.2]} color="#f8fafc" intensity={0.85} distance={9} />
+              </group>
+            ) : (
+              <ShopShowcaseStage
+                booth={activeFocusedBooth}
+                products={activeBoothProducts}
+                slots={slotsByBooth?.[activeFocusedBooth.id]}
+                selectedProductId={selectedProductId}
+                onSelectProduct={handleProductSelect}
+              />
+            )
           )}
 
           {/* Hide exterior avatars during front-facing Shop Showcase so they never photobomb the lens */}

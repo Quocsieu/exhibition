@@ -318,16 +318,36 @@ export function getBoothApproachPoint(
   };
 }
 
+export interface NavigationWorldOptions {
+  staticObstacles?: ObstacleBox[];
+  worldBounds?: {
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+  };
+}
+
 interface NavigationCacheEntry {
   signature: string;
   obstacles: ObstacleBox[];
   walkableGrid: Uint8Array;
 }
 
-const navCacheByRadius = new Map<number, NavigationCacheEntry>();
+const navCacheByRadius = new Map<string, NavigationCacheEntry>();
 
-function computeBoothsSignature(booths: BoothFootprint[]): string {
-  let sig = '';
+function computeBoothsSignature(
+  booths: BoothFootprint[],
+  navOptions?: NavigationWorldOptions
+): string {
+  const bounds = navOptions?.worldBounds ?? WORLD_BOUNDS;
+  const statics = navOptions?.staticObstacles ?? STATIC_OBSTACLES;
+  let sig = `B:${bounds.minX},${bounds.maxX},${bounds.minZ},${bounds.maxZ}|S:${statics.length}:`;
+  for (let i = 0; i < statics.length; i++) {
+    const s = statics[i];
+    sig += `${s.id}:${s.minX},${s.maxX},${s.minZ},${s.maxZ};`;
+  }
+  sig += '|H:';
   for (let i = 0; i < booths.length; i++) {
     const b = booths[i];
     sig += `${b.id}:${b.positionX},${b.positionZ},${b.rotationY || 0},${b.width || 4.8},${b.depth || 3.8};`;
@@ -335,22 +355,28 @@ function computeBoothsSignature(booths: BoothFootprint[]): string {
   return sig;
 }
 
-export function getAllObstacles(booths: BoothFootprint[]): ObstacleBox[] {
-  const sig = computeBoothsSignature(booths);
-  const cached = navCacheByRadius.get(PLAYER_RADIUS);
-  if (cached && cached.signature === sig) {
+export function getAllObstacles(
+  booths: BoothFootprint[],
+  navOptions?: NavigationWorldOptions
+): ObstacleBox[] {
+  const sig = computeBoothsSignature(booths, navOptions);
+  const cacheKey = `${PLAYER_RADIUS}|${sig}`;
+  const cached = navCacheByRadius.get(cacheKey);
+  if (cached) {
     return cached.obstacles;
   }
-  return [...STATIC_OBSTACLES, ...booths.map(getBoothObstacleBox)];
+  const statics = navOptions?.staticObstacles ?? STATIC_OBSTACLES;
+  return [...statics, ...booths.map(getBoothObstacleBox)];
 }
 
 function isPointWalkableWithObstacles(
   x: number,
   z: number,
   obstacles: ObstacleBox[],
-  radius: number
+  radius: number,
+  worldBounds: { minX: number; maxX: number; minZ: number; maxZ: number } = WORLD_BOUNDS
 ): boolean {
-  if (!isWithinWorldBounds(x, z, radius)) {
+  if (!isWithinWorldBounds(x, z, radius, worldBounds)) {
     return false;
   }
   for (let i = 0; i < obstacles.length; i++) {
@@ -367,17 +393,21 @@ function isPointWalkableWithObstacles(
   return true;
 }
 
-function getNavigationCache(booths: BoothFootprint[], radius: number): NavigationCacheEntry {
-  const sig = computeBoothsSignature(booths);
-  const existing = navCacheByRadius.get(radius);
-  if (existing && existing.signature === sig) {
+function getNavigationCache(
+  booths: BoothFootprint[],
+  radius: number,
+  navOptions?: NavigationWorldOptions
+): NavigationCacheEntry {
+  const sig = computeBoothsSignature(booths, navOptions);
+  const cacheKey = `${radius}|${sig}`;
+  const existing = navCacheByRadius.get(cacheKey);
+  if (existing) {
     return existing;
   }
 
-  const obstacles: ObstacleBox[] = [
-    ...STATIC_OBSTACLES,
-    ...booths.map(getBoothObstacleBox),
-  ];
+  const statics = navOptions?.staticObstacles ?? STATIC_OBSTACLES;
+  const worldBounds = navOptions?.worldBounds ?? WORLD_BOUNDS;
+  const obstacles: ObstacleBox[] = [...statics, ...booths.map(getBoothObstacleBox)];
   const walkableGrid = new Uint8Array(GRID_COLS * GRID_ROWS);
 
   for (let row = 0; row < GRID_ROWS; row++) {
@@ -385,7 +415,13 @@ function getNavigationCache(booths: BoothFootprint[], radius: number): Navigatio
     const rowOffset = row * GRID_COLS;
     for (let col = 0; col < GRID_COLS; col++) {
       const wx = GRID_MIN_X + col * GRID_STEP;
-      walkableGrid[rowOffset + col] = isPointWalkableWithObstacles(wx, wz, obstacles, radius)
+      walkableGrid[rowOffset + col] = isPointWalkableWithObstacles(
+        wx,
+        wz,
+        obstacles,
+        radius,
+        worldBounds
+      )
         ? 1
         : 0;
     }
@@ -396,16 +432,24 @@ function getNavigationCache(booths: BoothFootprint[], radius: number): Navigatio
     obstacles,
     walkableGrid,
   };
-  navCacheByRadius.set(radius, entry);
+  if (navCacheByRadius.size > 12) {
+    navCacheByRadius.clear();
+  }
+  navCacheByRadius.set(cacheKey, entry);
   return entry;
 }
 
-export function isWithinWorldBounds(x: number, z: number, margin = PLAYER_RADIUS): boolean {
+export function isWithinWorldBounds(
+  x: number,
+  z: number,
+  margin = PLAYER_RADIUS,
+  worldBounds: { minX: number; maxX: number; minZ: number; maxZ: number } = WORLD_BOUNDS
+): boolean {
   return (
-    x >= WORLD_BOUNDS.minX + margin &&
-    x <= WORLD_BOUNDS.maxX - margin &&
-    z >= WORLD_BOUNDS.minZ + margin &&
-    z <= WORLD_BOUNDS.maxZ - margin
+    x >= worldBounds.minX + margin &&
+    x <= worldBounds.maxX - margin &&
+    z >= worldBounds.minZ + margin &&
+    z <= worldBounds.maxZ - margin
   );
 }
 
@@ -427,10 +471,17 @@ export function isPointWalkable(
   x: number,
   z: number,
   booths: BoothFootprint[],
-  radius = PLAYER_RADIUS
+  radius = PLAYER_RADIUS,
+  navOptions?: NavigationWorldOptions
 ): boolean {
-  const { obstacles } = getNavigationCache(booths, radius);
-  return isPointWalkableWithObstacles(x, z, obstacles, radius);
+  const { obstacles } = getNavigationCache(booths, radius, navOptions);
+  return isPointWalkableWithObstacles(
+    x,
+    z,
+    obstacles,
+    radius,
+    navOptions?.worldBounds ?? WORLD_BOUNDS
+  );
 }
 
 export function resolveMovementWithSlide(
@@ -439,21 +490,23 @@ export function resolveMovementWithSlide(
   toX: number,
   toZ: number,
   booths: BoothFootprint[],
-  radius = PLAYER_RADIUS
+  radius = PLAYER_RADIUS,
+  navOptions?: NavigationWorldOptions
 ): { x: number; z: number; collided: boolean } {
-  const clampedX = Math.max(WORLD_BOUNDS.minX + radius, Math.min(WORLD_BOUNDS.maxX - radius, toX));
-  const clampedZ = Math.max(WORLD_BOUNDS.minZ + radius, Math.min(WORLD_BOUNDS.maxZ - radius, toZ));
+  const wb = navOptions?.worldBounds ?? WORLD_BOUNDS;
+  const clampedX = Math.max(wb.minX + radius, Math.min(wb.maxX - radius, toX));
+  const clampedZ = Math.max(wb.minZ + radius, Math.min(wb.maxZ - radius, toZ));
   const hitBounds = clampedX !== toX || clampedZ !== toZ;
 
-  if (isPointWalkable(clampedX, clampedZ, booths, radius)) {
+  if (isPointWalkable(clampedX, clampedZ, booths, radius, navOptions)) {
     return { x: clampedX, z: clampedZ, collided: hitBounds };
   }
 
-  if (isPointWalkable(clampedX, fromZ, booths, radius)) {
+  if (isPointWalkable(clampedX, fromZ, booths, radius, navOptions)) {
     return { x: clampedX, z: fromZ, collided: true };
   }
 
-  if (isPointWalkable(fromX, clampedZ, booths, radius)) {
+  if (isPointWalkable(fromX, clampedZ, booths, radius, navOptions)) {
     return { x: fromX, z: clampedZ, collided: true };
   }
 
@@ -519,7 +572,8 @@ function hasLineOfSightWithObstacles(
   p1: Point2D,
   p2: Point2D,
   obstacles: ObstacleBox[],
-  radius: number
+  radius: number,
+  worldBounds: { minX: number; maxX: number; minZ: number; maxZ: number } = WORLD_BOUNDS
 ): boolean {
   const dx = p2.x - p1.x;
   const dz = p2.z - p1.z;
@@ -531,7 +585,7 @@ function hasLineOfSightWithObstacles(
     const t = i * invSteps;
     const x = p1.x + dx * t;
     const z = p1.z + dz * t;
-    if (!isPointWalkableWithObstacles(x, z, obstacles, radius)) {
+    if (!isPointWalkableWithObstacles(x, z, obstacles, radius, worldBounds)) {
       return false;
     }
   }
@@ -563,9 +617,11 @@ export function findPathAStar(
   goalX: number,
   goalZ: number,
   booths: BoothFootprint[],
-  radius = PLAYER_RADIUS
+  radius = PLAYER_RADIUS,
+  navOptions?: NavigationWorldOptions
 ): Point2D[] {
-  const { obstacles, walkableGrid } = getNavigationCache(booths, radius);
+  const worldBounds = navOptions?.worldBounds ?? WORLD_BOUNDS;
+  const { obstacles, walkableGrid } = getNavigationCache(booths, radius, navOptions);
   const isWalkableCell = (col: number, row: number): boolean =>
     walkableGrid[row * GRID_COLS + col] === 1;
 
@@ -580,11 +636,13 @@ export function findPathAStar(
     return [gridToWorld(goalCell.col, goalCell.row)];
   }
 
-  const targetPoint = isPointWalkableWithObstacles(goalX, goalZ, obstacles, radius)
+  const targetPoint = isPointWalkableWithObstacles(goalX, goalZ, obstacles, radius, worldBounds)
     ? { x: goalX, z: goalZ }
     : gridToWorld(goalCell.col, goalCell.row);
 
-  if (hasLineOfSightWithObstacles({ x: startX, z: startZ }, targetPoint, obstacles, radius)) {
+  if (
+    hasLineOfSightWithObstacles({ x: startX, z: startZ }, targetPoint, obstacles, radius, worldBounds)
+  ) {
     return [targetPoint];
   }
 
@@ -725,7 +783,8 @@ export function findPathAStar(
           fullPath[anchorIndex],
           fullPath[probe],
           obstacles,
-          radius
+          radius,
+          worldBounds
         )
       ) {
         furthestVisible = probe;

@@ -2161,4 +2161,150 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       }
     }
   }, 20000);
+
+  it('V27 Phase 4 — enforces world-isolated Socket.IO rooms (v26 vs v27), authoritative V27 collision/bounds rejection, and reconnect restore with zero cross-world state leakage', async () => {
+    const connectClient = (auth: Record<string, unknown>) =>
+      new Promise<{
+        socket: ReturnType<typeof createClient>;
+        init: { self: { sessionId: string; x: number; z: number; rotationY: number }; visitors: unknown[]; onlineCount: number };
+      }>((resolve, reject) => {
+        const socket = createClient(baseUrl, {
+          transports: ['websocket'],
+          forceNew: true,
+          reconnection: false,
+          auth,
+        });
+        const timer = setTimeout(() => {
+          socket.disconnect();
+          reject(new Error('Timeout waiting for world:init'));
+        }, 5000);
+        socket.once('world:init', (init) => {
+          clearTimeout(timer);
+          resolve({ socket, init });
+        });
+        socket.once('connect_error', (err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+      });
+
+    // 1. Connect two V27 clients + one V26 client simultaneously
+    const cV27A = await connectClient({ name: 'V27-Alpha', color: '#0ea5e9', worldVersion: 'v27' });
+    const cV27B = await connectClient({ name: 'V27-Beta', color: '#10b981', worldVersion: 'v27' });
+    const cV26 = await connectClient({ name: 'V26-Legacy', color: '#f59e0b', worldVersion: 'v26' });
+
+    try {
+      // Spawn coordinates match respective world layouts (V27.1 expanded spawn at z = 15.2)
+      expect(cV27A.init.self.z).toBeCloseTo(15.2, 1);
+      expect(cV27B.init.onlineCount).toBe(2);
+      expect(cV27B.init.visitors.length).toBe(2);
+
+      // V26 client is strictly isolated in world:v26 (sees only itself, spawns at V26 plaza z ≈ 3.8)
+      expect(cV26.init.self.z).toBeCloseTo(3.8, 1);
+      expect(cV26.init.onlineCount).toBe(1);
+      expect(cV26.init.visitors.length).toBe(1);
+
+      // 2. Valid movement in V27.1 synchronizes to V27-Beta, NEVER leaks to V26-Legacy
+      let v26LeakCount = 0;
+      cV26.socket.on('visitor:moved', () => {
+        v26LeakCount += 1;
+      });
+
+      const movedOnV27B = new Promise<{ sessionId: string; x: number; z: number }>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('No visitor:moved received on V27-Beta')), 4000);
+        cV27B.socket.once('visitor:moved', (state) => {
+          clearTimeout(t);
+          resolve(state);
+        });
+      });
+
+      await new Promise((r) => setTimeout(r, 120));
+      cV27A.socket.emit('visitor:move', {
+        x: 0,
+        z: 13.8,
+        rotationY: Math.PI,
+        state: 'walk',
+        activeBoothId: null,
+      });
+
+      const synced = await movedOnV27B;
+      expect(synced.sessionId).toBe(cV27A.init.self.sessionId);
+      expect(synced.z).toBeCloseTo(13.8, 1);
+      await new Promise((r) => setTimeout(r, 80));
+      expect(v26LeakCount).toBe(0);
+
+      // 3. Authoritative V27.1 collision rejection (attempting to walk inside V27.1 EcoVita booth at x=-15.6, z=6.0)
+      const rejectedBooth = new Promise<{ x: number; z: number; reason: string }>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('Expected move:rejected for V27.1 booth collision')), 4000);
+        cV27A.socket.once('move:rejected', (payload) => {
+          clearTimeout(t);
+          resolve(payload);
+        });
+      });
+      cV27A.socket.emit('visitor:move', {
+        x: -15.6,
+        z: 6.0,
+        rotationY: 0,
+        state: 'idle',
+        activeBoothId: null,
+      });
+      const rej1 = await rejectedBooth;
+      expect(rej1.z).toBeCloseTo(13.8, 1);
+      expect(rej1.reason).toBeTruthy();
+
+      // 4. Authoritative V27.1 world bounds rejection (outside V27.1 maxZ = 20.8)
+      const rejectedBounds = new Promise<{ x: number; z: number; reason: string }>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('Expected move:rejected for V27.1 out-of-bounds')), 4000);
+        cV27A.socket.once('move:rejected', (payload) => {
+          clearTimeout(t);
+          resolve(payload);
+        });
+      });
+      cV27A.socket.emit('visitor:move', {
+        x: 0,
+        z: 22.5,
+        rotationY: 0,
+        state: 'idle',
+        activeBoothId: null,
+      });
+      const rej2 = await rejectedBounds;
+      expect(rej2.z).toBeCloseTo(13.8, 1);
+
+      // 4b. Preserved V27.0 rollback world room ('v27_0') spawns at z = 12.2 and stays isolated from V27.1
+      const cV270 = await connectClient({ name: 'V270-Rollback', worldVersion: 'v27_0' });
+      expect(cV270.init.self.z).toBeCloseTo(12.2, 1);
+      expect(cV270.init.onlineCount).toBe(1);
+      cV270.socket.disconnect();
+
+      // 5. Reconnect / Refresh with valid V27 position on Central Avenue (x=0, z=0 — blocked in V26 fountain, WALKABLE in V27!)
+      const cV27Reconnected = await connectClient({
+        name: 'V27-Reconnected',
+        color: '#6366f1',
+        worldVersion: 'v27',
+        x: 0,
+        z: 0,
+        rotationY: Math.PI,
+      });
+      expect(cV27Reconnected.init.self.x).toBe(0);
+      expect(cV27Reconnected.init.self.z).toBe(0);
+      expect(cV27Reconnected.init.onlineCount).toBe(3);
+
+      // 6. Spoofed invalid worldVersion defaults safely to 'v26' and rejects (0, 0) (V26 fountain) back to V26 spawn
+      const cSpoofed = await connectClient({
+        name: 'Spoofed-Client',
+        worldVersion: 'admin-bypass',
+        x: 0,
+        z: 0,
+      });
+      expect(cSpoofed.init.self.z).toBeCloseTo(3.8, 1);
+      expect(cSpoofed.init.onlineCount).toBe(2); // only V26-Legacy + Spoofed-Client
+
+      cV27Reconnected.socket.disconnect();
+      cSpoofed.socket.disconnect();
+    } finally {
+      cV27A.socket.disconnect();
+      cV27B.socket.disconnect();
+      cV26.socket.disconnect();
+    }
+  }, 20000);
 });

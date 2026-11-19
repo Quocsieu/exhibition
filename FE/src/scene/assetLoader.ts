@@ -84,8 +84,8 @@ export function getCachedAssetTemplate(assetId: GlbAssetId): THREE.Group {
   return cached;
 }
 
-export type KinetixBoothVersion = 'v2' | 'v3';
-export type BoothModelVersion = 'v2' | 'v3';
+export type KinetixBoothVersion = 'v2' | 'v3' | 'v4' | 'v27_3' | 'v27_4';
+export type BoothModelVersion = 'v2' | 'v3' | 'v4' | 'v27_3' | 'v27_4';
 
 export const DEFAULT_KINETIX_BOOTH_VERSION: KinetixBoothVersion = 'v3';
 
@@ -101,6 +101,9 @@ export const DEFAULT_BOOTH_MODEL_VERSIONS: Record<ArchitecturalBoothTheme, Booth
 export const KINETIX_GLB_BY_VERSION: Record<KinetixBoothVersion, string> = {
   v2: 'models/booths/kinetix-v2/kinetix_booth_v2.glb',
   v3: 'models/booths/kinetix-v3/kinetix_booth_v3.glb',
+  v4: 'models/booths/v4/booth_06_dynamic_frame_v4.glb',
+  v27_3: 'models/booths/v27_3/booth_06_dynamic_frame_v27_3.glb',
+  v27_4: 'models/booths/v27_4/booth_06_dynamic_frame_v27_4.glb',
 };
 
 export const BESPOKE_V2_GLB_MAP: Record<ArchitecturalBoothTheme, string> = {
@@ -121,6 +124,33 @@ export const BESPOKE_V3_GLB_MAP: Record<ArchitecturalBoothTheme, string> = {
   energy: 'models/booths/solaris-energy-v3/solaris_energy_v3.glb',
 };
 
+export const BESPOKE_V4_GLB_MAP: Record<ArchitecturalBoothTheme, string> = {
+  living: 'models/booths/v4/booth_01_signature_ring_v4.glb',
+  design: 'models/booths/v4/booth_02_organic_flow_v4.glb',
+  tech: 'models/booths/v4/booth_03_grand_portal_v4.glb',
+  energy: 'models/booths/v4/booth_04_wave_pavilion_v4.glb',
+  coffee: 'models/booths/v4/booth_05_gallery_arch_v4.glb',
+  robotics: KINETIX_GLB_BY_VERSION.v4,
+};
+
+export const BESPOKE_V27_3_GLB_MAP: Record<ArchitecturalBoothTheme, string> = {
+  living: 'models/booths/v27_3/booth_01_signature_ring_v27_3.glb',
+  design: 'models/booths/v27_3/booth_02_organic_flow_v27_3.glb',
+  tech: 'models/booths/v27_3/booth_03_grand_portal_v27_3.glb',
+  energy: 'models/booths/v27_3/booth_04_wave_pavilion_v27_3.glb',
+  coffee: 'models/booths/v27_3/booth_05_gallery_arch_v27_3.glb',
+  robotics: KINETIX_GLB_BY_VERSION.v27_3,
+};
+
+export const BESPOKE_V27_4_GLB_MAP: Record<ArchitecturalBoothTheme, string> = {
+  living: 'models/booths/v27_4/booth_01_signature_ring_v27_4.glb',
+  design: 'models/booths/v27_4/booth_02_organic_flow_v27_4.glb',
+  tech: 'models/booths/v27_4/booth_03_grand_portal_v27_4.glb',
+  energy: 'models/booths/v27_4/booth_04_wave_pavilion_v27_4.glb',
+  coffee: 'models/booths/v27_4/booth_05_gallery_arch_v27_4.glb',
+  robotics: KINETIX_GLB_BY_VERSION.v27_4,
+};
+
 const BOOTH_QUERY_KEY_BY_THEME: Record<ArchitecturalBoothTheme, string> = {
   robotics: 'kinetix',
   tech: 'aether',
@@ -138,13 +168,19 @@ const BOOTH_QUERY_KEY_BY_THEME: Record<ArchitecturalBoothTheme, string> = {
 export function resolveKinetixBoothVersion(options?: {
   search?: string;
   envValue?: string;
+  worldVersion?: 'v26' | 'v27_0' | 'v27';
 }): KinetixBoothVersion {
   const rawSearch =
     options?.search ?? (typeof window !== 'undefined' ? window.location.search : '');
   if (rawSearch) {
-    const param = new URLSearchParams(rawSearch).get('kinetix')?.trim().toLowerCase();
-    if (param === 'v2' || param === 'v3') {
+    const params = new URLSearchParams(rawSearch);
+    const param = params.get('kinetix')?.trim().toLowerCase();
+    if (param === 'v2' || param === 'v3' || param === 'v4' || param === 'v27_3' || param === 'v27_4') {
       return param;
+    }
+    const globalParam = params.get('booths')?.trim().toLowerCase();
+    if (globalParam === 'v2' || globalParam === 'v3' || globalParam === 'v4' || globalParam === 'v27_3' || globalParam === 'v27_4') {
+      return globalParam;
     }
   }
   const rawEnv = (
@@ -154,20 +190,21 @@ export function resolveKinetixBoothVersion(options?: {
   )
     .trim()
     .toLowerCase();
-  if (rawEnv === 'v2' || rawEnv === 'v3') {
+  if (rawEnv === 'v2' || rawEnv === 'v3' || rawEnv === 'v4' || rawEnv === 'v27_3' || rawEnv === 'v27_4') {
     return rawEnv;
+  }
+  if (options?.worldVersion === 'v27') {
+    return 'v27_4';
+  }
+  if (options?.worldVersion === 'v27_0') {
+    return 'v4';
   }
   return DEFAULT_KINETIX_BOOTH_VERSION;
 }
 
-/**
- * Resolves the active GLB version (`'v2'` or `'v3'`) for any exhibition booth theme.
- * Supports per-booth query rollback (`?aether=v2`, `?ecovita=v2`, `?lumina=v2`, `?nordic=v2`, `?solaris=v2`),
- * global rollback (`?booths=v2` or `VITE_BOOTHS_VERSION=v2`), while keeping Kinetix V3 independent.
- */
 export function resolveBoothModelVersion(
   theme: ArchitecturalBoothTheme,
-  options?: { search?: string; envValue?: string }
+  options?: { search?: string; envValue?: string; worldVersion?: 'v26' | 'v27_0' | 'v27' }
 ): BoothModelVersion {
   if (theme === 'robotics') {
     return resolveKinetixBoothVersion(options);
@@ -177,11 +214,11 @@ export function resolveBoothModelVersion(
   if (rawSearch) {
     const params = new URLSearchParams(rawSearch);
     const perBooth = params.get(BOOTH_QUERY_KEY_BY_THEME[theme])?.trim().toLowerCase();
-    if (perBooth === 'v2' || perBooth === 'v3') {
+    if (perBooth === 'v2' || perBooth === 'v3' || perBooth === 'v4' || perBooth === 'v27_3' || perBooth === 'v27_4') {
       return perBooth;
     }
     const globalParam = params.get('booths')?.trim().toLowerCase();
-    if (globalParam === 'v2' || globalParam === 'v3') {
+    if (globalParam === 'v2' || globalParam === 'v3' || globalParam === 'v4' || globalParam === 'v27_3' || globalParam === 'v27_4') {
       return globalParam;
     }
   }
@@ -192,8 +229,14 @@ export function resolveBoothModelVersion(
   )
     .trim()
     .toLowerCase();
-  if (rawEnv === 'v2' || rawEnv === 'v3') {
+  if (rawEnv === 'v2' || rawEnv === 'v3' || rawEnv === 'v4' || rawEnv === 'v27_3' || rawEnv === 'v27_4') {
     return rawEnv;
+  }
+  if (options?.worldVersion === 'v27') {
+    return 'v27_4';
+  }
+  if (options?.worldVersion === 'v27_0') {
+    return 'v4';
   }
   return DEFAULT_BOOTH_MODEL_VERSIONS[theme];
 }
@@ -203,7 +246,11 @@ export function resolveBespokeBoothGlbSubpath(
   versionOverride?: BoothModelVersion
 ): string {
   const ver = versionOverride ?? resolveBoothModelVersion(theme);
-  return ver === 'v3' ? BESPOKE_V3_GLB_MAP[theme] : BESPOKE_V2_GLB_MAP[theme];
+  if (ver === 'v27_4') return BESPOKE_V27_4_GLB_MAP[theme];
+  if (ver === 'v27_3') return BESPOKE_V27_3_GLB_MAP[theme];
+  if (ver === 'v4') return BESPOKE_V4_GLB_MAP[theme];
+  if (ver === 'v3') return BESPOKE_V3_GLB_MAP[theme];
+  return BESPOKE_V2_GLB_MAP[theme];
 }
 
 /**

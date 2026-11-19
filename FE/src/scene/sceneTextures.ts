@@ -1972,3 +1972,346 @@ export function createStormDrainGrateTexture(): THREE.CanvasTexture {
   texture.anisotropy = 8;
   return texture;
 }
+
+// ============================================================================
+// V27.4 — Architectural Product Display, Slim Architectural Signage & Medallion
+// ============================================================================
+
+export type ArchitecturalDisplayStyle =
+  | 'gallery-frame'
+  | 'physical-stand'
+  | 'shelf-screen'
+  | 'tabletop-display'
+  | 'wall-niche'
+  | 'digital-kiosk';
+
+/**
+ * V27.4 Phase 2 — Gallery-grade Architectural Product Display Texture.
+ * Replaces bulky 2D e-commerce cards with clean, high-ratio product photography (76-80%),
+ * restrained architectural framing, short product title, price, and subtle interactive cue.
+ */
+export function createArchitecturalProductDisplayTexture(options: {
+  name: string;
+  priceText: string;
+  imageUrl?: string;
+  accentColor: string;
+  selected?: boolean;
+  style: ArchitecturalDisplayStyle;
+}): THREE.CanvasTexture {
+  const W = 512;
+  const H = 640;
+  const canvas = createCanvasElement(W, H);
+  const ctx = canvas.getContext('2d');
+  const texture = registerTrackedTexture(canvas);
+  texture.anisotropy = 8;
+
+  const isLightGallery =
+    options.style === 'gallery-frame' ||
+    options.style === 'wall-niche' ||
+    options.style === 'tabletop-display';
+
+  const bg = isLightGallery ? '#f8f6f2' : '#121824';
+  const captionBg = isLightGallery ? '#ffffff' : '#182132';
+  const titleColor = isLightGallery ? '#1e242d' : '#f8fafc';
+  const priceColor = isLightGallery ? '#9a6b2f' : '#e2b76b';
+  const subtleBorder = options.selected
+    ? '#d9a441'
+    : isLightGallery
+      ? 'rgba(120, 108, 92, 0.28)'
+      : 'rgba(148, 163, 184, 0.28)';
+
+  const pad = options.style === 'gallery-frame' ? 28 : options.style === 'wall-niche' ? 22 : 16;
+  const imgX = pad;
+  const imgY = pad;
+  const imgW = W - pad * 2;
+  const imgH = 446 - pad;
+
+  const drawLayout = (loadedImg?: HTMLImageElement | null) => {
+    if (!ctx) return;
+    ctx.clearRect(0, 0, W, H);
+
+    // Base architectural mat / glass backing
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Restrained hairline architectural border (no thick neon!)
+    ctx.strokeStyle = subtleBorder;
+    ctx.lineWidth = options.selected ? 8 : 3;
+    ctx.strokeRect(4, 4, W - 8, H - 8);
+
+    // Product image viewport
+    ctx.save();
+    createRoundRectPath(ctx, imgX, imgY, imgW, imgH, isLightGallery ? 6 : 12);
+    ctx.clip();
+    ctx.fillStyle = isLightGallery ? '#ede9e1' : '#1e293b';
+    ctx.fillRect(imgX, imgY, imgW, imgH);
+
+    if (loadedImg && loadedImg.naturalWidth > 0 && loadedImg.naturalHeight > 0) {
+      const iw = loadedImg.naturalWidth;
+      const ih = loadedImg.naturalHeight;
+      const scale = Math.max(imgW / iw, imgH / ih);
+      const dw = iw * scale;
+      const dh = ih * scale;
+      ctx.drawImage(loadedImg, imgX + (imgW - dw) / 2, imgY + (imgH - dh) / 2, dw, dh);
+    } else {
+      // Subtle studio placeholder gradient while image loads
+      const grad = ctx.createLinearGradient(imgX, imgY, imgX + imgW, imgY + imgH);
+      grad.addColorStop(0, isLightGallery ? '#e5dfd5' : '#1e293b');
+      grad.addColorStop(1, isLightGallery ? '#d6cfc2' : '#0f172a');
+      ctx.fillStyle = grad;
+      ctx.fillRect(imgX, imgY, imgW, imgH);
+    }
+    ctx.restore();
+
+    // Minimalist architectural caption plate (bottom 176px)
+    const capY = 462;
+    ctx.fillStyle = captionBg;
+    ctx.fillRect(pad, capY, W - pad * 2, H - capY - pad);
+
+    // Thin accent hairline above caption
+    ctx.fillStyle = options.selected ? '#d9a441' : options.accentColor;
+    ctx.fillRect(pad, capY, 64, 4);
+
+    // Concise Product Name (max 2 lines, clean typography)
+    const maxW = W - pad * 2 - 28;
+    const shortName = options.name.length > 44 ? `${options.name.slice(0, 42).trimEnd()}…` : options.name;
+    const fitted = fitEnterpriseTitleLines(ctx, shortName, maxW, 26, 20);
+    ctx.fillStyle = titleColor;
+    ctx.textAlign = 'left';
+    ctx.font = `700 ${fitted.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
+    if (fitted.lines.length <= 1) {
+      ctx.fillText(fitted.lines[0] || shortName, pad + 14, capY + 46);
+    } else {
+      ctx.fillText(fitted.lines[0], pad + 14, capY + 38);
+      ctx.fillText(fitted.lines[1], pad + 14, capY + 68);
+    }
+
+    // Price + subtle interactive touch cue (dot + arrow, no heavy e-commerce CTA)
+    ctx.font = '800 28px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillStyle = priceColor;
+    ctx.fillText(options.priceText, pad + 14, H - pad - 24);
+
+    // Subtle interactive circle indicator on bottom-right
+    const cueX = W - pad - 30;
+    const cueY = H - pad - 34;
+    ctx.beginPath();
+    ctx.arc(cueX, cueY, 16, 0, Math.PI * 2);
+    ctx.fillStyle = options.selected ? '#d9a441' : isLightGallery ? '#1e242d' : 'rgba(255,255,255,0.14)';
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 18px Inter, Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('›', cueX + 1, cueY + 6);
+
+    texture.needsUpdate = true;
+  };
+
+  drawLayout(null);
+
+  if (options.imageUrl && typeof Image !== 'undefined') {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => drawLayout(img);
+    img.onerror = () => drawLayout(null);
+    img.src = options.imageUrl;
+  }
+
+  return texture;
+}
+
+/**
+ * V27.4 Phase 3 — Slim Architectural Signage Texture (1536×156).
+ * Integrated per-booth styling (backlit brass, gallery ribbon, brushed titanium,
+ * slender bronze bar) that preserves full dynamic enterprise name + category + count
+ * without blocking arches, rings, or facade geometry.
+ */
+export function createArchitecturalSignTexture(options: {
+  name: string;
+  category: string;
+  productCount: number;
+  color: string;
+  active: boolean;
+  theme: BoothVisualTheme;
+}): THREE.CanvasTexture {
+  const W = 1536;
+  const H = 156;
+  const canvas = createCanvasElement(W, H);
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    ctx.clearRect(0, 0, W, H);
+
+    const styleByTheme: Record<
+      BoothVisualTheme,
+      { bg: string; border: string; title: string; sub: string; pillBg: string; pillText: string }
+    > = {
+      living: {
+        bg: 'rgba(34, 26, 20, 0.92)',
+        border: '#c9a466',
+        title: '#fbf8f1',
+        sub: '#dec08a',
+        pillBg: '#c9a466',
+        pillText: '#1c1510',
+      },
+      design: {
+        bg: 'rgba(252, 245, 248, 0.94)',
+        border: '#b87a90',
+        title: '#3a1d3a',
+        sub: '#8c4c6b',
+        pillBg: '#5c2454',
+        pillText: '#ffffff',
+      },
+      tech: {
+        bg: 'rgba(14, 24, 42, 0.94)',
+        border: '#38bdf8',
+        title: '#f8fafc',
+        sub: '#7dd3fc',
+        pillBg: '#0284c7',
+        pillText: '#ffffff',
+      },
+      energy: {
+        bg: 'rgba(12, 46, 44, 0.94)',
+        border: '#e08e45',
+        title: '#fdfbf7',
+        sub: '#f6c18b',
+        pillBg: '#d97724',
+        pillText: '#ffffff',
+      },
+      coffee: {
+        bg: 'rgba(24, 52, 50, 0.94)',
+        border: '#c99b56',
+        title: '#fbf8f1',
+        sub: '#e2c48c',
+        pillBg: '#9a6b2f',
+        pillText: '#ffffff',
+      },
+      robotics: {
+        bg: 'rgba(22, 23, 30, 0.95)',
+        border: '#8b6ce8',
+        title: '#f8fafc',
+        sub: '#c4b5fd',
+        pillBg: '#5b3cc4',
+        pillText: '#ffffff',
+      },
+    };
+
+    const st = styleByTheme[options.theme];
+    const borderCol = options.active ? '#f59e0b' : st.border;
+
+    // Slim refined pill-bar or architectural plaque
+    ctx.save();
+    createRoundRectPath(ctx, 8, 8, W - 16, H - 16, 18);
+    ctx.fillStyle = st.bg;
+    ctx.fill();
+    ctx.lineWidth = options.active ? 6 : 3;
+    ctx.strokeStyle = borderCol;
+    ctx.stroke();
+    ctx.restore();
+
+    // Subtle left architectural accent bar
+    ctx.fillStyle = borderCol;
+    ctx.fillRect(28, 28, 8, H - 56);
+
+    // Dynamic Enterprise Name (auto-fit for long names, crisp sans)
+    const titleX = 56;
+    const maxTitleW = 1170;
+    const upperName = options.name.toUpperCase();
+    const fittedTitle = fitEnterpriseTitleLines(ctx, upperName, maxTitleW, 50, 32);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = st.title;
+    ctx.font = `800 ${fittedTitle.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
+    ctx.fillText(fittedTitle.lines[0] || upperName, titleX, 76);
+
+    // Subtitle / Category
+    const subText = options.category.toUpperCase();
+    const fittedSub = fitEnterpriseTitleLines(ctx, subText, maxTitleW, 24, 18);
+    ctx.fillStyle = st.sub;
+    ctx.font = `600 ${fittedSub.fontPx}px Inter, Segoe UI, Arial, sans-serif`;
+    ctx.fillText(fittedSub.lines[0] || subText, titleX, 118);
+
+    // Compact architectural product count badge on the right
+    ctx.save();
+    createRoundRectPath(ctx, W - 242, 34, 206, 88, 14);
+    ctx.fillStyle = st.pillBg;
+    ctx.fill();
+    ctx.restore();
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = st.pillText;
+    ctx.font = '800 34px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillText(`${options.productCount} SP`, W - 139, 78);
+    ctx.font = '700 16px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillText('TRƯNG BÀY', W - 139, 104);
+  }
+
+  const texture = registerTrackedTexture(canvas);
+  texture.anisotropy = 8;
+  return texture;
+}
+
+/**
+ * V27.4 Phase 4 — Grand Expo World Architectural Floor Medallion Texture (Central Avenue).
+ */
+export function createGrandExpoMedallionTexture(): THREE.CanvasTexture {
+  const S = 1024;
+  const canvas = createCanvasElement(S, S);
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, S, S);
+    const cx = S / 2;
+    const cy = S / 2;
+
+    // Subtle stone circular inlay base
+    ctx.beginPath();
+    ctx.arc(cx, cy, 488, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(241, 237, 229, 0.92)';
+    ctx.fill();
+
+    // Concentric champagne-brass & dark-navy architectural rings
+    ctx.beginPath();
+    ctx.arc(cx, cy, 474, 0, Math.PI * 2);
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = '#b99352';
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, 434, 0, Math.PI * 2);
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#1e293b';
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, 340, 0, Math.PI * 2);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(185, 147, 82, 0.65)';
+    ctx.stroke();
+
+    // 8 compass tick marks
+    for (let i = 0; i < 8; i++) {
+      const ang = (i * Math.PI) / 4;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * 352, cy + Math.sin(ang) * 352);
+      ctx.lineTo(cx + Math.cos(ang) * 424, cy + Math.sin(ang) * 424);
+      ctx.lineWidth = i % 2 === 0 ? 8 : 4;
+      ctx.strokeStyle = '#b99352';
+      ctx.stroke();
+    }
+
+    // Center Emblem Typography
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#1e293b';
+    ctx.font = '800 58px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillText('GRAND EXPO', cx, cy - 16);
+
+    ctx.fillStyle = '#9a7234';
+    ctx.font = '800 42px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillText('W O R L D', cx, cy + 42);
+
+    ctx.fillStyle = '#475569';
+    ctx.font = '700 22px Inter, Segoe UI, Arial, sans-serif';
+    ctx.fillText('VIRTUAL EXHIBITION PLAZA', cx, cy + 96);
+  }
+  const texture = registerTrackedTexture(canvas);
+  texture.anisotropy = 8;
+  return texture;
+}

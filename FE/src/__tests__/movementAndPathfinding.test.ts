@@ -53,6 +53,15 @@ import {
   getCachedAssetStats,
 } from '../scene/assetLoader';
 import {
+  DEFAULT_EXPO_WORLD_VERSION,
+  V27_BOOTH_LAYOUT_SPECS,
+  V27_SPAWN_POINT,
+  V27_WORLD_BOUNDS,
+  applyWorldLayoutToBooths,
+  getWorldRuntimeConfig,
+  resolveExpoWorldVersion,
+} from '../scene/worldLayout';
+import {
   BACKDROP_LEFT_BAY_LOCAL_POS,
   BACKDROP_RIGHT_BAY_LOCAL_POS,
   resolveBoothBackdropAndShelfSlots,
@@ -1930,6 +1939,169 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
       const approach = getBoothApproachPoint(booth);
       expect(isPointWalkable(approach.x, approach.z, DEFAULT_BOOTHS)).toBe(true);
       expect(verifyNpcPlacementSafety(booth).valid).toBe(true);
+    }
+  });
+
+  it('V27 Phase 1–2 — switches cleanly between V26.1 and V27 Grand Expo World, validates U-shaped 6-booth layout clearances, spawn, A* navigation to all 6 booths & between wings, NPC safety, and zero park asset imports in GrandExpoHall', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+
+    // 1. World version switching & Production default preservation (V26.1 default)
+    expect(DEFAULT_EXPO_WORLD_VERSION).toBe('v26');
+    expect(resolveExpoWorldVersion({ search: '', envValue: '' })).toBe('v26');
+    expect(resolveExpoWorldVersion({ search: '?world=v27', envValue: '' })).toBe('v27');
+    expect(resolveExpoWorldVersion({ search: '?world=v26', envValue: 'v27' })).toBe('v26');
+    expect(resolveExpoWorldVersion({ search: '', envValue: 'v27' })).toBe('v27');
+
+    // 2. U-Shaped layout transforms preserve all 6 boothIds, metadata, and keep strict non-overlap clearances
+    const v27Booths = applyWorldLayoutToBooths(DEFAULT_BOOTHS, 'v27');
+    const v26Booths = applyWorldLayoutToBooths(DEFAULT_BOOTHS, 'v26');
+    expect(v26Booths).toBe(DEFAULT_BOOTHS);
+    expect(v27Booths).toHaveLength(6);
+    expect(V27_BOOTH_LAYOUT_SPECS).toHaveLength(6);
+
+    for (let i = 0; i < v27Booths.length; i++) {
+      expect(v27Booths[i].id).toBe(DEFAULT_BOOTHS[i].id);
+      expect(v27Booths[i].name).toBe(DEFAULT_BOOTHS[i].name);
+      expect(v27Booths[i].companyName).toBe(DEFAULT_BOOTHS[i].companyName);
+      // Verify no two V27 booth obstacle boxes overlap (with >= 1.5m clearance)
+      const boxA = getBoothObstacleBox(v27Booths[i]);
+      for (let j = i + 1; j < v27Booths.length; j++) {
+        const boxB = getBoothObstacleBox(v27Booths[j]);
+        const separatedX = boxA.maxX + 1.5 <= boxB.minX || boxB.maxX + 1.5 <= boxA.minX;
+        const separatedZ = boxA.maxZ + 1.5 <= boxB.minZ || boxB.maxZ + 1.5 <= boxA.minZ;
+        expect(separatedX || separatedZ).toBe(true);
+      }
+    }
+
+    // 3. Spawn validity, isolated storageKey, and open central avenue (no V26 fountain blocking [0, 0])
+    const v27Cfg = getWorldRuntimeConfig('v27');
+    const v26Cfg = getWorldRuntimeConfig('v26');
+    expect(v27Cfg.storageKey).not.toBe(v26Cfg.storageKey);
+    expect(
+      isPointWalkable(V27_SPAWN_POINT.x, V27_SPAWN_POINT.z, v27Booths, undefined, v27Cfg.navOptions)
+    ).toBe(true);
+    // Central Avenue midpoint (0, 0) must be completely open and walkable in V27!
+    expect(isPointWalkable(0, 0, v27Booths, undefined, v27Cfg.navOptions)).toBe(true);
+
+    // 4. Approach points & A* navigation from Spawn -> all 6 booths AND booth-to-booth across U-wings
+    const approaches = v27Booths.map((b) => ({ booth: b, pt: getBoothApproachPoint(b) }));
+    for (const { booth, pt } of approaches) {
+      expect(isPointWalkable(pt.x, pt.z, v27Booths, undefined, v27Cfg.navOptions)).toBe(true);
+      const pathFromSpawn = findPathAStar(
+        V27_SPAWN_POINT.x,
+        V27_SPAWN_POINT.z,
+        pt.x,
+        pt.z,
+        v27Booths,
+        undefined,
+        v27Cfg.navOptions
+      );
+      expect(pathFromSpawn.length).toBeGreaterThan(0);
+      // Every waypoint must stay strictly inside V27 bounds and walkable
+      for (const wp of pathFromSpawn) {
+        expect(wp.x).toBeGreaterThanOrEqual(V27_WORLD_BOUNDS.minX);
+        expect(wp.x).toBeLessThanOrEqual(V27_WORLD_BOUNDS.maxX);
+        expect(wp.z).toBeGreaterThanOrEqual(V27_WORLD_BOUNDS.minZ);
+        expect(wp.z).toBeLessThanOrEqual(V27_WORLD_BOUNDS.maxZ);
+        expect(isPointWalkable(wp.x, wp.z, v27Booths, undefined, v27Cfg.navOptions)).toBe(true);
+      }
+      // NPC placement remains valid & grounded inside V27 world bounds
+      expect(verifyNpcPlacementSafety(booth).valid).toBe(true);
+    }
+
+    // Cross-hall navigation: Near-Left (EcoVita) -> Far-Right (Solaris) -> North-Left (Nordic) -> Back to Spawn
+    const ecoPt = getBoothApproachPoint(v27Booths.find((b) => b.id === 'booth-ecovita-craft')!);
+    const solPt = getBoothApproachPoint(v27Booths.find((b) => b.id === 'booth-solaris-energy')!);
+    const norPt = getBoothApproachPoint(v27Booths.find((b) => b.id === 'booth-nordic-living')!);
+    expect(
+      findPathAStar(ecoPt.x, ecoPt.z, solPt.x, solPt.z, v27Booths, undefined, v27Cfg.navOptions).length
+    ).toBeGreaterThan(0);
+    expect(
+      findPathAStar(solPt.x, solPt.z, norPt.x, norPt.z, v27Booths, undefined, v27Cfg.navOptions).length
+    ).toBeGreaterThan(0);
+    expect(
+      findPathAStar(norPt.x, norPt.z, V27_SPAWN_POINT.x, V27_SPAWN_POINT.z, v27Booths, undefined, v27Cfg.navOptions).length
+    ).toBeGreaterThan(0);
+
+    // 5. Verify GrandExpoHall.tsx imports ZERO park GLB loaders / ExteriorAssets / tree models
+    const hallSrc = fs.readFileSync(path.resolve(__dirname, '../scene/GrandExpoHall.tsx'), 'utf8');
+    expect(hallSrc).not.toContain('ExteriorAssets');
+    expect(hallSrc).not.toContain('fir_tree');
+    expect(hallSrc).not.toContain('jacaranda_tree');
+    expect(hallSrc).not.toContain('tree-gian');
+    expect(hallSrc).not.toContain('building03');
+  });
+
+  it('V27 Phase 3–5 & V27.3 — resolves 6 Unique V27.3 Booth GLBs & 5 Plaza GLBs in V27, preserves V4/V3/V2 rollback and V3 default in V26', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const {
+      BESPOKE_V27_4_GLB_MAP,
+      BESPOKE_V27_3_GLB_MAP,
+      BESPOKE_V4_GLB_MAP,
+      resolveBoothModelVersion,
+      resolveBespokeBoothGlbSubpath,
+    } = await import('../scene/assetLoader');
+
+    const themes = ['living', 'design', 'tech', 'energy', 'coffee', 'robotics'] as const;
+    const publicModelsRoot = path.resolve(__dirname, '../../public');
+
+    // 1. In V27.4 Grand Expo World (?world=v27), all 6 booths default to v27_4 and every V27.4 + V27.3 + V4 GLB exists on disk
+    const seenPaths = new Set<string>();
+    for (const theme of themes) {
+      expect(resolveBoothModelVersion(theme, { search: '?world=v27', worldVersion: 'v27' })).toBe('v27_4');
+      const subpath = resolveBespokeBoothGlbSubpath(theme, 'v27_4');
+      expect(subpath).toBe(BESPOKE_V27_4_GLB_MAP[theme]);
+      expect(subpath).toContain('models/booths/v27_4/');
+      expect(seenPaths.has(subpath)).toBe(false);
+      seenPaths.add(subpath);
+
+      const fullPath = path.join(publicModelsRoot, subpath);
+      expect(fs.existsSync(fullPath)).toBe(true);
+      const stat = fs.statSync(fullPath);
+      expect(stat.size).toBeGreaterThan(50_000);
+      expect(stat.size).toBeLessThan(950_000);
+
+      // V27.3 & V4 GLBs preserved untouched on disk + instant rollback via ?booths=v27_3, ?booths=v4, ?world=v27_0
+      expect(fs.existsSync(path.join(publicModelsRoot, BESPOKE_V27_3_GLB_MAP[theme]))).toBe(true);
+      expect(fs.existsSync(path.join(publicModelsRoot, BESPOKE_V4_GLB_MAP[theme]))).toBe(true);
+      expect(
+        resolveBoothModelVersion(theme, { search: '?world=v27&booths=v27_3', worldVersion: 'v27' })
+      ).toBe('v27_3');
+      expect(
+        resolveBoothModelVersion(theme, { search: '?world=v27&booths=v4', worldVersion: 'v27' })
+      ).toBe('v4');
+      expect(
+        resolveBoothModelVersion(theme, { search: '?world=v27_0', worldVersion: 'v27_0' })
+      ).toBe('v4');
+      expect(
+        resolveBoothModelVersion(theme, { search: '?world=v27&booths=v3', worldVersion: 'v27' })
+      ).toBe('v3');
+      expect(
+        resolveBoothModelVersion(theme, { search: '?world=v27&booths=v2', worldVersion: 'v27' })
+      ).toBe('v2');
+
+      // Default V26.1 Park World stays on V3 (untouched Production baseline)
+      expect(resolveBoothModelVersion(theme, { search: '', worldVersion: 'v26' })).toBe('v3');
+    }
+    expect(seenPaths.size).toBe(6);
+
+    // 2. Verify all 6 V27.4 & 5 V27.3 Plaza Amenity GLBs exist on disk
+    for (const plazaGlb of [
+      'models/plaza/v27_4/welcome_desk_v27_4.glb',
+      'models/plaza/v27_4/mini_cafe_corner_v27_4.glb',
+      'models/plaza/v27_4/rest_lounge_v27_4.glb',
+      'models/plaza/v27_4/checkin_stage_v27_4.glb',
+      'models/plaza/v27_4/directory_monument_v27_4.glb',
+      'models/plaza/v27_4/digital_totem_v27_4.glb',
+      'models/plaza/v27_3/welcome_desk_v27_3.glb',
+      'models/plaza/v27_3/mini_cafe_corner_v27_3.glb',
+      'models/plaza/v27_3/rest_lounge_v27_3.glb',
+      'models/plaza/v27_3/checkin_stage_v27_3.glb',
+      'models/plaza/v27_3/digital_totem_v27_3.glb',
+    ]) {
+      expect(fs.existsSync(path.join(publicModelsRoot, plazaGlb))).toBe(true);
     }
   });
 });

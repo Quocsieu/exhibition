@@ -4,11 +4,16 @@ import {
   type ServerToClientEvents,
   type ClientToServerEvents,
   type VisitorState,
+  type ExpoWorldVersion,
   VisitorMovePayloadSchema,
   VisitorProfilePayloadSchema,
   MOVE_EVENT_MIN_INTERVAL_MS,
   MAX_SERVER_SPEED,
+  PLAYER_RADIUS,
   CENTRAL_SPAWN_SLOTS,
+  V27_0_SPAWN_SLOTS,
+  V27_SPAWN_SLOTS,
+  normalizeExpoWorldVersion,
   isPointWalkable,
 } from '../schemas/expoSchemas.js';
 import type { ExpoDatabase } from '../database/db.js';
@@ -16,7 +21,12 @@ import type { CorsOriginConfig } from '../server.js';
 
 interface InternalVisitorRecord {
   state: VisitorState;
+  worldVersion: ExpoWorldVersion;
   lastMoveEventAt: number;
+}
+
+function getWorldRoomName(worldVersion: ExpoWorldVersion): string {
+  return `world:${worldVersion}`;
 }
 
 const DEFAULT_COLORS = [
@@ -42,15 +52,37 @@ export function attachSocketServer(
 
   const visitors = new Map<string, InternalVisitorRecord>();
 
+  const getWorldVisitorStates = (worldVersion: ExpoWorldVersion): VisitorState[] => {
+    const states: VisitorState[] = [];
+    for (const rec of visitors.values()) {
+      if (rec.worldVersion === worldVersion) {
+        states.push(rec.state);
+      }
+    }
+    return states;
+  };
+
   io.on('connection', (socket) => {
     const auth = (socket.handshake.auth || {}) as Record<string, unknown>;
+    // Lock worldVersion at handshake against strict allowlist — cannot be mutated mid-session
+    const worldVersion: ExpoWorldVersion = normalizeExpoWorldVersion(auth.worldVersion);
+    const worldRoom = getWorldRoomName(worldVersion);
+    void socket.join(worldRoom);
+
+    const existingInWorld = getWorldVisitorStates(worldVersion);
     const rawName = typeof auth.name === 'string' ? auth.name.trim().slice(0, 32) : '';
     const rawColor =
       typeof auth.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(auth.color)
         ? auth.color
-        : DEFAULT_COLORS[visitors.size % DEFAULT_COLORS.length];
+        : DEFAULT_COLORS[existingInWorld.length % DEFAULT_COLORS.length];
 
-    const defaultSlot = CENTRAL_SPAWN_SLOTS[visitors.size % CENTRAL_SPAWN_SLOTS.length];
+    const spawnSlots =
+      worldVersion === 'v27'
+        ? V27_SPAWN_SLOTS
+        : worldVersion === 'v27_0'
+          ? V27_0_SPAWN_SLOTS
+          : CENTRAL_SPAWN_SLOTS;
+    const defaultSlot = spawnSlots[existingInWorld.length % spawnSlots.length];
     const boothsOnConnect = db.listBooths();
     const rawAuthX = typeof auth.x === 'number' && Number.isFinite(auth.x) ? auth.x : null;
     const rawAuthZ = typeof auth.z === 'number' && Number.isFinite(auth.z) ? auth.z : null;
@@ -62,7 +94,7 @@ export function attachSocketServer(
     const canRestoreAuthPos =
       rawAuthX !== null &&
       rawAuthZ !== null &&
-      isPointWalkable(rawAuthX, rawAuthZ, boothsOnConnect);
+      isPointWalkable(rawAuthX, rawAuthZ, boothsOnConnect, PLAYER_RADIUS, worldVersion);
 
     const initialVisitor: VisitorState = {
       sessionId: socket.id,
@@ -78,19 +110,20 @@ export function attachSocketServer(
 
     visitors.set(socket.id, {
       state: initialVisitor,
+      worldVersion,
       lastMoveEventAt: 0,
     });
 
-    const allStates = Array.from(visitors.values()).map((v) => v.state);
+    const worldStates = getWorldVisitorStates(worldVersion);
 
     socket.emit('world:init', {
       self: initialVisitor,
-      visitors: allStates,
-      onlineCount: visitors.size,
+      visitors: worldStates,
+      onlineCount: worldStates.length,
     });
 
-    socket.broadcast.emit('visitor:joined', initialVisitor);
-    io.emit('visitors:count', { onlineCount: visitors.size });
+    socket.to(worldRoom).emit('visitor:joined', initialVisitor);
+    io.to(worldRoom).emit('visitors:count', { onlineCount: worldStates.length });
 
     socket.on('visitor:move', (rawPayload) => {
       const record = visitors.get(socket.id);
@@ -117,7 +150,7 @@ export function attachSocketServer(
       const { x, z, rotationY, state, activeBoothId } = parsed.data;
       const booths = db.listBooths();
 
-      if (!isPointWalkable(x, z, booths)) {
+      if (!isPointWalkable(x, z, booths, PLAYER_RADIUS, record.worldVersion)) {
         socket.emit('move:rejected', {
           x: record.state.x,
           z: record.state.z,
@@ -149,7 +182,7 @@ export function attachSocketServer(
         updatedAt: now,
       };
 
-      socket.broadcast.emit('visitor:moved', record.state);
+      socket.to(getWorldRoomName(record.worldVersion)).emit('visitor:moved', record.state);
     });
 
     socket.on('visitor:profile', (rawProfile) => {
@@ -166,14 +199,18 @@ export function attachSocketServer(
         updatedAt: Date.now(),
       };
 
-      io.emit('visitor:updated', record.state);
+      io.to(getWorldRoomName(record.worldVersion)).emit('visitor:updated', record.state);
     });
 
     socket.on('disconnect', () => {
+      const record = visitors.get(socket.id);
       visitors.delete(socket.id);
-      io.emit('visitor:left', {
+      if (!record) return;
+      const room = getWorldRoomName(record.worldVersion);
+      const remainingCount = getWorldVisitorStates(record.worldVersion).length;
+      io.to(room).emit('visitor:left', {
         sessionId: socket.id,
-        onlineCount: visitors.size,
+        onlineCount: remainingCount,
       });
     });
   });

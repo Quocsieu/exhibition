@@ -24,7 +24,13 @@ export {
   type KinetixBoothVersion,
 };
 
-interface Props { theme: ArchitecturalBoothTheme; fallback: THREE.Group; boothId?: string; isV2?: boolean }
+interface Props {
+  theme: ArchitecturalBoothTheme;
+  fallback: THREE.Group;
+  boothId?: string;
+  isV2?: boolean;
+  worldVersion?: 'v26' | 'v27_0' | 'v27';
+}
 
 class FrameBoundary extends React.Component<{ fallback: THREE.Group; children: React.ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -35,8 +41,8 @@ class FrameBoundary extends React.Component<{ fallback: THREE.Group; children: R
   }
 }
 
-function LoadedFrame({ theme, fallback, isV2 }: Props) {
-  const boothVersion = resolveBoothModelVersion(theme);
+function LoadedFrame({ theme, fallback, isV2, worldVersion }: Props) {
+  const boothVersion = resolveBoothModelVersion(theme, { worldVersion });
   const bespokeSubpath = isV2 ? resolveBespokeBoothGlbSubpath(theme, boothVersion) : null;
   const baseUrl =
     (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.BASE_URL || '/';
@@ -75,7 +81,7 @@ function LoadedFrame({ theme, fallback, isV2 }: Props) {
 }
 
 export function RooflessBoothShell(props: Props) {
-  return <FrameBoundary key={`${props.theme}-${props.isV2 ? 'v2' : 'v1'}`} fallback={props.fallback}>
+  return <FrameBoundary key={`${props.theme}-${props.worldVersion ?? 'v26'}-${props.isV2 ? 'v2' : 'v1'}`} fallback={props.fallback}>
     <Suspense fallback={<primitive object={props.fallback} dispose={null} />}>
       <LoadedFrame {...props} />
     </Suspense>
