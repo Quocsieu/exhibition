@@ -33,7 +33,7 @@ export const KORVATTS_DEFAULT_VOICE = 'phuong_linh';
 export const KORVATTS_DEFAULT_LANGUAGE = 'vi';
 export const KORVATTS_DEFAULT_SPEED = 1.05;
 export const KORVATTS_DEFAULT_STEPS = 24;
-export const KORVATTS_MODEL_VERSION = 'korvatts-0.1.3-e5c8c218';
+export const KORVATTS_MODEL_VERSION = 'korvatts-0.1.3-e5c8c218-v25.10.2';
 
 export const AZURE_DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 export const AZURE_DEFAULT_OUTPUT_FORMAT = 'audio-24khz-96kbitrate-mono-mp3';
@@ -227,27 +227,62 @@ export function normalizeTextForVietnameseTts(
 const VIETNAMESE_DIACRITIC_RE =
   /[ăâđêôơưáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/i;
 
+const ENGLISH_SHORT_BRAND_OR_MODEL_TOKENS = new Set([
+  'air', 'amp', 'app', 'arc', 'art', 'aux', 'bar', 'bay', 'bio', 'bit',
+  'box', 'bus', 'cam', 'car', 'cat', 'cob', 'core', 'cpu', 'dac', 'dell',
+  'desk', 'diy', 'dot', 'duo', 'eco', 'edge', 'ergo', 'eye', 'fan', 'fit',
+  'flex', 'flow', 'fold', 'ford', 'gear', 'glass', 'glow', 'gold', 'go',
+  'gpu', 'grid', 'grip', 'halo', 'hd', 'hex', 'home', 'hub', 'ice', 'ikea',
+  'ink', 'ion', 'iot', 'ip', 'jet', 'key', 'kit', 'lab', 'lan', 'laser',
+  'lcd', 'led', 'lego', 'lens', 'light', 'line', 'link', 'lite', 'live',
+  'lock', 'loop', 'lux', 'mac', 'mat', 'max', 'mesh', 'mic', 'mini', 'mix',
+  'mod', 'mode', 'nano', 'neo', 'net', 'next', 'node', 'note', 'nova',
+  'oled', 'omni', 'one', 'orb', 'pack', 'pad', 'pan', 'peak', 'pen', 'pet',
+  'plus', 'pod', 'poe', 'port', 'pro', 'pure', 'quad', 'rack', 'ram', 'ray',
+  'ring', 'rod', 'rom', 'rover', 'run', 'safe', 'scan', 'seat', 'sense',
+  'set', 'sim', 'slim', 'slot', 'smart', 'soft', 'solo', 'sony', 'sound',
+  'space', 'spot', 'star', 'step', 'sun', 'sync', 'tab', 'tag', 'tank',
+  'tap', 'tech', 'tile', 'tint', 'ton', 'top', 'touch', 'tour', 'track',
+  'tray', 'trim', 'trio', 'tube', 'twin', 'type', 'unit', 'usb', 'van',
+  'vent', 'view', 'vita', 'volt', 'wall', 'warm', 'watch', 'watt', 'wave',
+  'web', 'wifi', 'wing', 'wire', 'wood', 'work', 'x', 'zen', 'zero', 'zone',
+]);
+
+const PURE_VI_ASCII_MONOSYLLABLE_RE =
+  /^(?:ngh|ng|nh|gh|gi|kh|ph|qu|th|tr|ch|[bcdghklmnpqrstvx])?(?:oai|oao|oay|uoi|uya|uyu|ai|ao|au|ay|eo|ia|iu|oa|oe|oi|oo|ua|ui|uo|uu|uy|[aeioy]|u(?=[a-z])|u$)(?:ng|nh|ch|[cmnpt])?$/i;
+
+function isContextualVietnameseAsciiWord(tok: string): boolean {
+  if (!/^[A-Z][a-z]{1,5}$/.test(tok)) return false;
+  const lower = tok.toLowerCase();
+  if (ENGLISH_SHORT_BRAND_OR_MODEL_TOKENS.has(lower)) return false;
+  return PURE_VI_ASCII_MONOSYLLABLE_RE.test(lower);
+}
+
 /**
- * Converts Title-Cased Vietnamese common words in product titles (e.g. "Pin Lưu Trữ Điện Mặt Trời Solaris PowerWall")
- * into natural lowercase ("pin lưu trữ điện mặt trời Solaris PowerWall") while strictly preserving English brand/model
- * capitalization ("Solaris", "PowerWall", "Green Future", "Solar Battery", "Fjäll Standing Desk").
+ * Converts Title-Cased Vietnamese common words in product titles (e.g. "Pin Lưu Trữ Điện Mặt Trời Solaris PowerWall",
+ * "Trạm Sạc Xe Điện Thông Minh Solaris ChargeBox") into natural lowercase ("pin lưu trữ điện mặt trời Solaris PowerWall",
+ * "trạm sạc xe điện thông minh Solaris ChargeBox") while strictly preserving English brand/model capitalization
+ * ("Solaris", "PowerWall", "ChargeBox", "AetherGlass Lite", "Green Future", "Solar Battery", "Fjäll Standing Desk").
  */
 export function smoothVietnameseProductTitleForKorva(title: string): string {
   const tokens = (title || '').trim().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return '';
 
-  const hasViDiacritic = tokens.map((tok) => VIETNAMESE_DIACRITIC_RE.test(tok));
+  const isViToken = tokens.map((tok) => VIETNAMESE_DIACRITIC_RE.test(tok));
+  for (let pass = 0; pass < 2; pass++) {
+    for (let idx = 0; idx < tokens.length; idx++) {
+      if (isViToken[idx]) continue;
+      const adjacentToVi =
+        (idx + 1 < tokens.length && isViToken[idx + 1]) ||
+        (idx > 0 && isViToken[idx - 1]);
+      if (adjacentToVi && isContextualVietnameseAsciiWord(tokens[idx])) {
+        isViToken[idx] = true;
+      }
+    }
+  }
+
   return tokens
-    .map((tok, idx) => {
-      if (hasViDiacritic[idx]) {
-        return tok.toLowerCase();
-      }
-      // Also lowercase short Title-Case ASCII Vietnamese lead words (like "Pin", "Bộ", "Kem") when immediately followed by a Vietnamese-diacritic word
-      if (/^[A-Z][a-z]{1,4}$/.test(tok) && idx + 1 < tokens.length && hasViDiacritic[idx + 1]) {
-        return tok.toLowerCase();
-      }
-      return tok;
-    })
+    .map((tok, idx) => (isViToken[idx] ? tok.toLowerCase() : tok))
     .join(' ');
 }
 
@@ -458,19 +493,19 @@ function protectSpanSpaces(text: string, phrase: string): string {
 }
 
 /**
- * Splits a Vietnamese NPC consultation script into natural 70–120 character clauses for early
- * first-chunk playback while strictly protecting brand names, product names, prices, units,
- * decimals, multi-word English phrases, and abbreviations from ever being split mid-phrase.
+ * Splits a Vietnamese NPC consultation script into short, prosodically stable 52–85 character
+ * clauses for KorvaTTS (`<= ~115` NFKD tokens per inference pass), strictly preventing cross-sentence
+ * merging across `. ! ?` while protecting brand names, product names, prices, units, decimals,
+ * multi-word English phrases, and abbreviations from ever being split mid-phrase.
  */
 export function chunkVietnameseConsultationSpeech(
   text: string,
   protectedPhrases: string[] = [],
-  targetMin = 70,
-  targetMax = 120
+  targetMin = 52,
+  targetMax = 85
 ): string[] {
   const normalized = (text || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return [];
-  if (normalized.length <= targetMax) return [normalized];
 
   let guarded = normalized;
 
@@ -519,29 +554,28 @@ export function chunkVietnameseConsultationSpeech(
       .replace(/\s+/g, ' ')
       .trim();
 
-  // Split by real sentence boundaries first
+  // Split by real sentence boundaries first (abbreviations are protected with \u2024)
   const sentences = guarded
     .split(/(?<=[.!?])\s+/)
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const rawPieces: string[] = [];
+  const rawPieces: Array<{ text: string; endsSentence: boolean }> = [];
+  const minPunct = Math.max(24, Math.floor(targetMin * 0.54));
 
   for (const sent of sentences) {
     if (sent.length <= targetMax) {
-      rawPieces.push(sent);
+      rawPieces.push({ text: sent, endsSentence: true });
       continue;
     }
 
     let rem = sent;
     while (rem.length > targetMax) {
-      // Search for best natural break inside [targetMin .. targetMax], or up to first space after targetMax if a protected span is long
       const windowEnd = Math.min(rem.length, targetMax);
       const slice = rem.slice(0, windowEnd);
 
       let splitAt = -1;
-      // Priority 1: Semicolon or comma pause inside [targetMin*0.65 .. windowEnd]
-      const minPunct = Math.floor(targetMin * 0.65);
+      // Priority 1: Semicolon or comma pause inside [minPunct .. windowEnd]
       const semi = slice.lastIndexOf('; ');
       const comma = slice.lastIndexOf(', ');
       if (semi >= minPunct) {
@@ -559,7 +593,9 @@ export function chunkVietnameseConsultationSpeech(
           ' tích hợp ',
           ' lắp đặt ',
           ' quản lý ',
+          ' cùng ',
           ' để ',
+          ' là ',
           ' và ',
           ' hoặc ',
         ];
@@ -578,40 +614,67 @@ export function chunkVietnameseConsultationSpeech(
         if (sp >= minPunct) {
           splitAt = sp;
         } else {
-          // Protected phrase spans across targetMax -> advance to the very next regular space after targetMax
+          // Protected phrase spans across targetMax: if an intro lead (>= 18 chars) precedes the long protected phrase,
+          // split cleanly before the protected phrase rather than creating a >100-char chunk; otherwise advance to next regular space.
           const nextSp = rem.indexOf(' ', windowEnd);
-          splitAt = nextSp !== -1 ? nextSp : rem.length;
+          const earlySp = slice.lastIndexOf(' ');
+          if (earlySp >= 18 && (nextSp === -1 || nextSp > targetMax + 10)) {
+            splitAt = earlySp;
+          } else {
+            splitAt = nextSp !== -1 ? nextSp : rem.length;
+          }
         }
       }
 
       const head = rem.slice(0, splitAt).trim();
-      if (head) rawPieces.push(head);
-      rem = rem.slice(splitAt).trim();
+      const tail = rem.slice(splitAt).trim();
+      if (head) {
+        rawPieces.push({ text: head, endsSentence: !tail });
+      }
+      rem = tail;
     }
-    if (rem) rawPieces.push(rem);
+    if (rem) {
+      rawPieces.push({ text: rem, endsSentence: true });
+    }
   }
 
-  // Merge tiny fragments (< 42 chars) with adjacent clause if combined length stays reasonable (<= targetMax + 18)
-  const merged: string[] = [];
+  // Merge tiny intra-sentence fragments ONLY when they belong to the same sentence (never across `.`, `!`, `?`
+  // when the previous sentence is >= 24 chars) and ONLY when the combined length stays <= targetMax.
+  const merged: Array<{ text: string; endsSentence: boolean }> = [];
   for (const piece of rawPieces) {
-    const cleanPiece = restore(piece);
+    const cleanPiece = restore(piece.text);
     if (!cleanPiece) continue;
+
     if (merged.length > 0) {
       const prev = merged[merged.length - 1];
+      const canMergeAcrossBoundary = !prev.endsSentence || prev.text.length < 24;
+      const combinedLen = prev.text.length + 1 + cleanPiece.length;
       if (
-        (prev.length < 45 && prev.length + 1 + cleanPiece.length <= targetMax + 18) ||
-        (cleanPiece.length < 36 && prev.length + 1 + cleanPiece.length <= targetMax + 24)
+        canMergeAcrossBoundary &&
+        combinedLen <= targetMax &&
+        (prev.text.length < 34 || cleanPiece.length < 24)
       ) {
-        merged[merged.length - 1] = `${prev} ${cleanPiece}`.replace(/\s+/g, ' ').trim();
+        prev.text = `${prev.text} ${cleanPiece}`.replace(/\s+/g, ' ').trim();
+        prev.endsSentence = piece.endsSentence;
         continue;
       }
     }
-    merged.push(cleanPiece);
+
+    merged.push({ text: cleanPiece, endsSentence: piece.endsSentence });
   }
 
   return merged.map((seg) => {
-    const trimmed = seg.replace(/[,;:\s]+$/, '').trim();
-    return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+    if (seg.endsSentence) {
+      // Normalize trailing `!` to `.` so KorvaTTS `clean_tail` never clips sentence-final particles (e.g. "thăm ạ")
+      const trimmed = seg.text.replace(/[,;:\s]+$/, '').trim().replace(/!+$/, '.');
+      return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+    }
+    // Intra-sentence continuation clause: preserve natural comma cadence instead of forcing a full-stop period `.`
+    const trimmedClause = seg.text.replace(/[;:\s]+$/, '').trim();
+    if (/[.,!?]$/.test(trimmedClause)) {
+      return trimmedClause.replace(/!+$/, '.');
+    }
+    return `${trimmedClause},`;
   });
 }
 
@@ -2289,7 +2352,7 @@ export class ExpoService {
 
     const chunkTexts =
       cfg.provider === 'korvatts'
-        ? chunkVietnameseConsultationSpeech(speechText, protectedPhrases, 70, 120)
+        ? chunkVietnameseConsultationSpeech(speechText, protectedPhrases, 52, 85)
         : [speechText];
 
     const chunks = chunkTexts.map((txt, idx) => {
@@ -2325,7 +2388,7 @@ export class ExpoService {
     if (typeof params.chunkIndex === 'number') {
       const chunkTexts =
         cfg.provider === 'korvatts'
-          ? chunkVietnameseConsultationSpeech(speechText, protectedPhrases, 70, 120)
+          ? chunkVietnameseConsultationSpeech(speechText, protectedPhrases, 52, 85)
           : [speechText];
 
       if (params.chunkIndex < 0 || params.chunkIndex >= chunkTexts.length) {
@@ -2392,7 +2455,7 @@ export class ExpoService {
     this.checkTtsRateLimit(params.clientIp || 'anonymous', cfg.rateLimitPerMin);
 
     if (cfg.provider === 'korvatts') {
-      const chunkTexts = chunkVietnameseConsultationSpeech(speechText, protectedPhrases, 70, 120);
+      const chunkTexts = chunkVietnameseConsultationSpeech(speechText, protectedPhrases, 52, 85);
       const wavParts: Buffer[] = [];
       let allHit = true;
 

@@ -1929,4 +1929,236 @@ describe('DAY 2 & DAY 3 — BE API, SQLite, Realtime Socket.IO, Product Integrat
       }
     }
   });
+
+  it('V25.10.2 — prevents cross-sentence merging & long NFKD chunks in KorvaTTS, normalizes mixed Vi+En product titles safely, and invalidates stale WAV cache keys across all 6 booths', async () => {
+    const savedEnv = {
+      TTS_PROVIDER: process.env.TTS_PROVIDER,
+      KORVATTS_PYTHON_PATH: process.env.KORVATTS_PYTHON_PATH,
+      KORVATTS_WORKER_SCRIPT: process.env.KORVATTS_WORKER_SCRIPT,
+      TTS_DISK_CACHE_DIR: process.env.TTS_DISK_CACHE_DIR,
+      TTS_RATE_LIMIT_PER_MIN: process.env.TTS_RATE_LIMIT_PER_MIN,
+    };
+
+    const tmpDiskCacheDir = path.join(
+      os.tmpdir(),
+      `v2510-2-cache-test-${process.pid}-${Date.now()}`
+    );
+    const tmpWorkerFile = path.join(
+      os.tmpdir(),
+      `v2510-2-korva-mock-${process.pid}-${Date.now()}.cjs`
+    );
+
+    const mockWorkerCode = `
+      const readline = require('node:readline');
+      function makeWavBuffer(text) {
+        const payload = Buffer.from(text, 'utf8');
+        const pcmBytes = Math.max(200, payload.length * 2 + (payload.length % 2));
+        const buf = Buffer.alloc(44 + pcmBytes, 0);
+        buf.write('RIFF', 0, 'ascii');
+        buf.writeUInt32LE(36 + pcmBytes, 4);
+        buf.write('WAVE', 8, 'ascii');
+        buf.write('fmt ', 12, 'ascii');
+        buf.writeUInt32LE(16, 16);
+        buf.writeUInt16LE(1, 20);
+        buf.writeUInt16LE(1, 22);
+        buf.writeUInt32LE(44100, 24);
+        buf.writeUInt32LE(88200, 28);
+        buf.writeUInt16LE(2, 32);
+        buf.writeUInt16LE(16, 34);
+        buf.write('data', 36, 'ascii');
+        buf.writeUInt32LE(pcmBytes, 40);
+        payload.copy(buf, 44, 0, Math.min(payload.length, pcmBytes));
+        return buf;
+      }
+      process.stdout.write(JSON.stringify({
+        type: 'ready',
+        pid: process.pid,
+        korvaVersion: '0.1.3',
+        checkpoint: 'e5c8c218',
+        sampleRate: 44100,
+        voices: ['phuong_linh']
+      }) + '\\n');
+      const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+      rl.on('line', (line) => {
+        if (!line.trim()) return;
+        const msg = JSON.parse(line);
+        if (msg.type === 'shutdown') {
+          process.stdout.write(JSON.stringify({ type: 'shutdown_ack', id: msg.id }) + '\\n');
+          process.exit(0);
+        }
+        if (msg.type === 'synthesize') {
+          const wav = makeWavBuffer(msg.voice + '|' + msg.text);
+          process.stdout.write(JSON.stringify({
+            id: msg.id,
+            type: 'result',
+            ok: true,
+            mimeType: 'audio/wav',
+            sampleRate: 44100,
+            durationSec: 2.0,
+            audioBase64: wav.toString('base64')
+          }) + '\\n');
+        }
+      });
+    `;
+    fs.mkdirSync(tmpDiskCacheDir, { recursive: true });
+    fs.writeFileSync(tmpWorkerFile, mockWorkerCode, 'utf8');
+
+    try {
+      // 1. Mixed Vietnamese + English product title smoothing (Phase 3)
+      expect(
+        smoothVietnameseProductTitleForKorva('Trạm Sạc Xe Điện Thông Minh Solaris ChargeBox 22 ki lô oát')
+      ).toBe('trạm sạc xe điện thông minh Solaris ChargeBox 22 ki lô oát');
+      expect(
+        smoothVietnameseProductTitleForKorva('Kính Hỗ Trợ Kỹ Thuật Từ Xa AetherGlass Lite')
+      ).toBe('kính hỗ trợ kỹ thuật từ xa AetherGlass Lite');
+      expect(
+        smoothVietnameseProductTitleForKorva('Cụm Camera Kiểm Tra Ngoại Quan AI Kinetix EyePro')
+      ).toBe('cụm Camera kiểm tra ngoại quan AI Kinetix EyePro');
+      // Strictly preserves short/long English brand & model tokens adjacent to Vietnamese diacritic words
+      expect(smoothVietnameseProductTitleForKorva('Loa Di Động Sony Max')).toBe('loa di động Sony Max');
+      expect(smoothVietnameseProductTitleForKorva('Màn Hình Cảm Ứng Dell Pro')).toBe(
+        'màn hình cảm ứng Dell Pro'
+      );
+      expect(smoothVietnameseProductTitleForKorva('Đèn Bàn Học Thông Minh Sun Mini')).toBe(
+        'đèn bàn học thông minh Sun Mini'
+      );
+      expect(smoothVietnameseProductTitleForKorva('Solar Battery 15 ki lô oát giờ')).toBe(
+        'Solar Battery 15 ki lô oát giờ'
+      );
+
+      // 2. Never merges across sentence-ending punctuation & keeps NFKD length compact (Phase 2)
+      const closingSpeech =
+        'Dạ, vừa rồi là những sản phẩm nổi bật đang trưng bày tại gian hàng. Quý khách có thể chạm trực tiếp vào từng sản phẩm trên kệ để xem thông tin chi tiết nhé. Em cảm ơn quý khách đã ghé thăm ạ!';
+      const closingChunks = chunkVietnameseConsultationSpeech(closingSpeech, [], 52, 85);
+      expect(closingChunks).toEqual([
+        'Dạ, vừa rồi là những sản phẩm nổi bật đang trưng bày tại gian hàng.',
+        'Quý khách có thể chạm trực tiếp vào từng sản phẩm trên kệ,',
+        'để xem thông tin chi tiết nhé.',
+        'Em cảm ơn quý khách đã ghé thăm ạ.',
+      ]);
+
+      // Verify zero empty chunks, zero duplicate chunks, zero word loss/duplication, and compact NFKD length
+      const normalizeWords = (s: string) =>
+        s
+          .replace(/[.,;!?]+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      expect(normalizeWords(closingChunks.join(' '))).toBe(normalizeWords(closingSpeech));
+      expect(new Set(closingChunks).size).toBe(closingChunks.length);
+      for (const ch of closingChunks) {
+        expect(ch.length).toBeGreaterThan(0);
+        expect(ch.length).toBeLessThanOrEqual(85);
+        expect(ch.normalize('NFKD').length).toBeLessThanOrEqual(115);
+      }
+
+      // 3. Long multi-sentence & protected product/price/unit preservation (50-80, 80-120, >120 chars)
+      const solarisProd2Speech =
+        'Và sản phẩm tiếp theo trên kệ là trạm sạc xe điện thông minh Solaris ChargeBox hai mươi hai ki lô oát, hiện có mức giá mười sáu triệu năm trăm nghìn đồng. Bộ sạc AC Type-hai công suất hai mươi hai ki lô oát, tự động cân bằng tải theo công suất điện mặt trời dư thừa, quản lý qua ứng dụng di động và thẻ từ RFID.';
+      const solarisChunks = chunkVietnameseConsultationSpeech(
+        solarisProd2Speech,
+        [
+          'Bảo Trân',
+          'Solaris Clean Energy',
+          'trạm sạc xe điện thông minh Solaris ChargeBox hai mươi hai ki lô oát',
+          'mười sáu triệu năm trăm nghìn đồng',
+        ],
+        52,
+        85
+      );
+      expect(solarisChunks.every((c) => c.length > 0)).toBe(true);
+      expect(new Set(solarisChunks).size).toBe(solarisChunks.length);
+      expect(normalizeWords(solarisChunks.join(' '))).toBe(normalizeWords(solarisProd2Speech));
+      expect(
+        solarisChunks.some((c) =>
+          c.includes('trạm sạc xe điện thông minh Solaris ChargeBox hai mươi hai ki lô oát')
+        )
+      ).toBe(true);
+      expect(solarisChunks.some((c) => c.includes('mười sáu triệu năm trăm nghìn đồng'))).toBe(true);
+
+      // 4. Cache key version invalidates stale pre-V25.10.2 buggy WAVs without deleting cache directory (Phase 4)
+      expect(KORVATTS_MODEL_VERSION).toBe('korvatts-0.1.3-e5c8c218-v25.10.2');
+      const legacyBuggyChunk =
+        'Quý khách có thể chạm trực tiếp vào từng sản phẩm trên kệ để xem thông tin chi tiết nhé. Em cảm ơn quý khách đã ghé thăm ạ!';
+      const legacyKey = computeTtsCacheKey(
+        'korvatts',
+        'phuong_linh',
+        'vi',
+        'korvatts-0.1.3-e5c8c218|speed:1.05|steps:24',
+        legacyBuggyChunk
+      );
+      const legacyFullStepKey = computeTtsCacheKey(
+        'korvatts',
+        'phuong_linh',
+        'vi',
+        'korvatts-0.1.3-e5c8c218|speed:1.05|steps:24',
+        closingSpeech
+      );
+      // Plant poisoned legacy WAV files inside tmpDiskCacheDir to prove they are NEVER reused
+      const poisonedWav = Buffer.alloc(128, 0);
+      poisonedWav.write('RIFF', 0, 'ascii');
+      poisonedWav.writeUInt32LE(120, 4);
+      poisonedWav.write('WAVEfmt ', 8, 'ascii');
+      poisonedWav.writeUInt32LE(16, 16);
+      poisonedWav.writeUInt16LE(1, 20);
+      poisonedWav.writeUInt16LE(1, 22);
+      poisonedWav.writeUInt32LE(44100, 24);
+      poisonedWav.writeUInt32LE(88200, 28);
+      poisonedWav.writeUInt16LE(2, 32);
+      poisonedWav.writeUInt16LE(16, 34);
+      poisonedWav.write('data', 36, 'ascii');
+      poisonedWav.writeUInt32LE(84, 40);
+      poisonedWav.write('BUGGY_TREN_KE_TREN_KE', 44, 'utf8');
+      fs.writeFileSync(path.join(tmpDiskCacheDir, `${legacyKey}.wav`), poisonedWav);
+      fs.writeFileSync(path.join(tmpDiskCacheDir, `${legacyFullStepKey}.wav`), poisonedWav);
+
+      delete process.env.TTS_PROVIDER;
+      process.env.KORVATTS_PYTHON_PATH = process.execPath;
+      process.env.KORVATTS_WORKER_SCRIPT = tmpWorkerFile;
+      process.env.TTS_DISK_CACHE_DIR = tmpDiskCacheDir;
+      process.env.TTS_RATE_LIMIT_PER_MIN = '300';
+
+      const freshSvc = new ExpoService(db);
+      const boothsBefore = db.listBooths();
+      const productsBefore = db.listProducts();
+      expect(boothsBefore.length).toBe(6);
+
+      // 5. Verify CLOSING across all 6 booths: 4 clean chunks, MISS on first run -> HIT on second run, never serving poisonedWav, and DB untouched
+      for (let bIdx = 0; bIdx < boothsBefore.length; bIdx++) {
+        const booth = boothsBefore[bIdx];
+        const manifest = freshSvc.getNpcStepManifest({
+          boothId: booth.id,
+          stepType: 'CLOSING',
+        });
+        expect(manifest.totalChunks).toBe(4);
+
+        for (let cIdx = 0; cIdx < manifest.totalChunks; cIdx++) {
+          const res = await freshSvc.synthesizeNpcStepAudio({
+            boothId: booth.id,
+            stepType: 'CLOSING',
+            chunkIndex: cIdx,
+          });
+          // First booth triggers fresh synthesis (MISS); remaining 5 booths share the newly synthesized clean cache (HIT)
+          expect(res.cacheStatus).toBe(bIdx === 0 ? 'MISS' : 'HIT');
+          expect(res.audioBuffer.toString('utf8')).not.toContain('BUGGY_TREN_KE_TREN_KE');
+          expect(res.speechText).toBe(closingChunks[cIdx]);
+        }
+      }
+
+      // Legacy files were untouched (cache folder not wiped), while new v25.10.2 cache keys serve clean HITs
+      expect(fs.existsSync(path.join(tmpDiskCacheDir, `${legacyKey}.wav`))).toBe(true);
+      expect(db.listProducts()).toEqual(productsBefore);
+      await freshSvc.shutdown();
+    } finally {
+      try {
+        if (fs.existsSync(tmpWorkerFile)) fs.unlinkSync(tmpWorkerFile);
+        if (fs.existsSync(tmpDiskCacheDir)) fs.rmSync(tmpDiskCacheDir, { recursive: true, force: true });
+      } catch {
+        // ignore cleanup errors
+      }
+      for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }, 20000);
 });
