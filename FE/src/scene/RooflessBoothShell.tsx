@@ -2,17 +2,29 @@ import React, { Suspense, useMemo } from 'react';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ArchitecturalBoothTheme } from './architecturalModels';
+import {
+  DEFAULT_BOOTH_MODEL_VERSIONS,
+  DEFAULT_KINETIX_BOOTH_VERSION,
+  KINETIX_GLB_BY_VERSION,
+  resolveBespokeBoothGlbSubpath,
+  resolveBoothModelVersion,
+  resolveKinetixBoothVersion,
+  type BoothModelVersion,
+  type KinetixBoothVersion,
+} from './assetLoader';
+
+export {
+  DEFAULT_BOOTH_MODEL_VERSIONS,
+  DEFAULT_KINETIX_BOOTH_VERSION,
+  KINETIX_GLB_BY_VERSION,
+  resolveBespokeBoothGlbSubpath,
+  resolveBoothModelVersion,
+  resolveKinetixBoothVersion,
+  type BoothModelVersion,
+  type KinetixBoothVersion,
+};
 
 interface Props { theme: ArchitecturalBoothTheme; fallback: THREE.Group; boothId?: string; isV2?: boolean }
-
-const V2_GLB_MAP: Record<ArchitecturalBoothTheme, string> = {
-  robotics: 'models/booths/kinetix-v2/kinetix_booth_v2.glb',
-  tech: 'models/booths/v2/aether_tech_v2.glb',
-  living: 'models/booths/v2/nordic_living_v2.glb',
-  coffee: 'models/booths/v2/ecovita_coffee_v2.glb',
-  design: 'models/booths/v2/lumina_design_v2.glb',
-  energy: 'models/booths/v2/solaris_energy_v2.glb',
-};
 
 class FrameBoundary extends React.Component<{ fallback: THREE.Group; children: React.ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -24,19 +36,23 @@ class FrameBoundary extends React.Component<{ fallback: THREE.Group; children: R
 }
 
 function LoadedFrame({ theme, fallback, isV2 }: Props) {
-  const glbUrl = isV2 && V2_GLB_MAP[theme]
-    ? `${import.meta.env.BASE_URL}${V2_GLB_MAP[theme]}`
-    : `${import.meta.env.BASE_URL}models/booths/roofless-v1/${theme}.glb`;
+  const boothVersion = resolveBoothModelVersion(theme);
+  const bespokeSubpath = isV2 ? resolveBespokeBoothGlbSubpath(theme, boothVersion) : null;
+  const baseUrl =
+    (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.BASE_URL || '/';
+  const glbUrl = bespokeSubpath
+    ? `${baseUrl}${bespokeSubpath}`
+    : `${baseUrl}models/booths/roofless-v1/${theme}.glb`;
 
   const { scene } = useGLTF(glbUrl);
   const frame = useMemo(() => {
     const clone = scene.clone(true);
-    clone.name = isV2 ? `bespoke-booth-v2:${theme}` : `roofless-glb:${theme}`;
+    clone.name = isV2 ? `bespoke-booth-${boothVersion}:${theme}` : `roofless-glb:${theme}`;
     clone.traverse(obj => {
       if (obj instanceof THREE.Mesh) { obj.castShadow = true; obj.receiveShadow = true; }
     });
     return clone;
-  }, [scene, theme, isV2]);
+  }, [scene, theme, isV2, boothVersion]);
 
   const floor = useMemo(() => {
     // If V2, the GLB already includes the bespoke granite plinth & composite deck.

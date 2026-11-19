@@ -9,8 +9,10 @@ Thư mục `FE/booth-modeling/` chứa bộ script Python chạy trên **Blender
 ```text
 FE/booth-modeling/
 ├── scripts/
-│   ├── generate_five_booths_v2.py        # Sinh 5 gian hàng V2 (Aether, Nordic, EcoVita, Lumina, Solaris)
-│   ├── generate_kinetix_v2.py            # Sinh gian hàng V2 Kinetix Robotics (kinetix_booth_v2.glb)
+│   ├── generate_five_booths_v3.py        # Sinh 5 gian hàng V3 (Aether, EcoVita, Lumina, Nordic, Solaris — ACTIVE)
+│   ├── generate_five_booths_v2.py        # Sinh 5 gian hàng V2 (ROLLBACK)
+│   ├── generate_kinetix_v3.py            # Sinh gian hàng V3 Kinetix Robotics (kinetix_booth_v3.glb — ACTIVE)
+│   ├── generate_kinetix_v2.py            # Sinh gian hàng V2 Kinetix Robotics (kinetix_booth_v2.glb — ROLLBACK)
 │   ├── generate_roofless_frames.py       # Sinh 6 khung gian hàng fallback V1 (booths/roofless-v1/*.glb)
 │   ├── generate_vietnamese_female_npc.py # Sinh NPC tư vấn viên nữ 3D Việt Nam + 4 animation (npc/vietnamese_female_assistant.glb)
 │   ├── optimize_env_4k_assets.py         # Hạ độ phân giải texture & decimate cho các model 4K
@@ -24,13 +26,13 @@ FE/booth-modeling/
 
 ## 2. Đầu Ra Model 3D Trong `FE/public/models/`
 
-1. **6 Gian hàng V2 Chính thức (`ACTIVE`):**
-   - `FE/public/models/booths/kinetix-v2/kinetix_booth_v2.glb`
-   - `FE/public/models/booths/v2/aether_tech_v2.glb`
-   - `FE/public/models/booths/v2/nordic_living_v2.glb`
-   - `FE/public/models/booths/v2/ecovita_coffee_v2.glb`
-   - `FE/public/models/booths/v2/lumina_design_v2.glb`
-   - `FE/public/models/booths/v2/solaris_energy_v2.glb`
+1. **6 Gian hàng V3 Chính thức (`ACTIVE`, toàn bộ bản V2 được bảo toàn để rollback):**
+   - `FE/public/models/booths/kinetix-v3/kinetix_booth_v3.glb`
+   - `FE/public/models/booths/aether-tech-v3/aether_tech_v3.glb`
+   - `FE/public/models/booths/nordic-living-v3/nordic_living_v3.glb`
+   - `FE/public/models/booths/ecovita-coffee-v3/ecovita_coffee_v3.glb`
+   - `FE/public/models/booths/lumina-design-v3/lumina_design_v3.glb`
+   - `FE/public/models/booths/solaris-energy-v3/solaris_energy_v3.glb`
 2. **6 Gian hàng V1 Không mái (`FALLBACK` khi `isV2 = false`):**
    - `FE/public/models/booths/roofless-v1/{coffee,design,energy,living,robotics,tech}.glb`
 3. **12 Model Cảnh quan & Đô thị (`ACTIVE` trong `FE/public/models/env/`):**
@@ -48,8 +50,8 @@ FE/booth-modeling/
 # 1. Sinh lại 5 gian hàng V2
 blender --background --python "FE/booth-modeling/scripts/generate_five_booths_v2.py"
 
-# 2. Sinh lại gian hàng V2 Kinetix Robotics
-blender --background --python "FE/booth-modeling/scripts/generate_kinetix_v2.py"
+# 2. Sinh lại gian hàng V3 Kinetix Robotics (hoặc generate_kinetix_v2.py nếu cần bản V2)
+blender --background --python "FE/booth-modeling/scripts/generate_kinetix_v3.py"
 
 # 3. Sinh lại 6 khung gian hàng fallback V1
 blender --background --python "FE/booth-modeling/scripts/generate_roofless_frames.py"

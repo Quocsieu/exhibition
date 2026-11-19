@@ -84,6 +84,128 @@ export function getCachedAssetTemplate(assetId: GlbAssetId): THREE.Group {
   return cached;
 }
 
+export type KinetixBoothVersion = 'v2' | 'v3';
+export type BoothModelVersion = 'v2' | 'v3';
+
+export const DEFAULT_KINETIX_BOOTH_VERSION: KinetixBoothVersion = 'v3';
+
+export const DEFAULT_BOOTH_MODEL_VERSIONS: Record<ArchitecturalBoothTheme, BoothModelVersion> = {
+  robotics: DEFAULT_KINETIX_BOOTH_VERSION,
+  tech: 'v3',
+  coffee: 'v3',
+  design: 'v3',
+  living: 'v3',
+  energy: 'v3',
+};
+
+export const KINETIX_GLB_BY_VERSION: Record<KinetixBoothVersion, string> = {
+  v2: 'models/booths/kinetix-v2/kinetix_booth_v2.glb',
+  v3: 'models/booths/kinetix-v3/kinetix_booth_v3.glb',
+};
+
+export const BESPOKE_V2_GLB_MAP: Record<ArchitecturalBoothTheme, string> = {
+  robotics: KINETIX_GLB_BY_VERSION.v2,
+  tech: 'models/booths/v2/aether_tech_v2.glb',
+  living: 'models/booths/v2/nordic_living_v2.glb',
+  coffee: 'models/booths/v2/ecovita_coffee_v2.glb',
+  design: 'models/booths/v2/lumina_design_v2.glb',
+  energy: 'models/booths/v2/solaris_energy_v2.glb',
+};
+
+export const BESPOKE_V3_GLB_MAP: Record<ArchitecturalBoothTheme, string> = {
+  robotics: KINETIX_GLB_BY_VERSION.v3,
+  tech: 'models/booths/aether-tech-v3/aether_tech_v3.glb',
+  living: 'models/booths/nordic-living-v3/nordic_living_v3.glb',
+  coffee: 'models/booths/ecovita-coffee-v3/ecovita_coffee_v3.glb',
+  design: 'models/booths/lumina-design-v3/lumina_design_v3.glb',
+  energy: 'models/booths/solaris-energy-v3/solaris_energy_v3.glb',
+};
+
+const BOOTH_QUERY_KEY_BY_THEME: Record<ArchitecturalBoothTheme, string> = {
+  robotics: 'kinetix',
+  tech: 'aether',
+  coffee: 'ecovita',
+  design: 'lumina',
+  living: 'nordic',
+  energy: 'solaris',
+};
+
+/**
+ * Minimal, zero-overhead version selector for Kinetix Robotics booth:
+ * - Defaults to `'v3'` (`kinetix_booth_v3.glb`).
+ * - Supports instant rollback via `?kinetix=v2` URL query or `VITE_KINETIX_BOOTH_VERSION=v2`.
+ */
+export function resolveKinetixBoothVersion(options?: {
+  search?: string;
+  envValue?: string;
+}): KinetixBoothVersion {
+  const rawSearch =
+    options?.search ?? (typeof window !== 'undefined' ? window.location.search : '');
+  if (rawSearch) {
+    const param = new URLSearchParams(rawSearch).get('kinetix')?.trim().toLowerCase();
+    if (param === 'v2' || param === 'v3') {
+      return param;
+    }
+  }
+  const rawEnv = (
+    options?.envValue ??
+    ((import.meta as unknown as { env?: Record<string, string | undefined> }).env
+      ?.VITE_KINETIX_BOOTH_VERSION || '')
+  )
+    .trim()
+    .toLowerCase();
+  if (rawEnv === 'v2' || rawEnv === 'v3') {
+    return rawEnv;
+  }
+  return DEFAULT_KINETIX_BOOTH_VERSION;
+}
+
+/**
+ * Resolves the active GLB version (`'v2'` or `'v3'`) for any exhibition booth theme.
+ * Supports per-booth query rollback (`?aether=v2`, `?ecovita=v2`, `?lumina=v2`, `?nordic=v2`, `?solaris=v2`),
+ * global rollback (`?booths=v2` or `VITE_BOOTHS_VERSION=v2`), while keeping Kinetix V3 independent.
+ */
+export function resolveBoothModelVersion(
+  theme: ArchitecturalBoothTheme,
+  options?: { search?: string; envValue?: string }
+): BoothModelVersion {
+  if (theme === 'robotics') {
+    return resolveKinetixBoothVersion(options);
+  }
+  const rawSearch =
+    options?.search ?? (typeof window !== 'undefined' ? window.location.search : '');
+  if (rawSearch) {
+    const params = new URLSearchParams(rawSearch);
+    const perBooth = params.get(BOOTH_QUERY_KEY_BY_THEME[theme])?.trim().toLowerCase();
+    if (perBooth === 'v2' || perBooth === 'v3') {
+      return perBooth;
+    }
+    const globalParam = params.get('booths')?.trim().toLowerCase();
+    if (globalParam === 'v2' || globalParam === 'v3') {
+      return globalParam;
+    }
+  }
+  const rawEnv = (
+    options?.envValue ??
+    ((import.meta as unknown as { env?: Record<string, string | undefined> }).env
+      ?.VITE_BOOTHS_VERSION || '')
+  )
+    .trim()
+    .toLowerCase();
+  if (rawEnv === 'v2' || rawEnv === 'v3') {
+    return rawEnv;
+  }
+  return DEFAULT_BOOTH_MODEL_VERSIONS[theme];
+}
+
+export function resolveBespokeBoothGlbSubpath(
+  theme: ArchitecturalBoothTheme,
+  versionOverride?: BoothModelVersion
+): string {
+  const ver = versionOverride ?? resolveBoothModelVersion(theme);
+  return ver === 'v3' ? BESPOKE_V3_GLB_MAP[theme] : BESPOKE_V2_GLB_MAP[theme];
+}
+
 /**
  * Maps a booth theme (`tech`, `living`, `coffee`, `robotics`, `design`, `energy`)
  * to its corresponding GLB asset identifier.

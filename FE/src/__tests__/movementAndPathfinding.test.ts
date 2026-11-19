@@ -43,6 +43,11 @@ import {
   GLB_ASSET_PATHS,
   type GlbAssetId,
   cloneCachedAsset,
+  DEFAULT_BOOTH_MODEL_VERSIONS,
+  DEFAULT_KINETIX_BOOTH_VERSION,
+  resolveBoothModelVersion,
+  resolveKinetixBoothVersion,
+  resolveBespokeBoothGlbSubpath,
   disposeCachedAssets,
   getBoothGlbAssetId,
   getCachedAssetStats,
@@ -1807,5 +1812,124 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
       tex.dispose();
     }
     expect(getActiveCanvasTextureCount()).toBe(baseline);
+  });
+
+  it('V26 — integrates Kinetix V3 GLB by default, preserves V2 GLB rollback, leaves 5 other booths untouched, and preserves slots/collision/NPC safety', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+
+    // 1. Default version & clean rollback resolution
+    expect(DEFAULT_KINETIX_BOOTH_VERSION).toBe('v3');
+    expect(resolveKinetixBoothVersion({ search: '', envValue: '' })).toBe('v3');
+    expect(resolveKinetixBoothVersion({ search: '?kinetix=v2', envValue: '' })).toBe('v2');
+    expect(resolveKinetixBoothVersion({ search: '?kinetix=V3', envValue: 'v2' })).toBe('v3');
+    expect(resolveKinetixBoothVersion({ search: '', envValue: 'v2' })).toBe('v2');
+    expect(resolveKinetixBoothVersion({ search: '?kinetix=invalid', envValue: '' })).toBe('v3');
+
+    // 2. Exact GLB paths for Kinetix V3 vs V2 rollback, and all 5 other booths V2 rollback paths
+    expect(resolveBespokeBoothGlbSubpath('robotics', 'v3')).toBe(
+      'models/booths/kinetix-v3/kinetix_booth_v3.glb'
+    );
+    expect(resolveBespokeBoothGlbSubpath('robotics', 'v2')).toBe(
+      'models/booths/kinetix-v2/kinetix_booth_v2.glb'
+    );
+    expect(resolveBespokeBoothGlbSubpath('tech', 'v2')).toBe('models/booths/v2/aether_tech_v2.glb');
+    expect(resolveBespokeBoothGlbSubpath('living', 'v2')).toBe(
+      'models/booths/v2/nordic_living_v2.glb'
+    );
+    expect(resolveBespokeBoothGlbSubpath('coffee', 'v2')).toBe(
+      'models/booths/v2/ecovita_coffee_v2.glb'
+    );
+    expect(resolveBespokeBoothGlbSubpath('design', 'v2')).toBe(
+      'models/booths/v2/lumina_design_v2.glb'
+    );
+    expect(resolveBespokeBoothGlbSubpath('energy', 'v2')).toBe(
+      'models/booths/v2/solaris_energy_v2.glb'
+    );
+
+    // 3. Binary GLB existence & valid glTF 2.0 header check for BOTH Kinetix V3 and preserved Kinetix V2
+    const publicDir = path.resolve(__dirname, '../../public');
+    const v3File = path.join(publicDir, 'models/booths/kinetix-v3/kinetix_booth_v3.glb');
+    const v2File = path.join(publicDir, 'models/booths/kinetix-v2/kinetix_booth_v2.glb');
+    expect(fs.existsSync(v3File)).toBe(true);
+    expect(fs.existsSync(v2File)).toBe(true);
+
+    const v3Buf = fs.readFileSync(v3File);
+    const v2Buf = fs.readFileSync(v2File);
+    expect(v3Buf.toString('ascii', 0, 4)).toBe('glTF');
+    expect(v3Buf.readUInt32LE(4)).toBe(2);
+    expect(v3Buf.readUInt32LE(8)).toBe(v3Buf.byteLength);
+    // V3 must stay lightweight (< 561,028 bytes of V2)
+    expect(v3Buf.byteLength).toBeGreaterThan(50_000);
+    expect(v3Buf.byteLength).toBeLessThan(v2Buf.byteLength);
+    expect(v2Buf.byteLength).toBe(561_028);
+
+    // 4. Kinetix product slots, collision bounds, approach point & NPC safety remain 100% intact
+    const kinetix = DEFAULT_BOOTHS.find((b) => b.id === 'booth-kinetix-robotics')!;
+    expect(kinetix).toBeDefined();
+    expect(BOOTH_SLOT_DEFINITIONS.map((s) => s.slotId)).toEqual([
+      'slot_01',
+      'slot_02',
+      'slot_03',
+      'slot_04',
+      'slot_05',
+      'slot_06',
+    ]);
+    const approach = getBoothApproachPoint(kinetix);
+    expect(isPointWalkable(approach.x, approach.z, DEFAULT_BOOTHS)).toBe(true);
+    const pathFromSpawn = findPathAStar(
+      CENTRAL_SPAWN_POINT.x,
+      CENTRAL_SPAWN_POINT.z,
+      approach.x,
+      approach.z,
+      DEFAULT_BOOTHS
+    );
+    expect(pathFromSpawn.length).toBeGreaterThan(0);
+    expect(verifyNpcPlacementSafety(kinetix).valid).toBe(true);
+  });
+
+  it('V26.1 — integrates all 5 remaining V3 booth GLBs with valid glTF 2.0 headers, <240KB budget, per-booth & global V2 rollback, and full slot/NPC/navigation safety across all 6 booths', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const publicDir = path.resolve(__dirname, '../../public');
+
+    const fiveThemes = [
+      { theme: 'tech' as const, qKey: 'aether', v3: 'models/booths/aether-tech-v3/aether_tech_v3.glb', v2: 'models/booths/v2/aether_tech_v2.glb' },
+      { theme: 'coffee' as const, qKey: 'ecovita', v3: 'models/booths/ecovita-coffee-v3/ecovita_coffee_v3.glb', v2: 'models/booths/v2/ecovita_coffee_v2.glb' },
+      { theme: 'design' as const, qKey: 'lumina', v3: 'models/booths/lumina-design-v3/lumina_design_v3.glb', v2: 'models/booths/v2/lumina_design_v2.glb' },
+      { theme: 'living' as const, qKey: 'nordic', v3: 'models/booths/nordic-living-v3/nordic_living_v3.glb', v2: 'models/booths/v2/nordic_living_v2.glb' },
+      { theme: 'energy' as const, qKey: 'solaris', v3: 'models/booths/solaris-energy-v3/solaris_energy_v3.glb', v2: 'models/booths/v2/solaris_energy_v2.glb' },
+    ];
+
+    for (const item of fiveThemes) {
+      // Default V3 + per-booth & global V2 rollback
+      expect(DEFAULT_BOOTH_MODEL_VERSIONS[item.theme]).toBe('v3');
+      expect(resolveBoothModelVersion(item.theme, { search: '', envValue: '' })).toBe('v3');
+      expect(resolveBoothModelVersion(item.theme, { search: `?${item.qKey}=v2`, envValue: '' })).toBe('v2');
+      expect(resolveBoothModelVersion(item.theme, { search: '?booths=v2', envValue: '' })).toBe('v2');
+      expect(resolveBoothModelVersion(item.theme, { search: '', envValue: 'v2' })).toBe('v2');
+      expect(resolveBespokeBoothGlbSubpath(item.theme, 'v3')).toBe(item.v3);
+      expect(resolveBespokeBoothGlbSubpath(item.theme, 'v2')).toBe(item.v2);
+
+      // Verify both V3 and preserved V2 GLB files on disk with valid glTF 2.0 binary headers
+      const v3Path = path.join(publicDir, item.v3);
+      const v2Path = path.join(publicDir, item.v2);
+      expect(fs.existsSync(v3Path)).toBe(true);
+      expect(fs.existsSync(v2Path)).toBe(true);
+
+      const v3Buf = fs.readFileSync(v3Path);
+      expect(v3Buf.toString('ascii', 0, 4)).toBe('glTF');
+      expect(v3Buf.readUInt32LE(4)).toBe(2);
+      expect(v3Buf.readUInt32LE(8)).toBe(v3Buf.byteLength);
+      expect(v3Buf.byteLength).toBeGreaterThan(40_000);
+      expect(v3Buf.byteLength).toBeLessThan(240 * 1024);
+    }
+
+    // All 6 booths keep intact approach points, A* reachability, and NPC safety
+    for (const booth of DEFAULT_BOOTHS) {
+      const approach = getBoothApproachPoint(booth);
+      expect(isPointWalkable(approach.x, approach.z, DEFAULT_BOOTHS)).toBe(true);
+      expect(verifyNpcPlacementSafety(booth).valid).toBe(true);
+    }
   });
 });
