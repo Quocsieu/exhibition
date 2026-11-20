@@ -233,4 +233,216 @@ export const v28Api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  // Phase 2: Dynamic Exhibitions, Versions, Zones, Placements & Publish
+  listArchetypes: () => v28Request<{ archetypes: V28ArchetypeSpec[] }>('/archetypes'),
+  getActiveWorld: (previewVersionId?: string | null) => {
+    const qs = previewVersionId ? `?previewVersionId=${encodeURIComponent(previewVersionId)}` : '';
+    return v28Request<{ world: V28ExhibitionVersionDetail }>(`/exhibitions/active${qs}`);
+  },
+  listExhibitions: () => v28Request<{ exhibitions: V28ExhibitionSummary[] }>('/exhibitions'),
+  createExhibition: (payload: { name: string; targetBoothCount?: number; preferredZoneCapacity?: number }) =>
+    v28Request<{ exhibition: V28ExhibitionSummary }>('/exhibitions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  createDraftVersion: (
+    exhibitionId: string,
+    payload: { targetBoothCount: number; preferredZoneCapacity?: number; layoutSeed?: number; baseVersionId?: string }
+  ) =>
+    v28Request<{ version: V28ExhibitionVersionDetail }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/drafts`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    ),
+  getVersionDetail: (exhibitionId: string, versionId: string) =>
+    v28Request<{ version: V28ExhibitionVersionDetail }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}`
+    ),
+  updateDraftZone: (
+    exhibitionId: string,
+    versionId: string,
+    zoneId: string,
+    patch: { displayName?: string; categoryTag?: string }
+  ) =>
+    v28Request<{ version: V28ExhibitionVersionDetail }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/zones/${encodeURIComponent(zoneId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }
+    ),
+  updateDraftBooth: (
+    exhibitionId: string,
+    versionId: string,
+    boothId: string,
+    patch: {
+      positionX?: number;
+      positionZ?: number;
+      rotationY?: number;
+      archetypeId?: V28ArchetypeId;
+      companyId?: string;
+      boothName?: string;
+    }
+  ) =>
+    v28Request<{ version: V28ExhibitionVersionDetail }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/booths/${encodeURIComponent(boothId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }
+    ),
+  publishVersion: (exhibitionId: string, versionId: string) =>
+    v28Request<{ version: V28ExhibitionVersionDetail }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/publish`,
+      {
+        method: 'POST',
+      }
+    ),
+  rollbackVersion: (exhibitionId: string, targetVersionId: string) =>
+    v28Request<{ version: V28ExhibitionVersionDetail }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/rollback`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ targetVersionId }),
+      }
+    ),
 };
+
+export type V28ArchetypeId =
+  | 'signature_ring'
+  | 'organic_flow'
+  | 'grand_portal'
+  | 'wave_pavilion'
+  | 'gallery_arch'
+  | 'dynamic_frame';
+
+export interface V28ArchetypeSpec {
+  id: V28ArchetypeId;
+  theme: 'living' | 'design' | 'tech' | 'energy' | 'coffee' | 'robotics';
+  label: string;
+  glbPath: string;
+  width: number;
+  depth: number;
+  height: number;
+}
+
+export interface V28RectBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+export interface V28ExhibitionSummary {
+  id: string;
+  name: string;
+  status: string;
+  activeVersionId: string | null;
+  activeVersionNumber: number | null;
+  activeBoothCount: number;
+  activeZoneCount: number;
+  latestDraftVersionId: string | null;
+  latestDraftVersionNumber: number | null;
+  versions: Array<{
+    id: string;
+    versionNumber: number;
+    status: 'draft' | 'published' | 'archived';
+    targetBoothCount: number;
+    createdAt: string;
+    publishedAt: string | null;
+  }>;
+}
+
+export interface V28ZoneRecord {
+  id: string;
+  versionId: string;
+  code: string;
+  displayName: string;
+  categoryTag: string;
+  bounds: V28RectBounds;
+  sortOrder: number;
+  boothCount: number;
+}
+
+export interface V28BoothPlacementView {
+  versionId: string;
+  boothId: string;
+  boothName: string;
+  tagline: string;
+  description: string;
+  category: string;
+  color: string;
+  companyId: string | null;
+  companyName: string;
+  zoneId: string;
+  zoneCode: string;
+  zoneName: string;
+  slotIndex: number;
+  positionX: number;
+  positionZ: number;
+  rotationY: number;
+  archetypeId: V28ArchetypeId;
+  archetypeLabel: string;
+  archetypeTheme: string;
+  glbPath: string;
+  footprintWidth: number;
+  footprintDepth: number;
+  approachPoint: { x: number; z: number };
+  focusCameraPoint: { x: number; z: number };
+  placementStatus: string;
+  slots: Array<{ slotId: string; product: V28Product | null }>;
+  assignedSlotCount: number;
+}
+
+export interface V28ExhibitionVersionDetail {
+  exhibitionId: string;
+  exhibitionName: string;
+  versionId: string;
+  versionNumber: number;
+  status: 'draft' | 'published' | 'archived';
+  targetBoothCount: number;
+  createdAt: string;
+  publishedAt: string | null;
+  hallWidth: number;
+  hallDepth: number;
+  hallBounds: V28RectBounds;
+  walkableBounds: V28RectBounds;
+  centralAvenueBounds: V28RectBounds;
+  welcomeAreaBounds: V28RectBounds;
+  spawnPoint: { x: number; z: number; rotationY: number };
+  directoryPoint: { x: number; z: number };
+  cameraOverviewBounds: {
+    centerX: number;
+    centerZ: number;
+    radius: number;
+    recommendedHeight: number;
+    recommendedDistance: number;
+  };
+  roofBounds: {
+    hallWidth: number;
+    hallDepth: number;
+    bounds: V28RectBounds;
+    eaveHeight: number;
+    roofRise: number;
+    ribSpacing: number;
+    skylightRatio: number;
+  };
+  zones: V28ZoneRecord[];
+  booths: V28BoothPlacementView[];
+  validation: {
+    valid: boolean;
+    errors: string[];
+    stats: {
+      boothCount: number;
+      zoneCount: number;
+      overlapCount: number;
+      outOfBoundsCount: number;
+      blockedWalkwayCount: number;
+      unreachableBoothCount: number;
+      focusClipCount: number;
+    };
+  };
+}

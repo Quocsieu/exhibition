@@ -238,6 +238,57 @@ export const V28UrlImportInputSchema = z.object({
   saveToCatalog: z.boolean().optional().default(true),
 });
 
+// ============================================================================
+// PHASE 2: DYNAMIC EXHIBITIONS, VERSIONS, ZONES & BOOTH PLACEMENTS
+// ============================================================================
+export const V28ArchetypeIdSchema = z.enum([
+  'signature_ring',
+  'organic_flow',
+  'grand_portal',
+  'wave_pavilion',
+  'gallery_arch',
+  'dynamic_frame',
+]);
+
+export const ExhibitionVersionStatusSchema = z.enum(['draft', 'published', 'archived']);
+export type ExhibitionVersionStatus = z.infer<typeof ExhibitionVersionStatusSchema>;
+
+export const CreateExhibitionInputSchema = z.object({
+  name: z.string().trim().min(2, 'Tên triển lãm tối thiểu 2 ký tự').max(140),
+  targetBoothCount: z.number().int().min(1).max(200).optional().default(20),
+  preferredZoneCapacity: z.number().int().min(4).max(50).optional().default(10),
+});
+
+export const CreateDraftLayoutInputSchema = z.object({
+  targetBoothCount: z.number().int().min(1, 'Tối thiểu 1 gian hàng').max(200, 'Tối đa 200 gian hàng'),
+  preferredZoneCapacity: z.number().int().min(4).max(50).optional().default(10),
+  hallStyle: z.enum(['grand_expo', 'modular_pavilion']).optional().default('grand_expo'),
+  mainAvenueWidth: z.number().min(8).max(20).optional().default(10),
+  aisleWidth: z.number().min(7.6).max(16).optional().default(8.4),
+  perimeterWidth: z.number().min(5).max(15).optional().default(6),
+  layoutSeed: z.number().int().min(0).max(9999).optional().default(28),
+  baseVersionId: z.string().trim().optional(),
+});
+
+export const UpdateZoneInputSchema = z.object({
+  displayName: z.string().trim().min(1, 'Tên khu không được trống').max(100).optional(),
+  categoryTag: z.string().trim().max(100).optional(),
+});
+
+export const UpdateDraftBoothPlacementInputSchema = z.object({
+  positionX: z.number().finite().optional(),
+  positionZ: z.number().finite().optional(),
+  rotationY: z.number().finite().optional(),
+  archetypeId: V28ArchetypeIdSchema.optional(),
+  companyId: z.string().trim().min(1).optional(),
+  zoneId: z.string().trim().min(1).optional(),
+  boothName: z.string().trim().min(2).max(120).optional(),
+});
+
+export const RollbackVersionInputSchema = z.object({
+  targetVersionId: z.string().trim().min(1, 'Thiếu targetVersionId'),
+});
+
 export function slugifyCompanyName(name: string): string {
   const normalized = name
     .normalize('NFD')

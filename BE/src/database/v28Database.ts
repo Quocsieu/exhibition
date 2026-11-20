@@ -413,6 +413,79 @@ export class V28CatalogDatabase {
       this.db.exec('PRAGMA foreign_keys = ON;');
     }
 
+    // Phase 2 Migration: user_version 3 -> 4 (exhibitions, exhibition_versions, zones, exhibition_version_booths)
+    const vAfterP1 = Number(
+      ((this.db.prepare('PRAGMA user_version').get() as { user_version: number } | undefined)?.user_version) || 0
+    );
+    if (vAfterP1 < 4) {
+      this.db.exec('BEGIN IMMEDIATE;');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS exhibitions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            active_version_id TEXT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+          );
+
+          CREATE TABLE IF NOT EXISTS exhibition_versions (
+            id TEXT PRIMARY KEY,
+            exhibition_id TEXT NOT NULL,
+            version_number INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'draft',
+            target_booth_count INTEGER NOT NULL,
+            layout_config_json TEXT NOT NULL,
+            roof_config_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            published_at TEXT NULL,
+            UNIQUE (exhibition_id, version_number),
+            FOREIGN KEY (exhibition_id) REFERENCES exhibitions(id) ON DELETE CASCADE
+          );
+
+          CREATE TABLE IF NOT EXISTS zones (
+            id TEXT PRIMARY KEY,
+            version_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            category_tag TEXT NOT NULL DEFAULT '',
+            bounds_json TEXT NOT NULL DEFAULT '{}',
+            sort_order INTEGER NOT NULL DEFAULT 1,
+            UNIQUE (version_id, code),
+            FOREIGN KEY (version_id) REFERENCES exhibition_versions(id) ON DELETE CASCADE
+          );
+
+          CREATE TABLE IF NOT EXISTS exhibition_version_booths (
+            version_id TEXT NOT NULL,
+            booth_id TEXT NOT NULL,
+            zone_id TEXT NOT NULL,
+            slot_index INTEGER NOT NULL DEFAULT 0,
+            position_x REAL NOT NULL,
+            position_z REAL NOT NULL,
+            rotation_y REAL NOT NULL DEFAULT 0,
+            archetype_id TEXT NOT NULL DEFAULT 'grand_portal',
+            placement_status TEXT NOT NULL DEFAULT 'placed',
+            PRIMARY KEY (version_id, booth_id),
+            FOREIGN KEY (version_id) REFERENCES exhibition_versions(id) ON DELETE CASCADE,
+            FOREIGN KEY (booth_id) REFERENCES booths(id) ON DELETE RESTRICT,
+            FOREIGN KEY (zone_id) REFERENCES zones(id) ON DELETE RESTRICT
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_exhibition_versions_exh ON exhibition_versions(exhibition_id, status);
+          CREATE INDEX IF NOT EXISTS idx_zones_version ON zones(version_id, sort_order);
+          CREATE INDEX IF NOT EXISTS idx_evb_version_zone ON exhibition_version_booths(version_id, zone_id);
+          CREATE INDEX IF NOT EXISTS idx_evb_booth ON exhibition_version_booths(booth_id);
+        `);
+
+        this.db.exec('PRAGMA user_version = 4;');
+        this.db.exec('COMMIT;');
+      } catch (err) {
+        this.db.exec('ROLLBACK;');
+        throw err;
+      }
+    }
+
     const fkRows = this.db.prepare('PRAGMA foreign_key_check').all();
     const integrityRow = this.db.prepare('PRAGMA integrity_check').get() as { integrity_check: string };
     const jmRow = this.db.prepare('PRAGMA journal_mode').get() as { journal_mode: string };
@@ -426,7 +499,7 @@ export class V28CatalogDatabase {
 
     return {
       fromVersion,
-      toVersion: 3,
+      toVersion: 4,
       journalMode: String(jmRow?.journal_mode || ''),
       foreignKeyCheckOk: fkRows.length === 0,
       integrityCheckOk: integrityRow.integrity_check === 'ok',
@@ -440,6 +513,10 @@ export class V28CatalogDatabase {
         importJobs: Number((this.db.prepare('SELECT COUNT(*) as c FROM import_jobs').get() as { c: number }).c),
       },
     };
+  }
+
+  public getConnection(): DatabaseSync {
+    return this.db;
   }
 
   // ============================================================================

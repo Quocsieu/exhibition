@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { CompanyManagement } from './CompanyManagement';
 import { ProductCatalog } from './ProductCatalog';
 import { ExcelImportWizard } from './ExcelImportWizard';
+import { ExhibitionConfigurator } from './ExhibitionConfigurator';
 
 export const V28Phase1Workspace: React.FC = () => {
-  const [subTab, setSubTab] = useState<'companies' | 'catalog' | 'excel'>('companies');
+  const [subTab, setSubTab] = useState<'companies' | 'catalog' | 'excel' | 'exhibitions'>('companies');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
 
   return (
@@ -45,6 +46,13 @@ export const V28Phase1Workspace: React.FC = () => {
           >
             📊 Import Excel (.xlsx)
           </button>
+          <button
+            type="button"
+            className={`btn ${subTab === 'exhibitions' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setSubTab('exhibitions')}
+          >
+            🏗️ Quy hoạch Triển lãm (V28)
+          </button>
         </div>
       </div>
 
@@ -58,6 +66,7 @@ export const V28Phase1Workspace: React.FC = () => {
       )}
       {subTab === 'catalog' && <ProductCatalog initialCompanyId={selectedCompanyId} />}
       {subTab === 'excel' && <ExcelImportWizard />}
+      {subTab === 'exhibitions' && <ExhibitionConfigurator />}
     </div>
   );
 };

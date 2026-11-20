@@ -78,7 +78,7 @@ describe('V28 PHASE 1 — Migration, Company Management, Independent Product Cat
 
   it('M1–M10: migrates a snapshot copy safely, preserves all Booth/Product/Slot IDs, passes FK & integrity checks, stays idempotent, and leaves original expo.db 100% untouched', async () => {
     const report = v28Db.lastMigrationReport;
-    expect(report.toVersion).toBe(3);
+    expect(report.toVersion).toBeGreaterThanOrEqual(3);
     expect(report.foreignKeyCheckOk).toBe(true);
     expect(report.integrityCheckOk).toBe(true);
     expect(report.counts.booths).toBeGreaterThanOrEqual(6);

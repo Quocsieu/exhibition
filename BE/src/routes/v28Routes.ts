@@ -9,7 +9,13 @@ import {
   UpdateV28ProductInputSchema,
   ExcelDuplicateStrategySchema,
   V28UrlImportInputSchema,
+  CreateExhibitionInputSchema,
+  CreateDraftLayoutInputSchema,
+  UpdateZoneInputSchema,
+  UpdateDraftBoothPlacementInputSchema,
+  RollbackVersionInputSchema,
 } from '../schemas/v28Schemas.js';
+import { V28ExhibitionService, type ExhibitionVersionDetail } from '../services/v28/exhibitionService.js';
 import { fetchExternalProductHtml, extractProductFromHtml } from '../integrations/productAdapter.js';
 import { z } from 'zod';
 
@@ -39,7 +45,9 @@ function getHttpStatus(err: unknown, fallback = 400): number {
 
 export function createV28ApiRoutes(
   v28Db: V28CatalogDatabase,
-  excelService = new V28ExcelImportService(v28Db)
+  excelService = new V28ExcelImportService(v28Db),
+  exhibitionService = new V28ExhibitionService(v28Db),
+  onLayoutPublished?: (version: ExhibitionVersionDetail) => void
 ): Router {
   const router = Router();
   // Allow up to ~7.5MB JSON body specifically on V28 routes for 5MB base64-encoded .xlsx uploads
@@ -313,6 +321,143 @@ export function createV28ApiRoutes(
         status: 'active',
       });
       res.status(201).json({ draft, product, saved: true });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  // ============================================================================
+  // E. PHASE 2 — DYNAMIC EXHIBITIONS, VERSIONS, ZONES, PLACEMENTS & PUBLISH
+  // ============================================================================
+  router.get('/archetypes', (_req: Request, res: Response) => {
+    res.json({ archetypes: exhibitionService.listArchetypes() });
+  });
+
+  router.get('/exhibitions/active', (req: Request, res: Response) => {
+    try {
+      const previewVersionId =
+        typeof req.query.previewVersionId === 'string' && req.query.previewVersionId
+          ? req.query.previewVersionId
+          : undefined;
+      const world = exhibitionService.getActiveExhibitionWorld(previewVersionId);
+      res.json({ world });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get('/exhibitions', (_req: Request, res: Response) => {
+    exhibitionService.ensureDefaultExhibition(20);
+    res.json({ exhibitions: exhibitionService.listExhibitions() });
+  });
+
+  router.post('/exhibitions', requireAdminAuth, (req: Request, res: Response) => {
+    const parsed = CreateExhibitionInputSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message || 'Dữ liệu triển lãm không hợp lệ.' });
+      return;
+    }
+    try {
+      const exhibition = exhibitionService.createExhibition(parsed.data);
+      res.status(201).json({ exhibition });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/exhibitions/:id/drafts', requireAdminAuth, (req: Request, res: Response) => {
+    const parsed = CreateDraftLayoutInputSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message || 'Cấu hình layout không hợp lệ.' });
+      return;
+    }
+    try {
+      const version = exhibitionService.createDraftVersion(getParam(req.params.id), parsed.data);
+      res.status(201).json({ version });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get('/exhibitions/:id/versions/:versionId', (req: Request, res: Response) => {
+    const version = exhibitionService.getVersionDetail(getParam(req.params.versionId));
+    if (!version || version.exhibitionId !== getParam(req.params.id)) {
+      res.status(404).json({ error: 'Không tìm thấy phiên bản triển lãm.' });
+      return;
+    }
+    res.json({ version });
+  });
+
+  router.patch('/exhibitions/:id/versions/:versionId/zones/:zoneId', requireAdminAuth, (req: Request, res: Response) => {
+    const parsed = UpdateZoneInputSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message || 'Dữ liệu cập nhật khu không hợp lệ.' });
+      return;
+    }
+    try {
+      const version = exhibitionService.updateDraftZone(
+        getParam(req.params.versionId),
+        getParam(req.params.zoneId),
+        parsed.data
+      );
+      res.json({ version });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.patch(
+    '/exhibitions/:id/versions/:versionId/booths/:boothId',
+    requireAdminAuth,
+    (req: Request, res: Response) => {
+      const parsed = UpdateDraftBoothPlacementInputSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message || 'Dữ liệu cập nhật gian hàng không hợp lệ.' });
+        return;
+      }
+      try {
+        const version = exhibitionService.updateDraftBoothPlacement(
+          getParam(req.params.versionId),
+          getParam(req.params.boothId),
+          parsed.data
+        );
+        res.json({ version });
+      } catch (err) {
+        res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+      }
+    }
+  );
+
+  router.post(
+    '/exhibitions/:id/versions/:versionId/publish',
+    requireAdminAuth,
+    (req: Request, res: Response) => {
+      try {
+        const version = exhibitionService.publishVersion(
+          getParam(req.params.id),
+          getParam(req.params.versionId)
+        );
+        onLayoutPublished?.(version);
+        res.json({ version });
+      } catch (err) {
+        res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+      }
+    }
+  );
+
+  router.post('/exhibitions/:id/rollback', requireAdminAuth, (req: Request, res: Response) => {
+    const parsed = RollbackVersionInputSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message || 'Thiếu targetVersionId.' });
+      return;
+    }
+    try {
+      const version = exhibitionService.rollbackVersion(
+        getParam(req.params.id),
+        parsed.data.targetVersionId
+      );
+      onLayoutPublished?.(version);
+      res.json({ version });
     } catch (err) {
       res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
     }

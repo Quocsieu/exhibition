@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ExhibitionPage } from './pages/ExhibitionPage';
 import { AdminPage } from './pages/AdminPage';
+import { DynamicExhibitionPage } from './pages/DynamicExhibitionPage';
 
 interface ParsedRoute {
-  view: 'expo' | 'admin';
+  view: 'expo' | 'admin' | 'dynamic';
   adminBoothId: string | null;
   previewBoothId?: string | null;
 }
@@ -39,6 +40,12 @@ function parseCurrentLocation(): ParsedRoute {
   }
   if (/^\/admin(?:\/booths)?\/?$/i.test(pathname)) {
     return { view: 'admin', adminBoothId: null };
+  }
+
+  // 3. Isolated V28 Dynamic Exhibition World (?world=dynamic)
+  const worldParam = new URLSearchParams(window.location.search).get('world');
+  if (worldParam === 'dynamic') {
+    return { view: 'dynamic', adminBoothId: null };
   }
 
   return { view: 'expo', adminBoothId: null };
@@ -83,6 +90,8 @@ export const App: React.FC = () => {
       onNavigateBoothSlots={openAdmin}
       onBackToExpo={openExpo}
     />
+  ) : route.view === 'dynamic' ? (
+    <DynamicExhibitionPage onOpenAdmin={() => openAdmin(null)} />
   ) : (
     <ExhibitionPage
       initialFocusBoothId={route.previewBoothId || null}
