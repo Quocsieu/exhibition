@@ -19,6 +19,7 @@ import {
 } from '../scene/v28/spatialStreaming';
 import { FarBoothInstancedProxy } from '../scene/v28/FarBoothInstancedProxy';
 import { ParametricExpoRoof } from '../scene/v28/ParametricExpoRoof';
+import { useV28SpatialRealtime } from '../hooks/useV28SpatialRealtime';
 
 export interface DynamicExhibitionPageProps {
   onOpenAdmin: () => void;
@@ -108,6 +109,13 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     loadActiveWorld();
   }, [loadActiveWorld]);
 
+  const { remoteAvatars, onlineCount, overflowCount, sendMove, sendTeleport } =
+    useV28SpatialRealtime({
+      versionId: world?.versionId ?? null,
+      isMobilePortrait,
+      onLayoutChanged: loadActiveWorld,
+    });
+
   const handleTeleportToBooth = useCallback((booth: V28BoothPlacementView) => {
     const lookRot = Math.atan2(
       booth.positionX - booth.approachPoint.x,
@@ -117,10 +125,11 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
       nonce: prev.nonce + 1,
       pos: { x: booth.approachPoint.x, z: booth.approachPoint.z, rotationY: lookRot },
     }));
+    sendTeleport(booth.approachPoint.x, booth.approachPoint.z, lookRot);
     setFocusedBooth(booth);
     setSelectedProduct(null);
     setCameraMode('focus');
-  }, []);
+  }, [sendTeleport]);
 
   const handleFocusBooth = useCallback((booth: V28BoothPlacementView) => {
     setFocusedBooth(booth);
@@ -204,7 +213,11 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         joystickVector={joystickVec}
         isMobilePortrait={isMobilePortrait}
         boothLodMap={boothLodMap}
-        onPlayerMove={setPlayerPos}
+        remoteAvatars={remoteAvatars}
+        onPlayerMove={(pos) => {
+          setPlayerPos(pos);
+          sendMove(pos.x, pos.z, pos.rotationY);
+        }}
         onFloorClick={handleFloorClick}
         onFocusBooth={handleFocusBooth}
         onSelectProduct={handleSelectProduct}
@@ -222,6 +235,8 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         playerPos={playerPos}
         focusedBooth={focusedBooth}
         selectedProduct={selectedProduct}
+        onlineCount={onlineCount}
+        overflowVisitorCount={overflowCount}
         onChangeCameraMode={(mode) => {
           setCameraMode(mode);
           if (mode !== 'focus') {

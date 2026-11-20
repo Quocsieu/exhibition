@@ -11,6 +11,8 @@ import { ExpoService } from './services/expoService.js';
 import { ExpoController, type DataMutationCallback } from './controllers/expoController.js';
 import { createApiRoutes } from './routes/apiRoutes.js';
 import { createV28ApiRoutes } from './routes/v28Routes.js';
+import { V28ExhibitionService } from './services/v28/exhibitionService.js';
+import { V28SpatialAoiEngine } from './realtime/v28/spatialAoiEngine.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 import type { ServerToClientEvents, ClientToServerEvents } from './schemas/expoSchemas.js';
 
@@ -77,7 +79,15 @@ export function createApp(
 
   if (v28Db) {
     app.locals.v28Db = v28Db;
-    app.use('/api/v28', createV28ApiRoutes(v28Db));
+    const v28ExhibitionService = new V28ExhibitionService(v28Db);
+    app.locals.v28ExhibitionService = v28ExhibitionService;
+    app.use(
+      '/api/v28',
+      createV28ApiRoutes(v28Db, undefined, v28ExhibitionService, (publishedVersion) => {
+        const aoi = app.locals.v28SpatialAoi as V28SpatialAoiEngine | undefined;
+        aoi?.onLayoutPublished(publishedVersion);
+      })
+    );
   }
 
   return app;
@@ -110,6 +120,14 @@ if (isMain) {
   const io = attachSocketServer(httpServer, db, CORS_ORIGIN);
   app.set('io', io);
 
+  const v28ExhService = app.locals.v28ExhibitionService as V28ExhibitionService | undefined;
+  const v28SpatialAoi = v28ExhService
+    ? new V28SpatialAoiEngine(io, v28ExhService.getActiveExhibitionWorld())
+    : undefined;
+  if (v28SpatialAoi) {
+    app.locals.v28SpatialAoi = v28SpatialAoi;
+  }
+
   httpServer.listen(PORT, () => {
     console.log(`[Virtual Expo BE] Running on http://localhost:${PORT}`);
     console.log(`[Virtual Expo BE] Legacy V27.5 DB: ${dbPath}`);
@@ -123,6 +141,7 @@ if (isMain) {
     void (svc ? svc.shutdown() : Promise.resolve()).finally(() => {
       httpServer.close(() => {
         try {
+          v28SpatialAoi?.dispose();
           db.close();
           v28Db.close();
         } catch {
