@@ -9,6 +9,8 @@ import {
   LocalAudioStorageAdapter,
   getConfiguredGeminiTtsModel,
   getConfiguredGeminiTtsVoice,
+  isValidWavBuffer,
+  ensureValidWavBuffer,
 } from '../services/v28/audioCacheService.js';
 import { V28AiConsultantService } from '../services/v28/aiConsultantService.js';
 
@@ -88,6 +90,28 @@ describe('V28 NPC AUDIO (GEMINI TTS PRE-GEN & CACHE) & AI CHAT', () => {
       const afterRestart = await restartedAudioSvc.getOrPrepareBoothAudioPack(restartedBooth);
       expect(afterRestart.cacheHits).toBe(first.clips.length);
       expect(afterRestart.generatedCount).toBe(0);
+
+      // 7. Corrupt WAV cache detection & auto-regeneration + raw PCM -> WAV wrapping
+      const rawPcm = Buffer.alloc(4800, 1);
+      expect(isValidWavBuffer(rawPcm)).toBe(false);
+      const wrappedWav = ensureValidWavBuffer(rawPcm, 24000, 1, 16);
+      expect(isValidWavBuffer(wrappedWav)).toBe(true);
+      expect(wrappedWav.length).toBe(44 + 4800);
+
+      const targetClip = afterRestart.clips[0];
+      // Corrupt the cached file on disk to 0 bytes -> must NOT report cache hit and must regenerate valid WAV!
+      await new LocalAudioStorageAdapter(audioDir).put(targetClip.storageKey, Buffer.alloc(0));
+      const streamWhileCorrupt = await restartedAudioSvc.getAudioStreamBuffer(targetClip.audioId);
+      expect(streamWhileCorrupt).toBeNull();
+      const healed = await restartedAudioSvc.ensureCachedAudio({
+        entityType: targetClip.entityType,
+        entityId: targetClip.entityId,
+        slotKey: targetClip.slotKey,
+        transcript: targetClip.transcript,
+      });
+      expect(healed.cacheHit).toBe(false);
+      const healedStream = await restartedAudioSvc.getAudioStreamBuffer(healed.asset.audioId);
+      expect(healedStream && isValidWavBuffer(healedStream.buffer)).toBe(true);
     } finally {
       try { v28Db.close(); } catch {}
       try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {}

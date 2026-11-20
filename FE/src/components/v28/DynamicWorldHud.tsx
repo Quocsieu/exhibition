@@ -522,7 +522,7 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
           </div>
         )}
 
-        {/* Focused Booth / Product / NPC AI Consultant Bottom Sheet or Floating Card */}
+        {/* Product Detail Card or NPC Consultant Panel (Duplicate white booth card removed per Task A) */}
         {npcPanelOpen && focusedBooth ? (
           <div style={{ marginLeft: 'auto', width: isMobilePortrait ? '100%' : 'auto' }}>
             <V28NpcConsultantPanel
@@ -536,7 +536,7 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               }}
             />
           </div>
-        ) : (selectedProduct || focusedBooth) && (
+        ) : selectedProduct && (
           <div
             style={{
               pointerEvents: 'auto',
@@ -552,112 +552,43 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               border: '1px solid #e2e8f0',
             }}
           >
-            {selectedProduct ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#0284c7' }}>
-                      {selectedProduct.booth.companyName} · {selectedProduct.slotId}
-                    </div>
-                    <h4 style={{ margin: '2px 0 0', fontSize: 16, color: '#0f172a' }}>
-                      {selectedProduct.product.name}
-                    </h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#0284c7' }}>
+                    {selectedProduct.booth.companyName} · {selectedProduct.slotId}
                   </div>
-                  <button
-                    type="button"
-                    onClick={onCloseProduct}
-                    style={{ minWidth: 40, minHeight: 40, borderRadius: 10, border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
-                  >
-                    ✕
-                  </button>
+                  <h4 style={{ margin: '2px 0 0', fontSize: 16, color: '#0f172a' }}>
+                    {selectedProduct.product.name}
+                  </h4>
                 </div>
-                {selectedProduct.product.images[0] && (
-                  <img
-                    src={selectedProduct.product.images[0]}
-                    alt={selectedProduct.product.name}
-                    style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 10 }}
-                  />
+                <button
+                  type="button"
+                  onClick={onCloseProduct}
+                  style={{ minWidth: 40, minHeight: 40, borderRadius: 10, border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
+                >
+                  ✕
+                </button>
+              </div>
+              {selectedProduct.product.images[0] && (
+                <img
+                  src={selectedProduct.product.images[0]}
+                  alt={selectedProduct.product.name}
+                  style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 10 }}
+                />
+              )}
+              <div style={{ fontSize: 16, fontWeight: 800, color: '#047857' }}>
+                {selectedProduct.product.price.toLocaleString('vi-VN')} {selectedProduct.product.currency}
+                {selectedProduct.product.sku && (
+                  <span style={{ fontSize: 12, fontWeight: 500, color: '#64748b', marginLeft: 8 }}>
+                    SKU: {selectedProduct.product.sku}
+                  </span>
                 )}
-                <div style={{ fontSize: 16, fontWeight: 800, color: '#047857' }}>
-                  {selectedProduct.product.price.toLocaleString('vi-VN')} {selectedProduct.product.currency}
-                  {selectedProduct.product.sku && (
-                    <span style={{ fontSize: 12, fontWeight: 500, color: '#64748b', marginLeft: 8 }}>
-                      SKU: {selectedProduct.product.sku}
-                    </span>
-                  )}
-                </div>
-                <p style={{ margin: 0, fontSize: 13, color: '#334155', lineHeight: 1.45 }}>
-                  {selectedProduct.product.description || 'Sản phẩm trưng bày chính thức tại gian hàng.'}
-                </p>
               </div>
-            ) : focusedBooth ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#0284c7' }}>
-                      {focusedBooth.zoneName} · {focusedBooth.archetypeLabel}
-                    </div>
-                    <h4 style={{ margin: '2px 0 0', fontSize: 16, color: '#0f172a' }}>{focusedBooth.boothName}</h4>
-                    <div style={{ fontSize: 12, color: '#475569' }}>{focusedBooth.companyName}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onCloseFocus}
-                    style={{ minWidth: 40, minHeight: 40, borderRadius: 10, border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>
-                    Sản phẩm trưng bày ({focusedBooth.assignedSlotCount}/6 vị trí):
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onOpenNpcPanel}
-                    style={{
-                      minHeight: 36,
-                      padding: '0 12px',
-                      borderRadius: 10,
-                      border: 'none',
-                      background: '#0284c7',
-                      color: '#fff',
-                      fontWeight: 700,
-                      fontSize: 12,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    🤖 Hỏi Trợ lý AI / Audio
-                  </button>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8 }}>
-                  {focusedBooth.slots.map((s) => (
-                    <button
-                      key={s.slotId}
-                      type="button"
-                      disabled={!s.product}
-                      onClick={() => s.product && onSelectProduct(focusedBooth, s.product, s.slotId)}
-                      style={{
-                        minWidth: 0,
-                        minHeight: 44,
-                        padding: '8px 10px',
-                        borderRadius: 10,
-                        border: '1px solid #e2e8f0',
-                        background: s.product ? '#f8fafc' : '#f1f5f9',
-                        textAlign: 'left',
-                        cursor: s.product ? 'pointer' : 'default',
-                        opacity: s.product ? 1 : 0.6,
-                      }}
-                    >
-                      <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b' }}>{s.slotId}</div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {s.product ? s.product.name : 'Vị trí trống'}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+              <p style={{ margin: 0, fontSize: 13, color: '#334155', lineHeight: 1.45 }}>
+                {selectedProduct.product.description || 'Sản phẩm trưng bày chính thức tại gian hàng.'}
+              </p>
+            </div>
           </div>
         )}
       </div>

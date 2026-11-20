@@ -152,11 +152,20 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
 
   const stopAudioElement = useCallback(() => {
     if (audioElRef.current) {
+      audioElRef.current.onplay = null;
+      audioElRef.current.onpause = null;
       audioElRef.current.onended = null;
       audioElRef.current.onerror = null;
       audioElRef.current.pause();
       audioElRef.current.currentTime = 0;
       audioElRef.current = null;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore speechSynthesis cancel error
+      }
     }
     activeClipKeyRef.current = null;
     setIsAudioPlaying(false);
@@ -176,19 +185,12 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
         step.type === 'GREETING' ? 'greet' : step.type === 'PRODUCT' ? 'point' : 'talk'
       );
 
-      if (isMutedRef.current || !clip || clip.status !== 'ready') {
+      if (isMutedRef.current) {
         setIsAudioPlaying(false);
         return;
       }
 
-      const audio = new Audio(`${API_BASE}${clip.audioUrl}`);
-      audio.muted = isMutedRef.current;
-      audioElRef.current = audio;
-      activeClipKeyRef.current = `${booth.boothId}:${step.slotKey}:${clip.audioId}`;
-
-      audio.onplay = () => setIsAudioPlaying(true);
-      audio.onpause = () => setIsAudioPlaying(false);
-      audio.onended = () => {
+      const advanceToNext = () => {
         setIsAudioPlaying(false);
         if (stepIdx < steps.length - 1) {
           const nextIdx = stepIdx + 1;
@@ -199,16 +201,77 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
           onAnimStateChange('idle');
         }
       };
-      audio.onerror = () => {
-        setIsAudioPlaying(false);
-        setAudioError('Không thể tải tệp âm thanh đã lưu. Hệ thống đang hiển thị phụ đề tiếng Việt.');
-        onAnimStateChange('idle');
-      };
 
-      audio.play().catch(() => {
-        // Browser autoplay policy blocked before user gesture -> keep subtitle visible cleanly
-        setIsAudioPlaying(false);
-      });
+      // Mode 1: Real pre-generated Gemini TTS WAV cached on backend -> play cached WAV directly (0 Gemini calls!)
+      if (pack?.liveGeminiTtsEnabled && clip && clip.status === 'ready') {
+        const audio = new Audio(`${API_BASE}${clip.audioUrl}`);
+        audio.crossOrigin = 'anonymous';
+        audio.preload = 'auto';
+        audio.muted = isMutedRef.current;
+        audioElRef.current = audio;
+        activeClipKeyRef.current = `${booth.boothId}:${step.slotKey}:${clip.audioId}`;
+
+        audio.onplay = () => setIsAudioPlaying(true);
+        audio.onpause = () => setIsAudioPlaying(false);
+        audio.onended = advanceToNext;
+        audio.onerror = () => {
+          const code = audio.error?.code;
+          setIsAudioPlaying(false);
+          setAudioError(
+            `Không thể tải tệp âm thanh đã lưu (mã lỗi media: ${code ?? 'unknown'}). Hệ thống đang hiển thị phụ đề tiếng Việt.`
+          );
+          onAnimStateChange('idle');
+        };
+
+        audio.play().catch(() => {
+          setIsAudioPlaying(false);
+        });
+        return;
+      }
+
+      // Mode 2: Zero-cost Vietnamese fallback when LIVE GEMINI TTS is not yet configured -> Web Speech vi-VN
+      const speechText = clip?.transcript || step.fallbackText;
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window && speechText) {
+        try {
+          const utter = new SpeechSynthesisUtterance(speechText);
+          utter.lang = 'vi-VN';
+          utter.rate = 1.0;
+          const voices = window.speechSynthesis.getVoices();
+          const viVoice = voices.find((v) => v.lang.toLowerCase().startsWith('vi'));
+          if (viVoice) utter.voice = viVoice;
+          utter.onstart = () => setIsAudioPlaying(true);
+          utter.onend = advanceToNext;
+          utter.onerror = () => {
+            setIsAudioPlaying(false);
+          };
+          activeClipKeyRef.current = `${booth.boothId}:${step.slotKey}:speech-fallback`;
+          window.speechSynthesis.speak(utter);
+          return;
+        } catch {
+          // fall through to cached WAV fallback
+        }
+      }
+
+      // Mode 3: Direct cached WAV playback fallback if speechSynthesis is unavailable
+      if (clip && clip.status === 'ready') {
+        const audio = new Audio(`${API_BASE}${clip.audioUrl}`);
+        audio.crossOrigin = 'anonymous';
+        audio.preload = 'auto';
+        audio.muted = isMutedRef.current;
+        audioElRef.current = audio;
+        audio.onplay = () => setIsAudioPlaying(true);
+        audio.onpause = () => setIsAudioPlaying(false);
+        audio.onended = advanceToNext;
+        audio.onerror = () => {
+          const code = audio.error?.code;
+          setIsAudioPlaying(false);
+          setAudioError(
+            `Không thể tải tệp âm thanh đã lưu (mã lỗi media: ${code ?? 'unknown'}). Hệ thống đang hiển thị phụ đề tiếng Việt.`
+          );
+          onAnimStateChange('idle');
+        };
+        audio.play().catch(() => setIsAudioPlaying(false));
+      }
     },
     [audioPack, booth.boothId, onAnimStateChange, steps, stopAudioElement]
   );
@@ -271,6 +334,9 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
   const handlePause = () => {
     if (audioElRef.current && !audioElRef.current.paused) {
       audioElRef.current.pause();
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel(); } catch {}
     }
     setIsAudioPlaying(false);
     setStatus('PAUSED');
@@ -339,6 +405,9 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
     if (nextTab === 'chat' && (status === 'GREETING' || status === 'PRESENTING')) {
       if (audioElRef.current && !audioElRef.current.paused) {
         audioElRef.current.pause();
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel(); } catch {}
       }
       setIsAudioPlaying(false);
       setStatus('PAUSED');

@@ -1,8 +1,53 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { V28CatalogDatabase } from '../../database/v28Database.js';
 import type { ExhibitionBoothPlacementView, ExhibitionVersionDetail } from './exhibitionService.js';
+
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_AUDIO_DIR = path.resolve(MODULE_DIR, '..', '..', '..', 'data', 'v28_audio');
+
+/**
+ * Validates that a buffer is a non-empty, browser-decodable RIFF/WAVE file (duration > 0).
+ */
+export function isValidWavBuffer(buf: Buffer | null | undefined): boolean {
+  if (!buf || buf.length <= 44) return false;
+  if (buf.subarray(0, 4).toString('ascii') !== 'RIFF') return false;
+  if (buf.subarray(8, 12).toString('ascii') !== 'WAVE') return false;
+  return true;
+}
+
+/**
+ * Ensures any audio payload (pre-wrapped WAV OR raw PCM L16 from Gemini TTS)
+ * is stored as a valid RIFF/WAVE file with accurate header fields.
+ */
+export function ensureValidWavBuffer(
+  raw: Buffer,
+  sampleRate = 24000,
+  channels = 1,
+  bitsPerSample = 16
+): Buffer {
+  if (isValidWavBuffer(raw)) return raw;
+  const dataBytes = raw.length;
+  const byteRate = sampleRate * channels * (bitsPerSample / 8);
+  const blockAlign = channels * (bitsPerSample / 8);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataBytes, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(dataBytes, 40);
+  return Buffer.concat([header, raw]);
+}
 
 /**
  * Verified official Gemini TTS model IDs from Google Gemini API docs (gemini-api-guides/speech-generation.md):
@@ -62,7 +107,7 @@ export class LocalAudioStorageAdapter implements AudioStorageAdapter {
   public readonly driverName = 'local_fs';
   private readonly baseDir: string;
 
-  constructor(baseDir = path.resolve(process.cwd(), 'data', 'v28_audio')) {
+  constructor(baseDir = DEFAULT_AUDIO_DIR) {
     this.baseDir = baseDir;
     if (!fs.existsSync(this.baseDir)) {
       fs.mkdirSync(this.baseDir, { recursive: true });
@@ -152,7 +197,8 @@ async function synthesizeGeminiTtsWav(params: {
   if (!base64Audio) {
     throw new Error('Gemini TTS API không trả về dữ liệu output_audio.');
   }
-  const buffer = Buffer.from(base64Audio, 'base64');
+  const rawBuffer = Buffer.from(base64Audio, 'base64');
+  const buffer = ensureValidWavBuffer(rawBuffer, 24000, 1, 16);
   // Estimate duration from WAV 24kHz mono 16-bit PCM byte length (48,000 bytes/sec)
   const durationSec = Math.max(0.5, Math.round((Math.max(0, buffer.length - 44) / 48000) * 10) / 10);
   return { buffer, durationSec };
@@ -307,10 +353,15 @@ export class V28AudioCacheService {
 
       if (existing) {
         const storageKey = String(existing.storage_key);
-        if (await this.storage.exists(storageKey)) {
+        const cachedBuf = await this.storage.get(storageKey);
+        if (isValidWavBuffer(cachedBuf)) {
           this.metrics.cacheHits++;
           return { asset: this.mapRow(existing), cacheHit: true };
         }
+        // Corrupt or missing cached WAV -> invalidate row so it is safely regenerated!
+        this.db
+          .prepare(`UPDATE audio_assets SET status = 'failed' WHERE audio_id = ?`)
+          .run(String(existing.audio_id));
       }
 
       this.metrics.cacheMisses++;
@@ -477,7 +528,10 @@ export class V28AudioCacheService {
       .get(audioId) as { storage_key: string; mime_type: string } | undefined;
     if (!row) return null;
     const buffer = await this.storage.get(row.storage_key);
-    if (!buffer) return null;
+    if (!buffer || !isValidWavBuffer(buffer)) {
+      this.db.prepare(`UPDATE audio_assets SET status = 'failed' WHERE audio_id = ?`).run(audioId);
+      return null;
+    }
     return { buffer, mimeType: row.mime_type || 'audio/wav' };
   }
 

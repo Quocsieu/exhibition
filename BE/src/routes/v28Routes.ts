@@ -863,11 +863,31 @@ export function createV28ApiRoutes(
       const audioId = getParam(req.params.audioId);
       const result = await audioCacheService.getAudioStreamBuffer(audioId);
       if (!result) {
-        res.status(404).json({ error: 'Không tìm thấy tệp âm thanh.' });
+        res.status(404).json({ error: 'Không tìm thấy tệp âm thanh hợp lệ.' });
         return;
       }
+      const total = result.buffer.length;
       res.setHeader('Content-Type', result.mimeType);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
       res.setHeader('Cache-Control', 'public, max-age=86400');
+
+      const rangeHeader = req.headers.range;
+      if (rangeHeader && /^bytes=\d*-\d*$/i.test(rangeHeader.trim())) {
+        const [rawStart, rawEnd] = rangeHeader.replace(/bytes=/i, '').split('-');
+        const start = rawStart ? Number(rawStart) : 0;
+        const end = rawEnd ? Math.min(total - 1, Number(rawEnd)) : total - 1;
+        if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && start <= end && end < total) {
+          const slice = result.buffer.subarray(start, end + 1);
+          res.status(206);
+          res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+          res.setHeader('Content-Length', String(slice.length));
+          res.send(slice);
+          return;
+        }
+      }
+
+      res.setHeader('Content-Length', String(total));
       res.send(result.buffer);
     } catch (err) {
       res.status(getHttpStatus(err, 500)).json({ error: (err as Error).message });
