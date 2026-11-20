@@ -293,15 +293,143 @@ function createCafeSignTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+function createInteractiveTotemTexture(): THREE.CanvasTexture {
+  const canvas = createCanvas(512, 1024);
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const grad = ctx.createLinearGradient(0, 0, 0, 1024);
+    grad.addColorStop(0, '#0b1324');
+    grad.addColorStop(1, '#162238');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 1024);
+
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(18, 18, 476, 988);
+
+    ctx.fillStyle = '#d6be96';
+    ctx.font = 'bold 24px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('GRAND EXPO WORLD', 256, 86);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 42px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('INTERACTIVE', 256, 152);
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillText('EXPO CORNER', 256, 204);
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(96, 240, 320, 4);
+
+    const cards = [
+      { tag: '01 · TRẢI NGHIỆM 3D', desc: 'Khám phá 6 không gian triển lãm đa ngành' },
+      { tag: '02 · TƯ VẤN TRỰC TIẾP', desc: 'Nghe giới thiệu sản phẩm từ tư vấn viên 3D' },
+      { tag: '03 · ĐẠI LỘ TRUNG TÂM', desc: 'Không gian mở 51.2m × 46.0m chuẩn quốc tế' },
+      { tag: '04 · TIỆN ÍCH QUẢNG TRƯỜNG', desc: 'Lounge nghỉ chân, Café, Check-in & Sơ đồ' },
+    ];
+    ctx.textAlign = 'left';
+    cards.forEach((c, idx) => {
+      const y = 290 + idx * 165;
+      ctx.fillStyle = 'rgba(30, 41, 59, 0.85)';
+      ctx.fillRect(44, y, 424, 134);
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(44, y, 8, 134);
+      ctx.font = 'bold 23px "Segoe UI", Arial, sans-serif';
+      ctx.fillText(c.tag, 70, y + 46);
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '500 22px "Segoe UI", Arial, sans-serif';
+      ctx.fillText(c.desc.slice(0, 26), 70, y + 84);
+      if (c.desc.length > 26) {
+        ctx.fillText(c.desc.slice(26).trim(), 70, y + 114);
+      }
+    });
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function createInteractiveWallPanelTexture(): THREE.CanvasTexture {
+  const canvas = createCanvas(1024, 620);
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const grad = ctx.createLinearGradient(0, 0, 1024, 620);
+    grad.addColorStop(0, '#0f172a');
+    grad.addColorStop(1, '#1e293b');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 1024, 620);
+
+    ctx.strokeStyle = '#d6be96';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(18, 18, 988, 584);
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 26px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('GRAND EXPO WORLD · EXHIBITION INFORMATION', 56, 78);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 46px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('KHÔNG GIAN TRIỂN LÃM THƯƠNG MẠI 3D', 56, 138);
+
+    ctx.fillStyle = '#d6be96';
+    ctx.fillRect(56, 162, 912, 3);
+
+    const zones = [
+      { title: 'KHU GIAN HÀNG CHỮ U', detail: '6 Showroom đa ngành · Trưng bày trực quan · Tư vấn 3D' },
+      { title: 'LANDSCAPE LOUNGE (TÂY BẮC)', detail: 'Khu nghỉ chân & giao lưu ngắn giữa hành trình tham quan' },
+      { title: 'CHECK-IN PHOTO ZONE (PHÍA BẮC)', detail: 'Sân khấu chụp ảnh trung tâm cuối đại lộ 10.2m' },
+      { title: 'WELCOME · CAFÉ · REST (PHÍA NAM)', detail: 'Quầy tiếp đón, Sơ đồ triển lãm & Khu thư giãn' },
+    ];
+    zones.forEach((z, idx) => {
+      const col = idx % 2;
+      const row = Math.floor(idx / 2);
+      const x = 56 + col * 468;
+      const y = 200 + row * 185;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+      ctx.fillRect(x, y, 444, 156);
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, 444, 156);
+
+      ctx.fillStyle = '#d6be96';
+      ctx.font = 'bold 23px "Segoe UI", Arial, sans-serif';
+      ctx.fillText(z.title, x + 22, y + 48);
+
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = '500 21px "Segoe UI", Arial, sans-serif';
+      const words = z.detail.split(' ');
+      let line1 = '';
+      let line2 = '';
+      for (const w of words) {
+        if ((line1 + ' ' + w).trim().length <= 34) line1 = (line1 + ' ' + w).trim();
+        else line2 = (line2 + ' ' + w).trim();
+      }
+      ctx.fillText(line1, x + 22, y + 92);
+      if (line2) ctx.fillText(line2, x + 22, y + 124);
+    });
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export const GrandExpoPlazaAmenities: React.FC = React.memo(() => {
   const baseUrl =
     (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.BASE_URL || '/';
 
-  // Supports instant V27.3 rollback via ?booths=v27_3 while defaulting V27 to V27.4
-  const isV273Rollback = useMemo(() => {
-    if (typeof window === 'undefined') return false;
+  // Supports instant rollback via ?booths=v27_3 (V27.3) or ?plaza=v27_4 (V27.4 without V27.5 enrichment)
+  const { isV273Rollback, isV274Only } = useMemo(() => {
+    if (typeof window === 'undefined') return { isV273Rollback: false, isV274Only: false };
     const params = new URLSearchParams(window.location.search);
-    return params.get('booths')?.trim().toLowerCase() === 'v27_3';
+    const bParam = params.get('booths')?.trim().toLowerCase();
+    const pParam = params.get('plaza')?.trim().toLowerCase();
+    return {
+      isV273Rollback: bParam === 'v27_3',
+      isV274Only: pParam === 'v27_4',
+    };
   }, []);
 
   const welcomeTex = useMemo(() => createWelcomeSignTexture(), []);
@@ -310,6 +438,8 @@ export const GrandExpoPlazaAmenities: React.FC = React.memo(() => {
   const signageLeftTex = useMemo(() => createDigitalSignageTexture('left'), []);
   const signageRightTex = useMemo(() => createDigitalSignageTexture('right'), []);
   const cafeTex = useMemo(() => createCafeSignTexture(), []);
+  const interactiveTotemTex = useMemo(() => createInteractiveTotemTexture(), []);
+  const interactiveWallTex = useMemo(() => createInteractiveWallPanelTexture(), []);
 
   useEffect(() => {
     return () => {
@@ -319,8 +449,19 @@ export const GrandExpoPlazaAmenities: React.FC = React.memo(() => {
       signageLeftTex.dispose();
       signageRightTex.dispose();
       cafeTex.dispose();
+      interactiveTotemTex.dispose();
+      interactiveWallTex.dispose();
     };
-  }, [welcomeTex, directoryTex, checkInTex, signageLeftTex, signageRightTex, cafeTex]);
+  }, [
+    welcomeTex,
+    directoryTex,
+    checkInTex,
+    signageLeftTex,
+    signageRightTex,
+    cafeTex,
+    interactiveTotemTex,
+    interactiveWallTex,
+  ]);
 
   const plazaDir = isV273Rollback ? 'v27_3' : 'v27_4';
   const verSuffix = isV273Rollback ? 'v27_3' : 'v27_4';
@@ -433,6 +574,80 @@ export const GrandExpoPlazaAmenities: React.FC = React.memo(() => {
           </mesh>
         </group>
       ))}
+
+      {/* ====================================================================
+          7. V27.5 — PLAZA LANDSCAPE & SPATIAL ENRICHMENT CLUSTERS
+             (Disabled cleanly on ?booths=v27_3 or ?plaza=v27_4 rollback)
+         ==================================================================== */}
+      {!isV273Rollback && !isV274Only && (
+        <group name="GrandExpoPlazaEnrichment_v27_5">
+          {/* 7A. LEFT LANDSCAPE LOUNGE (North-West Plaza Pocket — Premium Contemporary Lounge) */}
+          <group position={[-16.8, 0, -14.8]} rotation={[0, 0.22, 0]}>
+            <AmenityErrorBoundary>
+              <Suspense fallback={null}>
+                <PlazaGlbAsset url={`${baseUrl}models/plaza/v27_5/landscape_lounge_v27_5.glb`} />
+              </Suspense>
+            </AmenityErrorBoundary>
+          </group>
+
+          {/* 7B. RIGHT INTERACTIVE EXPO CORNER (North-East Plaza Pocket — Information & Experience Zone) */}
+          <group position={[16.8, 0, -14.8]} rotation={[0, -0.22, 0]}>
+            <AmenityErrorBoundary>
+              <Suspense fallback={null}>
+                <PlazaGlbAsset url={`${baseUrl}models/plaza/v27_5/interactive_expo_corner_v27_5.glb`} />
+              </Suspense>
+            </AmenityErrorBoundary>
+            {/* Digital Information Totem Screen (dual-sided, aligned to TotemBody) */}
+            <group position={[-1.65, 1.32, 0.35]} rotation={[0, 0.4189, 0]}>
+              <mesh position={[0, 0, 0.125]}>
+                <planeGeometry args={[0.90, 1.98]} />
+                <meshBasicMaterial map={interactiveTotemTex} toneMapped={false} />
+              </mesh>
+              <mesh position={[0, 0, -0.125]} rotation={[0, Math.PI, 0]}>
+                <planeGeometry args={[0.90, 1.98]} />
+                <meshBasicMaterial map={interactiveTotemTex} toneMapped={false} />
+              </mesh>
+            </group>
+            {/* Wide Exhibition Information Wall Panel (aligned to InfoFrame) */}
+            <mesh position={[0.55, 1.36, -0.945]}>
+              <planeGeometry args={[2.44, 1.46]} />
+              <meshBasicMaterial map={interactiveWallTex} toneMapped={false} />
+            </mesh>
+          </group>
+
+          {/* 7C. MID-BOOTH GARDEN BENCH & PLANTER OASES (West & East Buffer Gaps — clear of Focus cameras!) */}
+          <group position={[-13.4, 0, -0.2]} rotation={[0, 0, 0]}>
+            <AmenityErrorBoundary>
+              <Suspense fallback={null}>
+                <PlazaGlbAsset url={`${baseUrl}models/plaza/v27_5/plaza_oasis_v27_5.glb`} />
+              </Suspense>
+            </AmenityErrorBoundary>
+          </group>
+          <group position={[13.4, 0, -0.2]} rotation={[0, Math.PI, 0]}>
+            <AmenityErrorBoundary>
+              <Suspense fallback={null}>
+                <PlazaGlbAsset url={`${baseUrl}models/plaza/v27_5/plaza_oasis_v27_5.glb`} />
+              </Suspense>
+            </AmenityErrorBoundary>
+          </group>
+
+          {/* 7D. SOUTH CONCOURSE PLANTER & BOLLARD ISLANDS (South-West & South-East Entry Flanks) */}
+          <group position={[-9.4, 0, 11.6]} rotation={[0, 0, 0]}>
+            <AmenityErrorBoundary>
+              <Suspense fallback={null}>
+                <PlazaGlbAsset url={`${baseUrl}models/plaza/v27_5/avenue_planter_island_v27_5.glb`} />
+              </Suspense>
+            </AmenityErrorBoundary>
+          </group>
+          <group position={[9.4, 0, 11.6]} rotation={[0, Math.PI, 0]}>
+            <AmenityErrorBoundary>
+              <Suspense fallback={null}>
+                <PlazaGlbAsset url={`${baseUrl}models/plaza/v27_5/avenue_planter_island_v27_5.glb`} />
+              </Suspense>
+            </AmenityErrorBoundary>
+          </group>
+        </group>
+      )}
     </group>
   );
 });

@@ -1,0 +1,483 @@
+/* ============================================================================
+ * GRAND EXPO WORLD V28 — PREMIUM SAAS ADMIN DASHBOARD (Taste Skill 2.5.1)
+ * Scoped strictly to `.v28-admin-shell` — ZERO impact on V27.5 Admin or World.
+ * Principles: 92% neutral surfaces, single ocean-blue accent (zero violet),
+ * 1px hairlines, 4/8/12/16/24/32 spacing scale, tabular-nums, quiet hover/focus.
+ * ============================================================================ */
+
+.v28-admin-shell {
+  --v28-bg: #f6f7f9;
+  --v28-surface: #ffffff;
+  --v28-surface-alt: #f8fafc;
+  --v28-ink: #111827;
+  --v28-muted: #526071;
+  --v28-hairline: rgba(17, 24, 39, 0.1);
+  --v28-accent: #0284c7;
+  --v28-accent-hover: #0369a1;
+  --v28-accent-soft: #e0f2fe;
+  --v28-success: #059669;
+  --v28-success-soft: #ecfdf5;
+  --v28-danger: #dc2626;
+  --v28-danger-soft: #fef2f2;
+  --v28-r-sm: 8px;
+  --v28-r-md: 12px;
+  --v28-r-lg: 14px;
+
+  min-height: 100vh;
+  background: var(--v28-bg);
+  color: var(--v28-ink);
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  display: grid;
+  grid-template-columns: 256px minmax(0, 1fr);
+}
+
+.v28-admin-shell * {
+  box-sizing: border-box;
+}
+
+.v28-admin-shell :focus-visible {
+  outline: 2px solid var(--v28-accent);
+  outline-offset: 2px;
+}
+
+/* Left SaaS Sidebar */
+.v28-sidebar {
+  background: var(--v28-surface);
+  border-right: 1px solid var(--v28-hairline);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 20px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.v28-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 16px;
+  border-bottom: 1px solid var(--v28-hairline);
+}
+
+.v28-brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--v28-r-sm);
+  background: var(--v28-ink);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+}
+
+.v28-brand-title {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--v28-ink);
+  line-height: 1.2;
+}
+
+.v28-brand-sub {
+  font-size: 12px;
+  color: var(--v28-muted);
+  margin-top: 2px;
+}
+
+.v28-nav-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--v28-muted);
+  padding: 12px 10px 6px;
+}
+
+.v28-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.v28-nav-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--v28-r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--v28-ink);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.v28-nav-item:hover {
+  background: var(--v28-surface-alt);
+  transform: translateY(-1px);
+}
+
+.v28-nav-item:active {
+  transform: translateY(0);
+}
+
+.v28-nav-item--active {
+  background: var(--v28-accent-soft);
+  color: var(--v28-accent-hover);
+  border-color: rgba(2, 132, 199, 0.22);
+}
+
+.v28-sidebar-footer {
+  border-top: 1px solid var(--v28-hairline);
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Main Workspace Column */
+.v28-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.v28-topbar {
+  background: var(--v28-surface);
+  border-bottom: 1px solid var(--v28-hairline);
+  padding: 14px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.v28-topbar-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--v28-ink);
+}
+
+.v28-topbar-meta {
+  font-size: 13px;
+  color: var(--v28-muted);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.v28-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  background: var(--v28-success-soft);
+  color: var(--v28-success);
+  border: 1px solid rgba(5, 150, 105, 0.25);
+}
+
+.v28-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: var(--v28-r-sm);
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.v28-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.v28-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.v28-btn--primary {
+  background: var(--v28-accent);
+  color: #ffffff;
+}
+
+.v28-btn--primary:hover:not(:disabled) {
+  background: var(--v28-accent-hover);
+}
+
+.v28-btn--secondary {
+  background: var(--v28-surface);
+  color: var(--v28-ink);
+  border-color: var(--v28-hairline);
+}
+
+.v28-btn--secondary:hover:not(:disabled) {
+  background: var(--v28-surface-alt);
+}
+
+.v28-btn--danger {
+  background: var(--v28-danger-soft);
+  color: var(--v28-danger);
+  border-color: rgba(220, 38, 38, 0.25);
+}
+
+.v28-content {
+  padding: 24px 28px 40px;
+  max-width: 1440px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.v28-mobile-menu-btn {
+  display: none;
+}
+
+/* Focused Workspace Cards, KPIs, Wizard & 2D Preview Split */
+.v28-card {
+  background: var(--v28-surface);
+  border: 1px solid var(--v28-hairline);
+  border-radius: var(--v28-r-lg);
+  padding: 20px;
+}
+
+.v28-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.v28-kpi-card {
+  background: var(--v28-surface);
+  border: 1px solid var(--v28-hairline);
+  border-radius: var(--v28-r-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.v28-kpi-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--v28-muted);
+}
+
+.v28-kpi-value {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--v28-ink);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.v28-kpi-sub {
+  font-size: 12px;
+  color: var(--v28-muted);
+}
+
+.v28-preview-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.v28-advanced-details {
+  border: 1px solid var(--v28-hairline);
+  border-radius: var(--v28-r-sm);
+  padding: 10px 12px;
+  background: var(--v28-surface-alt);
+  font-size: 12.5px;
+  color: var(--v28-muted);
+}
+
+.v28-advanced-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--v28-ink);
+}
+
+/* Inline Overview Workspace: Zone -> Booth Cards + Right-Side 6-Slot Inspector */
+.v28-overview-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.v28-overview-workspace--with-inspector {
+  grid-template-columns: minmax(0, 1fr) 400px;
+}
+
+.v28-booth-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 8px;
+}
+
+.v28-booth-card {
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: var(--v28-r-sm);
+  border: 1px solid var(--v28-hairline);
+  background: var(--v28-surface);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.v28-booth-card:hover {
+  border-color: rgba(2, 132, 199, 0.45);
+  transform: translateY(-1px);
+}
+
+.v28-booth-card--active {
+  border: 2px solid var(--v28-accent);
+  background: #f0f9ff;
+}
+
+.v28-booth-card--empty {
+  border-left: 3px solid var(--v28-danger);
+}
+
+.v28-inspector {
+  background: var(--v28-surface);
+  border: 1px solid var(--v28-hairline);
+  border-radius: var(--v28-r-lg);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+.v28-inspector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--v28-hairline);
+}
+
+.v28-slot-row {
+  padding: 10px 12px;
+  border-radius: var(--v28-r-sm);
+  border: 1px solid var(--v28-hairline);
+  background: var(--v28-surface-alt);
+}
+
+.v28-slot-row--filled {
+  background: var(--v28-surface);
+}
+
+.v28-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--v28-ink);
+}
+
+.v28-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--v28-r-sm);
+  border: 1px solid rgba(17, 24, 39, 0.16);
+  background: var(--v28-surface);
+  color: var(--v28-ink);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+/* Clean Minimal SaaS overrides for embedded ProductCatalog & CompanyManagement (scoped strictly to V28 Admin) */
+.v28-admin-shell .dashboard-card {
+  background: var(--v28-surface);
+  border: 1px solid var(--v28-hairline);
+  border-radius: var(--v28-r-lg);
+  padding: 18px;
+  color: var(--v28-ink);
+  box-shadow: none;
+}
+
+.v28-admin-shell .dashboard-card input,
+.v28-admin-shell .dashboard-card select,
+.v28-admin-shell .dashboard-card textarea {
+  background: var(--v28-surface);
+  color: var(--v28-ink);
+  border: 1px solid rgba(17, 24, 39, 0.16);
+  border-radius: var(--v28-r-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+/* Responsive Tablet & Mobile */
+@media (max-width: 1080px) {
+  .v28-overview-workspace--with-inspector {
+    grid-template-columns: 1fr;
+  }
+
+  .v28-inspector {
+    position: static;
+    max-height: none;
+  }
+}
+@media (max-width: 960px) {
+  .v28-admin-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .v28-preview-split {
+    grid-template-columns: 1fr;
+  }
+
+  .v28-sidebar {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--v28-hairline);
+    padding: 14px 16px;
+  }
+
+  .v28-sidebar--collapsed .v28-nav-collapse {
+    display: none;
+  }
+
+  .v28-mobile-menu-btn {
+    display: inline-flex;
+  }
+
+  .v28-topbar {
+    padding: 14px 16px;
+  }
+
+  .v28-content {
+    padding: 16px 14px 32px;
+  }
+}

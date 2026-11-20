@@ -6,9 +6,13 @@ import express, { type Express } from 'express';
 import cors from 'cors';
 import type { Server } from 'socket.io';
 import { ExpoDatabase } from './database/db.js';
+import { V28CatalogDatabase } from './database/v28Database.js';
 import { ExpoService } from './services/expoService.js';
 import { ExpoController, type DataMutationCallback } from './controllers/expoController.js';
 import { createApiRoutes } from './routes/apiRoutes.js';
+import { createV28ApiRoutes } from './routes/v28Routes.js';
+import { V28ExhibitionService } from './services/v28/exhibitionService.js';
+import { V28SpatialAoiEngine } from './realtime/v28/spatialAoiEngine.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 import type { ServerToClientEvents, ClientToServerEvents } from './schemas/expoSchemas.js';
 
@@ -39,24 +43,63 @@ export function buildCorsOriginChecker(rawCors: string = '*'): CorsOriginConfig 
       return;
     }
     const normalized = origin.replace(/\/+$/, '');
+    const isProd = process.env.NODE_ENV === 'production';
+    const hasExplicitAllowlist = allowedList.length > 0 && !allowedList.includes('*');
+    // V28-AUDIT-035B: Enforce strict CORS allowlist in production; no wildcard *.vercel.app bypass
     const isAllowed =
       allowedList.includes('*') ||
       allowedList.includes(normalized) ||
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized) ||
-      /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(normalized);
+      (!isProd && !hasExplicitAllowlist && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized)) ||
+      /^https?:\/\/([a-z0-9-]+\.)*mbws\.vn$/i.test(normalized);
 
     callback(null, isAllowed);
   };
 }
 
+export function resolveTrustProxyConfig(raw?: string): boolean | number | string {
+  const val = (raw ?? process.env.TRUST_PROXY ?? '').trim().toLowerCase();
+  if (!val || val === 'false' || val === '0' || val === 'off') return false;
+  if (val === 'loopback' || val === 'linklocal' || val === 'uniquelocal') return val;
+  if (/^\d+$/.test(val)) {
+    const hops = Number(val);
+    if (Number.isInteger(hops) && hops >= 1 && hops <= 5) return hops;
+  }
+  // Fail closed: never allow unvalidated 'true' or arbitrary strings
+  return false;
+}
+
 export function createApp(
   db: ExpoDatabase,
   corsOrigin: CorsOriginConfig = '*',
-  onMutation?: DataMutationCallback
+  onMutation?: DataMutationCallback,
+  v28Db?: V28CatalogDatabase
 ): Express {
   const app = express();
-  app.use(cors({ origin: corsOrigin }));
-  app.use(express.json({ limit: '1mb' }));
+  // Phase 3 Hardening: Explicit env-validated trust proxy (defaults safely to false; never hardcoded true)
+  app.set('trust proxy', resolveTrustProxyConfig());
+  app.use(
+    cors({
+      origin: corsOrigin,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      exposedHeaders: [
+        'X-TTS-Cache',
+        'X-TTS-Provider',
+        'X-TTS-Voice',
+        'X-TTS-Chunk-Index',
+        'X-TTS-Total-Chunks',
+      ],
+    })
+  );
+  // Phase 5 Hardening: Skip global 1mb JSON parser ONLY for the Excel base64 upload endpoint so valid <=5MB Excel (~7MB base64) is not rejected before v28Routes
+  const globalJsonParser = express.json({ limit: '1mb' });
+  app.use((req, res, next) => {
+    if (req.path === '/api/v28/imports/excel/preview') {
+      next();
+      return;
+    }
+    globalJsonParser(req, res, next);
+  });
 
   const service = new ExpoService(db);
   app.locals.expoService = service;
@@ -71,6 +114,19 @@ export function createApp(
     }
   });
   app.use('/api', createApiRoutes(controller));
+
+  if (v28Db) {
+    app.locals.v28Db = v28Db;
+    const v28ExhibitionService = new V28ExhibitionService(v28Db);
+    app.locals.v28ExhibitionService = v28ExhibitionService;
+    app.use(
+      '/api/v28',
+      createV28ApiRoutes(v28Db, undefined, v28ExhibitionService, (publishedVersion) => {
+        const aoi = app.locals.v28SpatialAoi as V28SpatialAoiEngine | undefined;
+        aoi?.onLayoutPublished(publishedVersion);
+      })
+    );
+  }
 
   return app;
 }
@@ -88,28 +144,63 @@ if (isMain) {
       ? rawDbPath
       : path.resolve(BE_ROOT_DIR, rawDbPath);
 
+  const rawV28DbPath = process.env.V28_SQLITE_DB_PATH || './data/expo_v28_dev.db';
+  const v28DbPath =
+    rawV28DbPath === ':memory:' || path.isAbsolute(rawV28DbPath)
+      ? rawV28DbPath
+      : path.resolve(BE_ROOT_DIR, rawV28DbPath);
+
   const db = new ExpoDatabase(dbPath);
-  const app = createApp(db, CORS_ORIGIN);
+  const v28Db = new V28CatalogDatabase(v28DbPath);
+  const app = createApp(db, CORS_ORIGIN, undefined, v28Db);
   const httpServer = http.createServer(app);
+  // Phase 4.2 Hardening: Configurable HTTP timeouts compatible with Nginx/Plesk reverse proxy & long imports
+  httpServer.keepAliveTimeout = Math.max(5000, Number(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 65000));
+  httpServer.headersTimeout = Math.max(
+    httpServer.keepAliveTimeout + 1000,
+    Number(process.env.HTTP_HEADERS_TIMEOUT_MS || 66000)
+  );
+  httpServer.requestTimeout = Math.max(10000, Number(process.env.HTTP_REQUEST_TIMEOUT_MS || 60000));
 
   const io = attachSocketServer(httpServer, db, CORS_ORIGIN);
   app.set('io', io);
 
+  const v28ExhService = app.locals.v28ExhibitionService as V28ExhibitionService | undefined;
+  const v28SpatialAoi = v28ExhService
+    ? new V28SpatialAoiEngine(io, v28ExhService.getActiveExhibitionWorld())
+    : undefined;
+  if (v28SpatialAoi) {
+    app.locals.v28SpatialAoi = v28SpatialAoi;
+  }
+
   httpServer.listen(PORT, () => {
     console.log(`[Virtual Expo BE] Running on http://localhost:${PORT}`);
+    console.log(`[Virtual Expo BE] Legacy V27.5 DB: ${dbPath}`);
+    console.log(`[Virtual Expo BE] Isolated V28 DB: ${v28DbPath}`);
     const svc = app.locals.expoService as ExpoService | undefined;
     svc?.prewarmTtsWorker();
   });
 
   const gracefulShutdown = () => {
     const svc = app.locals.expoService as ExpoService | undefined;
+    // V28-AUDIT-033B: Close Socket.IO & force-exit fallback so active WebSockets never hang shutdown
+    const forceTimer = setTimeout(() => process.exit(0), 3000);
+    forceTimer.unref?.();
     void (svc ? svc.shutdown() : Promise.resolve()).finally(() => {
+      try {
+        v28SpatialAoi?.dispose();
+        io.close();
+      } catch {
+        // ignore
+      }
       httpServer.close(() => {
         try {
           db.close();
+          v28Db.close();
         } catch {
           // ignore
         }
+        clearTimeout(forceTimer);
         process.exit(0);
       });
     });
