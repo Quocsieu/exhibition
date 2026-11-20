@@ -36,7 +36,7 @@ describe('V28 PHASE 2 — Dynamic Layout Generator, Exhibition Versioning, Resiz
       const validation = validateExhibitionLayout(layout);
 
       expect(layout.placements.length, `count=${count}`).toBe(count);
-      expect(layout.clusters.length, `clusters for count=${count}`).toBe(Math.ceil(count / 6));
+      expect(layout.clusters.length, `u-zones for count=${count}`).toBe(layout.zones.length);
       expect(layout.zones.length, `zones for count=${count}`).toBeGreaterThanOrEqual(1);
       expect(validation.valid, `validation errors for count=${count}: ${validation.errors.join('; ')}`).toBe(true);
       expect(validation.stats.overlapCount, `overlaps count=${count}`).toBe(0);

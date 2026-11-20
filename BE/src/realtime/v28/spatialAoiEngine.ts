@@ -415,6 +415,23 @@ export class V28SpatialAoiEngine {
         this.sendSnapshotToSocket(socket, v);
       });
 
+      // Visitor rename / color profile customization (exact parity with V27.5)
+      socket.on('v28:profile', (payload: unknown) => {
+        const v = this.visitorsBySocket.get(socket.id);
+        if (!v || !payload || typeof payload !== 'object') return;
+        const data = payload as Record<string, unknown>;
+        if (typeof data.name === 'string' && data.name.trim()) {
+          v.name = data.name.trim().slice(0, 32);
+          v.lastSeq++;
+          v.dirty = true;
+        }
+        if (typeof data.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(data.color)) {
+          v.color = data.color;
+          v.lastSeq++;
+          v.dirty = true;
+        }
+      });
+
       // Client confirms new layout version
       socket.on('v28:version_ack', (payload: unknown) => {
         const v = this.visitorsBySocket.get(socket.id);

@@ -17,6 +17,9 @@ export interface DynamicWorldHudProps {
   focusedBooth: V28BoothPlacementView | null;
   selectedProduct: { booth: V28BoothPlacementView; product: V28Product; slotId: string } | null;
   npcPanelOpen: boolean;
+  playerName?: string;
+  playerColor?: string;
+  onUpdateVisitorProfile?: (name: string, color: string) => void;
   onlineCount?: number;
   overflowVisitorCount?: number;
   onChangeCameraMode: (mode: V28CameraMode) => void;
@@ -40,6 +43,9 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   focusedBooth,
   selectedProduct,
   npcPanelOpen,
+  playerName = 'Khách V28',
+  playerColor = '#0ea5e9',
+  onUpdateVisitorProfile,
   onlineCount = 1,
   overflowVisitorCount = 0,
   onChangeCameraMode,
@@ -57,6 +63,9 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   const [selectedZoneCode, setSelectedZoneCode] = useState<string>('ALL');
   const [directoryOpen, setDirectoryOpen] = useState<boolean>(false);
   const [joystickEnabled, setJoystickEnabled] = useState<boolean>(false);
+  const [editingProfile, setEditingProfile] = useState<boolean>(false);
+  const [draftName, setDraftName] = useState<string>(playerName);
+  const [draftColor, setDraftColor] = useState<string>(playerColor);
   const joyOriginRef = useRef<{ x: number; y: number } | null>(null);
   const [joyKnob, setJoyKnob] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -232,6 +241,76 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
                 🕹️ Joystick
               </button>
             )}
+            {/* V27.5 Visitor Rename & Color Customization Pill */}
+            {editingProfile ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  onUpdateVisitorProfile?.(draftName, draftColor);
+                  setEditingProfile(false);
+                }}
+                style={{ display: 'flex', gap: 4, alignItems: 'center' }}
+              >
+                <input
+                  name="visitorName"
+                  value={draftName}
+                  onChange={(e) => setDraftName(e.target.value)}
+                  maxLength={32}
+                  autoFocus
+                  style={{
+                    width: 120,
+                    minHeight: 36,
+                    padding: '4px 8px',
+                    borderRadius: 8,
+                    border: '1px solid #38bdf8',
+                    background: '#0f172a',
+                    color: '#fff',
+                    fontSize: 12,
+                  }}
+                />
+                <input
+                  type="color"
+                  value={draftColor}
+                  onChange={(e) => setDraftColor(e.target.value)}
+                  style={{ width: 28, height: 32, border: 'none', background: 'transparent', cursor: 'pointer' }}
+                />
+                <button
+                  type="submit"
+                  style={{ minHeight: 36, padding: '0 10px', borderRadius: 8, border: 'none', background: '#10b981', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}
+                >
+                  Lưu
+                </button>
+              </form>
+            ) : (
+              <button
+                type="button"
+                title="Đổi tên & màu nhân vật"
+                onClick={() => {
+                  setDraftName(playerName);
+                  setDraftColor(playerColor);
+                  setEditingProfile(true);
+                }}
+                style={{
+                  minHeight: 44,
+                  padding: '0 12px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  background: 'rgba(255,255,255,0.1)',
+                  color: '#fff',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <span style={{ width: 10, height: 10, borderRadius: '50%', background: playerColor, display: 'inline-block' }} />
+                <span>{playerName}</span>
+                <span>✏️</span>
+              </button>
+            )}
+
             {!isMobilePortrait && (
               <button
                 type="button"

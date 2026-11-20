@@ -1,11 +1,14 @@
 /**
- * GRAND EXPO WORLD V28 — PHASE 8 DYNAMIC SIX-BOOTH CLUSTER LAYOUT GENERATOR
+ * GRAND EXPO WORLD V28 — PHASE 8 MULTIPLE U-SHAPED CATEGORY ZONES LAYOUT GENERATOR
  *
- * Uses V27.5's iconic U-Shaped 6-Booth Courtyard as the modular spatial unit:
- *   - Max 6 booths per cluster, all facing INWARD toward a spacious 25m+ cluster plaza.
- *   - Uses real measured bounding-box footprints of the 6 V27.4 GLB archetypes.
- *   - Supports Category-Based Zones (`Khu + Category Name`), deterministic cluster centerpiece
- *     variations, zero fake booths for partial clusters, 0 overlaps, and 100% BFS walkway connectivity.
+ * Implements the user's sketch-aligned multi-U exhibition architecture:
+ * - Each Category Zone is ONE variable-size U-shaped zone (booths along 3 sides, 4th side OPEN).
+ * - ALL booths face INWARD into their U-zone's spacious interior courtyard.
+ * - Multiple U-zones are arranged in facing rows (North row opening South, South row opening North)
+ *   along a wide Grand Central Boulevard, with generous walkways between every U-zone.
+ * - Supports arbitrary booth counts (1..200+) and uneven category allocations (e.g. 25 / 20 / 20 / 15 / 20).
+ * - Uses real measured GLB footprints of the 6 V27.4 archetypes; guarantees 0 overlap, 0 focus clip,
+ *   and 100% BFS walkway connectivity from Spawn to every booth.
  */
 
 export type V28ArchetypeId =
@@ -118,6 +121,10 @@ export type ClusterCenterpieceKind =
   | 'interactive_corner'
   | 'cafe_rest';
 
+/**
+ * Represents one U-shaped Zone courtyard (variable size based on its allocated boothCount).
+ * Retains the `GeneratedClusterSpec` interface name for full backward compatibility with FE/API.
+ */
 export interface GeneratedClusterSpec {
   clusterId: string;
   clusterIndex: number;
@@ -129,6 +136,10 @@ export interface GeneratedClusterSpec {
   width: number;
   depth: number;
   boothCount: number;
+  openingDirection: 'south' | 'north';
+  backCount: number;
+  leftCount: number;
+  rightCount: number;
   variationSeed: number;
   centerpieceKind: ClusterCenterpieceKind;
 }
@@ -142,6 +153,7 @@ export interface GeneratedZoneSpec {
   sortOrder: number;
   boothCount: number;
   clusterCount: number;
+  openingDirection: 'south' | 'north';
 }
 
 export interface GeneratedBoothPlacement {
@@ -226,31 +238,19 @@ export interface LayoutValidationResult {
 }
 
 // ============================================================================
-// V27.5 SIX-BOOTH U-SHAPED COURTYARD CLUSTER TEMPLATE (Local Coordinates)
-// Derived directly from FE/src/scene/worldLayout.ts V27_BOOTH_LAYOUT_SPECS
+// VARIABLE-SIZE U-SHAPED ZONE CONSTANTS (Spacious, Zero-Overlap, V27.5 Heritage)
 // ============================================================================
-export const MAX_BOOTHS_PER_CLUSTER = 6;
-export const CLUSTER_WIDTH = 44.0;
-export const CLUSTER_DEPTH = 38.0;
-export const CLUSTER_GAP_X = 8.0;
-export const CLUSTER_GAP_Z = 9.0;
+export const MAX_BOOTHS_PER_CLUSTER = 6; // legacy export kept for compatibility
+export const BOOTH_PITCH_M = 12.2; // accommodates 9.4m widest archetype + 2.8m clear gap
+export const BOOTH_EDGE_INSET_M = 4.6; // center offset from outer U wall to booth center
+export const CORNER_CLEARANCE_M = 10.8; // generous clearance between back-row & side-wing booths
+export const MIN_U_INTERIOR_WIDTH_M = 25.0; // spacious >= 25m interior courtyard matching V27.5
+export const ZONE_GAP_X_M = 14.0; // wide walkway between adjacent U-zones
+export const GRAND_BOULEVARD_WIDTH_M = 18.0; // grand horizontal central avenue between facing U rows
+export const ENTRY_SPINE_WIDTH_M = 14.0; // clear North-South entrance boulevard from Spawn
 export const WELCOME_AREA_DEPTH = 18.0;
 export const APPROACH_OFFSET_M = 2.4;
 export const FOCUS_CAMERA_OFFSET_M = 4.4;
-
-const V27_CLUSTER_SLOTS: ReadonlyArray<{
-  localX: number;
-  localZ: number;
-  rotationY: number;
-  defaultArchetype: V28ArchetypeId;
-}> = [
-  { localX: -7.2, localZ: -13.6, rotationY: 0, defaultArchetype: 'signature_ring' },
-  { localX: 7.2, localZ: -13.6, rotationY: 0, defaultArchetype: 'organic_flow' },
-  { localX: -16.0, localZ: -4.2, rotationY: Number((Math.PI / 2).toFixed(4)), defaultArchetype: 'grand_portal' },
-  { localX: 16.0, localZ: -4.2, rotationY: Number((-Math.PI / 2).toFixed(4)), defaultArchetype: 'wave_pavilion' },
-  { localX: -16.0, localZ: 7.2, rotationY: Number((Math.PI / 2).toFixed(4)), defaultArchetype: 'gallery_arch' },
-  { localX: 16.0, localZ: 7.2, rotationY: Number((-Math.PI / 2).toFixed(4)), defaultArchetype: 'dynamic_frame' },
-];
 
 const CENTERPIECE_VARIANTS: readonly ClusterCenterpieceKind[] = [
   'medallion_oasis',
@@ -271,6 +271,53 @@ function zoneCodeForIndex(index: number): string {
     n = Math.floor(n / 26) - 1;
   } while (n >= 0);
   return code;
+}
+
+/**
+ * Partition `count` booths cleanly along the 3 sides of a U-shaped zone:
+ * - Back wall (bottom of the U)
+ * - Left wing
+ * - Right wing
+ * Example: 6 -> (2, 2, 2) [exact V27.5 U!]; 15 -> (5, 5, 5); 20 -> (6, 7, 7); 25 -> (7, 9, 9).
+ */
+export function computeUZoneSideCounts(count: number): {
+  backCount: number;
+  leftCount: number;
+  rightCount: number;
+} {
+  if (count <= 0) return { backCount: 0, leftCount: 0, rightCount: 0 };
+  if (count <= 3) return { backCount: count, leftCount: 0, rightCount: 0 };
+  if (count === 4) return { backCount: 2, leftCount: 1, rightCount: 1 };
+  if (count === 5) return { backCount: 2, leftCount: 2, rightCount: 1 };
+  if (count === 6) return { backCount: 2, leftCount: 2, rightCount: 2 };
+
+  const backCount = Math.max(2, Math.round(count * 0.3));
+  const rem = count - backCount;
+  const leftCount = Math.ceil(rem / 2);
+  const rightCount = rem - leftCount;
+  return { backCount, leftCount, rightCount };
+}
+
+function computeUZoneDimensions(count: number): {
+  width: number;
+  depth: number;
+  backCount: number;
+  leftCount: number;
+  rightCount: number;
+} {
+  const { backCount, leftCount, rightCount } = computeUZoneSideCounts(count);
+  const sideMax = Math.max(leftCount, rightCount);
+
+  // Back wall needs enough width so back booths don't collide with left/right wings at corners
+  const backSpan = backCount > 0 ? backCount * BOOTH_PITCH_M : 0;
+  const interiorWidth = Math.max(MIN_U_INTERIOR_WIDTH_M, backSpan + 6.0);
+  const width = round2(interiorWidth + BOOTH_EDGE_INSET_M * 2 + 4.0);
+
+  // Depth covers back wall + corner clearance + wing booths + open front apron
+  const wingSpan = sideMax > 0 ? sideMax * BOOTH_PITCH_M : 0;
+  const depth = round2(Math.max(36.0, CORNER_CLEARANCE_M + wingSpan + 8.0));
+
+  return { width, depth, backCount, leftCount, rightCount };
 }
 
 export function getBoothWorldAabb(
@@ -341,110 +388,163 @@ function segmentIntersectsRect(
 }
 
 /**
- * Build deterministic Six-Booth U-Shaped Courtyard Cluster Layout.
- * - 1..6 booths -> 1 central courtyard cluster (matching V27.5 spirit!)
- * - 7..200 booths -> symmetrical West & East wing clusters flanking Central Main Avenue.
- * - Supports Category-Based Zones (`Khu + Category Name`) or fallback balanced zones.
+ * Generate a multi-U exhibition world where EACH Category Zone is ONE variable-size U-shaped zone.
  */
 export function generateDynamicExhibitionLayout(
   input: LayoutGeneratorInput
 ): GeneratedExhibitionLayout {
   const targetBoothCount = Math.max(1, Math.min(500, Math.floor(input.targetBoothCount)));
-  const preferredZoneCapacity = Math.max(4, Math.min(50, Math.floor(input.preferredZoneCapacity ?? 12)));
+  const preferredZoneCapacity = Math.max(4, Math.min(50, Math.floor(input.preferredZoneCapacity ?? 20)));
   const hallStyle = input.hallStyle ?? 'grand_expo';
-  const mainAvenueWidth = Math.max(10.0, input.mainAvenueWidth ?? 12.0);
-  const aisleWidth = Math.max(8.0, input.aisleWidth ?? 8.4);
-  const perimeterWidth = Math.max(6.0, input.perimeterWidth ?? 7.0);
+  const mainAvenueWidth = Math.max(12.0, input.mainAvenueWidth ?? ENTRY_SPINE_WIDTH_M);
+  const aisleWidth = Math.max(8.0, input.aisleWidth ?? 10.0);
+  const perimeterWidth = Math.max(7.0, input.perimeterWidth ?? 8.0);
   const layoutSeed = input.layoutSeed ?? 28;
   const reservedAreas = input.reservedAreas ?? [];
   const categoryZones = input.categoryZones ?? [];
 
-  // 1. Partition total booths into Cluster Specs (max 6 booths per cluster, zero fake booths!)
-  interface PendingCluster {
-    zoneCode: string;
-    zoneName: string;
+  // 1. Build pending U-Zones list (1 U-Zone per Category!)
+  interface PendingUZone {
+    code: string;
     categoryId: string | null;
+    displayName: string;
     categoryTag: string;
     boothCount: number;
+    dims: ReturnType<typeof computeUZoneDimensions>;
   }
-  const pendingClusters: PendingCluster[] = [];
+  const pendingZones: PendingUZone[] = [];
 
   if (categoryZones.length > 0) {
     let zIdx = 0;
-    let remainingGlobal = targetBoothCount;
+    let remaining = targetBoothCount;
     for (const cz of categoryZones) {
-      if (remainingGlobal <= 0) break;
-      const countForCat = Math.min(remainingGlobal, Math.max(0, Math.floor(cz.boothCount)));
-      if (countForCat <= 0) continue;
-      remainingGlobal -= countForCat;
+      if (remaining <= 0) break;
+      const take = Math.min(remaining, Math.max(0, Math.floor(cz.boothCount)));
+      if (take <= 0) continue;
+      remaining -= take;
       const code = zoneCodeForIndex(zIdx++);
       const displayName = cz.categoryName.startsWith('Khu ') ? cz.categoryName : `Khu ${cz.categoryName}`;
-      let rem = countForCat;
-      while (rem > 0) {
-        const take = Math.min(MAX_BOOTHS_PER_CLUSTER, rem);
-        pendingClusters.push({
-          zoneCode: code,
-          zoneName: displayName,
-          categoryId: cz.categoryId,
-          categoryTag: cz.categoryName,
-          boothCount: take,
-        });
-        rem -= take;
-      }
+      pendingZones.push({
+        code,
+        categoryId: cz.categoryId,
+        displayName,
+        categoryTag: cz.categoryName,
+        boothCount: take,
+        dims: computeUZoneDimensions(take),
+      });
     }
-    // If sum(categoryZones) < targetBoothCount, add remaining in a General zone
-    if (remainingGlobal > 0) {
+    if (remaining > 0) {
       const code = zoneCodeForIndex(zIdx++);
-      while (remainingGlobal > 0) {
-        const take = Math.min(MAX_BOOTHS_PER_CLUSTER, remainingGlobal);
-        pendingClusters.push({
-          zoneCode: code,
-          zoneName: 'Khu Tổng hợp',
-          categoryId: null,
-          categoryTag: 'Tổng hợp',
-          boothCount: take,
-        });
-        remainingGlobal -= take;
-      }
+      pendingZones.push({
+        code,
+        categoryId: null,
+        displayName: 'Khu Tổng hợp',
+        categoryTag: 'Tổng hợp',
+        boothCount: remaining,
+        dims: computeUZoneDimensions(remaining),
+      });
     }
   } else {
-    const totalClusters = Math.ceil(targetBoothCount / MAX_BOOTHS_PER_CLUSTER);
-    const clustersPerZone = Math.max(1, Math.ceil(preferredZoneCapacity / MAX_BOOTHS_PER_CLUSTER));
-    let remaining = targetBoothCount;
-    for (let c = 0; c < totalClusters; c++) {
-      const take = Math.min(MAX_BOOTHS_PER_CLUSTER, remaining);
-      remaining -= take;
-      const zIdx = Math.floor(c / clustersPerZone);
-      const code = zoneCodeForIndex(zIdx);
-      pendingClusters.push({
-        zoneCode: code,
-        zoneName: `Khu ${code}`,
+    // Auto-partition into balanced U-zones when no explicit category breakdown is provided
+    const zoneCount = targetBoothCount <= 6 ? 1 : Math.max(2, Math.ceil(targetBoothCount / preferredZoneCapacity));
+    const base = Math.floor(targetBoothCount / zoneCount);
+    let rem = targetBoothCount % zoneCount;
+    for (let z = 0; z < zoneCount; z++) {
+      const take = base + (rem > 0 ? 1 : 0);
+      if (rem > 0) rem--;
+      const code = zoneCodeForIndex(z);
+      pendingZones.push({
+        code,
         categoryId: null,
+        displayName: `Khu ${code}`,
         categoryTag: `Phân khu ${code}`,
         boothCount: take,
+        dims: computeUZoneDimensions(take),
       });
     }
   }
 
-  const numClusters = pendingClusters.length;
-  const singleCentered = numClusters === 1;
+  // 2. Arrange U-Zones into 2 facing rows (North Row opening South, South Row opening North)
+  //    separated by the wide horizontal Grand Boulevard at z = boulevardZ,
+  //    with the South Row split cleanly around x = 0 so the Entrance Spine from Spawn is 100% unobstructed!
+  const numZones = pendingZones.length;
+  const northZones: PendingUZone[] = [];
+  const southZones: PendingUZone[] = [];
 
-  // Grid dimensions for clusters
-  const colsPerWing = singleCentered ? 1 : numClusters <= 4 ? 1 : numClusters <= 16 ? 2 : 3;
-  const clustersPerRow = singleCentered ? 1 : colsPerWing * 2;
-  const numRows = Math.ceil(numClusters / clustersPerRow);
+  if (numZones === 1) {
+    northZones.push(pendingZones[0]);
+  } else {
+    // Give South row an EVEN count (so it splits symmetrically around the x=0 Entry Spine),
+    // and put the remaining zones on the North row!
+    const southCount = Math.max(2, Math.floor(numZones / 2) * 2 === numZones ? numZones / 2 : Math.floor(numZones / 2));
+    const evenSouthCount = southCount % 2 === 0 ? southCount : Math.max(0, southCount - 1);
+    const northCount = numZones - evenSouthCount;
+    for (let i = 0; i < northCount; i++) northZones.push(pendingZones[i]);
+    for (let i = northCount; i < numZones; i++) southZones.push(pendingZones[i]);
+  }
 
-  const pitchX = CLUSTER_WIDTH + CLUSTER_GAP_X;
-  const pitchZ = CLUSTER_DEPTH + CLUSTER_GAP_Z;
+  const northRowMaxDepth = northZones.reduce((m, z) => Math.max(m, z.dims.depth), 0);
+  const southRowMaxDepth = southZones.reduce((m, z) => Math.max(m, z.dims.depth), 0);
 
-  const halfHallWidth = singleCentered
-    ? round2(CLUSTER_WIDTH / 2 + perimeterWidth)
-    : round2(mainAvenueWidth / 2 + colsPerWing * CLUSTER_WIDTH + (colsPerWing - 1) * CLUSTER_GAP_X + CLUSTER_GAP_X / 2 + perimeterWidth);
+  // Compute X centers for North row (centered around x = 0 with ZONE_GAP_X_M between adjacent U-zones)
+  const northTotalWidth =
+    northZones.reduce((s, z) => s + z.dims.width, 0) + Math.max(0, northZones.length - 1) * ZONE_GAP_X_M;
+  const northCentersX: number[] = [];
+  {
+    let curX = -northTotalWidth / 2;
+    for (const z of northZones) {
+      northCentersX.push(round2(curX + z.dims.width / 2));
+      curX += z.dims.width + ZONE_GAP_X_M;
+    }
+  }
+
+  // Compute X centers for South row (split symmetrically West & East of x = 0 Entry Spine!)
+  const halfSouth = southZones.length / 2;
+  const southWestZones = southZones.slice(0, halfSouth);
+  const southEastZones = southZones.slice(halfSouth);
+  const southWestWidth =
+    southWestZones.reduce((s, z) => s + z.dims.width, 0) + Math.max(0, southWestZones.length - 1) * ZONE_GAP_X_M;
+  const southEastWidth =
+    southEastZones.reduce((s, z) => s + z.dims.width, 0) + Math.max(0, southEastZones.length - 1) * ZONE_GAP_X_M;
+  const southCentersX: number[] = [];
+  {
+    // West side going left from -ENTRY_SPINE_WIDTH_M/2
+    let curX = -(mainAvenueWidth / 2 + ZONE_GAP_X_M / 2);
+    const westXs: number[] = [];
+    for (let i = southWestZones.length - 1; i >= 0; i--) {
+      const z = southWestZones[i];
+      westXs.unshift(round2(curX - z.dims.width / 2));
+      curX -= z.dims.width + ZONE_GAP_X_M;
+    }
+    // East side going right from +ENTRY_SPINE_WIDTH_M/2
+    curX = mainAvenueWidth / 2 + ZONE_GAP_X_M / 2;
+    const eastXs: number[] = [];
+    for (const z of southEastZones) {
+      eastXs.push(round2(curX + z.dims.width / 2));
+      curX += z.dims.width + ZONE_GAP_X_M;
+    }
+    southCentersX.push(...westXs, ...eastXs);
+  }
+
+  const maxHalfRowW = Math.max(
+    northTotalWidth / 2,
+    mainAvenueWidth / 2 + ZONE_GAP_X_M / 2 + southWestWidth,
+    mainAvenueWidth / 2 + ZONE_GAP_X_M / 2 + southEastWidth
+  );
+  const halfHallWidth = round2(maxHalfRowW + perimeterWidth);
   const hallWidth = round2(halfHallWidth * 2);
 
-  const clustersTotalDepthZ = round2(numRows * CLUSTER_DEPTH + Math.max(0, numRows - 1) * CLUSTER_GAP_Z);
-  const hallDepth = round2(perimeterWidth + clustersTotalDepthZ + WELCOME_AREA_DEPTH + perimeterWidth);
-  const halfHallDepth = round2(hallDepth / 2);
+  // Compute vertical Z layout:
+  // [Perimeter] [North Row U-Zones] [Grand Boulevard] [South Row U-Zones (if any)] [Welcome Area] [Perimeter]
+  const hasSouthRow = southZones.length > 0;
+  const totalDepth = round2(
+    perimeterWidth +
+      northRowMaxDepth +
+      (hasSouthRow ? GRAND_BOULEVARD_WIDTH_M + southRowMaxDepth : 0) +
+      WELCOME_AREA_DEPTH +
+      perimeterWidth
+  );
+  const halfHallDepth = round2(totalDepth / 2);
 
   const hallBounds: RectBounds = {
     minX: -halfHallWidth,
@@ -452,26 +552,31 @@ export function generateDynamicExhibitionLayout(
     minZ: -halfHallDepth,
     maxZ: halfHallDepth,
   };
-
   const walkableBounds: RectBounds = {
-    minX: round2(hallBounds.minX + 1.4),
-    maxX: round2(hallBounds.maxX - 1.4),
-    minZ: round2(hallBounds.minZ + 1.4),
-    maxZ: round2(hallBounds.maxZ - 1.4),
+    minX: round2(hallBounds.minX + 1.5),
+    maxX: round2(hallBounds.maxX - 1.5),
+    minZ: round2(hallBounds.minZ + 1.5),
+    maxZ: round2(hallBounds.maxZ - 1.5),
   };
 
-  // In single-cluster mode (1..6 booths), Central Avenue runs from South Welcome into the courtyard center
-  const centralAvenueBounds: RectBounds = singleCentered
-    ? { minX: -5.1, maxX: 5.1, minZ: -8.0, maxZ: hallBounds.maxZ }
-    : { minX: round2(-mainAvenueWidth / 2), maxX: round2(mainAvenueWidth / 2), minZ: hallBounds.minZ, maxZ: hallBounds.maxZ };
+  const northRowTopZ = round2(hallBounds.minZ + perimeterWidth);
+  const northRowBottomZ = round2(northRowTopZ + northRowMaxDepth);
+  const boulevardCenterZ = round2(northRowBottomZ + (hasSouthRow ? GRAND_BOULEVARD_WIDTH_M / 2 : 5.0));
+  const southRowTopZ = round2(northRowBottomZ + GRAND_BOULEVARD_WIDTH_M);
+  const zonesEndZ = round2(hasSouthRow ? southRowTopZ + southRowMaxDepth : northRowBottomZ);
 
-  const firstRowTopZ = round2(hallBounds.minZ + perimeterWidth);
-  const clustersEndZ = round2(firstRowTopZ + clustersTotalDepthZ);
+  // Central Entry Spine (South Welcome -> Grand Boulevard)
+  const centralAvenueBounds: RectBounds = {
+    minX: round2(-mainAvenueWidth / 2),
+    maxX: round2(mainAvenueWidth / 2),
+    minZ: hasSouthRow ? boulevardCenterZ - GRAND_BOULEVARD_WIDTH_M / 2 : northRowBottomZ,
+    maxZ: hallBounds.maxZ,
+  };
 
   const welcomeAreaBounds: RectBounds = {
     minX: round2(hallBounds.minX + perimeterWidth),
     maxX: round2(hallBounds.maxX - perimeterWidth),
-    minZ: clustersEndZ,
+    minZ: zonesEndZ,
     maxZ: round2(hallBounds.maxZ - perimeterWidth),
   };
 
@@ -480,178 +585,152 @@ export function generateDynamicExhibitionLayout(
     z: round2(hallBounds.maxZ - perimeterWidth - 4.0),
     rotationY: Math.PI,
   };
-
   const directoryPoint = {
     x: round2(-mainAvenueWidth / 2 - 2.4),
-    z: round2(clustersEndZ + WELCOME_AREA_DEPTH * 0.48),
+    z: round2(zonesEndZ + WELCOME_AREA_DEPTH * 0.48),
   };
 
-  // 2. Place clusters & their <= 6 booths
+  // 3. Place all U-Zones & their booths along the 3 sides facing INWARD!
   const clusters: GeneratedClusterSpec[] = [];
+  const zones: GeneratedZoneSpec[] = [];
   const placements: GeneratedBoothPlacement[] = [];
-  const rowBoulevardZs: number[] = [];
-
-  for (let row = 0; row < numRows; row++) {
-    const centerZ = round2(firstRowTopZ + row * pitchZ + CLUSTER_DEPTH / 2);
-    // Horizontal visitor boulevard just South of each cluster row (open side of U-shaped courtyard!)
-    const southBoulevardZ = round2(centerZ + CLUSTER_DEPTH / 2 + CLUSTER_GAP_Z / 2);
-    rowBoulevardZs.push(southBoulevardZ);
-
-    for (let colIdx = 0; colIdx < clustersPerRow; colIdx++) {
-      const cIdx = row * clustersPerRow + colIdx;
-      if (cIdx >= numClusters) break;
-      const pc = pendingClusters[cIdx];
-
-      let centerX: number;
-      if (singleCentered) {
-        centerX = 0;
-      } else {
-        const isWest = colIdx < colsPerWing;
-        const wingCol = isWest ? colIdx : colIdx - colsPerWing;
-        const offsetFromAvenue = mainAvenueWidth / 2 + CLUSTER_GAP_X / 2 + CLUSTER_WIDTH / 2 + wingCol * pitchX;
-        centerX = round2(isWest ? -offsetFromAvenue : offsetFromAvenue);
-      }
-
-      const clusterId = `cluster-${String(cIdx + 1).padStart(2, '0')}`;
-      const variationSeed = (cIdx * 37 + layoutSeed) % 997;
-      const centerpieceKind = CENTERPIECE_VARIANTS[(cIdx + layoutSeed) % CENTERPIECE_VARIANTS.length];
-
-      clusters.push({
-        clusterId,
-        clusterIndex: cIdx,
-        zoneCode: pc.zoneCode,
-        zoneName: pc.zoneName,
-        categoryId: pc.categoryId,
-        centerX,
-        centerZ,
-        width: CLUSTER_WIDTH,
-        depth: CLUSTER_DEPTH,
-        boothCount: pc.boothCount,
-        variationSeed,
-        centerpieceKind,
-      });
-
-      for (let localSlot = 0; localSlot < pc.boothCount; localSlot++) {
-        const tmpl = V27_CLUSTER_SLOTS[localSlot];
-        const archSpec = ARCHETYPE_MAP[tmpl.defaultArchetype];
-        const px = round2(centerX + tmpl.localX);
-        const pz = round2(centerZ + tmpl.localZ);
-        const rotY = tmpl.rotationY;
-        const fx = Math.sin(rotY);
-        const fz = Math.cos(rotY);
-
-        placements.push({
-          slotIndex: placements.length,
-          clusterId,
-          clusterIndex: cIdx,
-          zoneCode: pc.zoneCode,
-          categoryId: pc.categoryId,
-          positionX: px,
-          positionZ: pz,
-          rotationY: rotY,
-          archetypeId: archSpec.id,
-          footprintWidth: archSpec.width,
-          footprintDepth: archSpec.depth,
-          approachPoint: {
-            x: round2(px + fx * (archSpec.depth / 2 + APPROACH_OFFSET_M)),
-            z: round2(pz + fz * (archSpec.depth / 2 + APPROACH_OFFSET_M)),
-          },
-          focusCameraPoint: {
-            x: round2(px + fx * (archSpec.depth / 2 + FOCUS_CAMERA_OFFSET_M)),
-            z: round2(pz + fz * (archSpec.depth / 2 + FOCUS_CAMERA_OFFSET_M)),
-          },
-        });
-      }
-    }
-  }
-
-  // 3. Build Zone summaries
-  const zoneOrder: string[] = [];
-  const zoneMetaByCode = new Map<string, { displayName: string; categoryId: string | null; categoryTag: string }>();
-  for (const pc of pendingClusters) {
-    if (!zoneMetaByCode.has(pc.zoneCode)) {
-      zoneOrder.push(pc.zoneCode);
-      zoneMetaByCode.set(pc.zoneCode, {
-        displayName: pc.zoneName,
-        categoryId: pc.categoryId,
-        categoryTag: pc.categoryTag,
-      });
-    }
-  }
-
-  const zones: GeneratedZoneSpec[] = zoneOrder.map((code, idx) => {
-    const meta = zoneMetaByCode.get(code)!;
-    const zClusters = clusters.filter((c) => c.zoneCode === code);
-    const zBooths = placements.filter((p) => p.zoneCode === code);
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    for (const c of zClusters) {
-      minX = Math.min(minX, c.centerX - c.width / 2);
-      maxX = Math.max(maxX, c.centerX + c.width / 2);
-      minZ = Math.min(minZ, c.centerZ - c.depth / 2);
-      maxZ = Math.max(maxZ, c.centerZ + c.depth / 2);
-    }
-    return {
-      code,
-      categoryId: meta.categoryId,
-      displayName: meta.displayName,
-      categoryTag: meta.categoryTag,
-      bounds: { minX: round2(minX), maxX: round2(maxX), minZ: round2(minZ), maxZ: round2(maxZ) },
-      sortOrder: idx + 1,
-      boothCount: zBooths.length,
-      clusterCount: zClusters.length,
-    };
-  });
-
-  // 4. Build BFS-connected Walkway Graph:
-  //    Spawn -> Central Avenue Spine -> Row South Boulevards -> Cluster Courtyard Centers -> Booth Approaches
   const nodes: WalkwayNode[] = [];
   const edges: Array<[string, string]> = [];
+
   const spawnNodeId = 'walk-spawn';
+  const blvdHubId = 'walk-boulevard-hub';
   nodes.push({ id: spawnNodeId, x: spawnPoint.x, z: spawnPoint.z, kind: 'spawn' });
+  nodes.push({ id: blvdHubId, x: 0, z: boulevardCenterZ, kind: 'avenue' });
+  edges.push([spawnNodeId, blvdHubId]);
 
-  let prevSpineId = spawnNodeId;
-  for (let row = numRows - 1; row >= 0; row--) {
-    const blvdZ = rowBoulevardZs[row];
-    const spineId = `walk-avenue-row-${row}`;
-    nodes.push({ id: spineId, x: 0, z: blvdZ, kind: 'avenue' });
-    edges.push([prevSpineId, spineId]);
-    prevSpineId = spineId;
+  const placeOneUZone = (
+    pz: PendingUZone,
+    uIndex: number,
+    centerX: number,
+    centerZ: number,
+    openingDirection: 'south' | 'north'
+  ) => {
+    const { width, depth, backCount, leftCount, rightCount } = pz.dims;
+    const clusterId = `u-zone-${String(uIndex + 1).padStart(2, '0')}`;
+    const variationSeed = (uIndex * 41 + layoutSeed) % 997;
+    const centerpieceKind = CENTERPIECE_VARIANTS[(uIndex + layoutSeed) % CENTERPIECE_VARIANTS.length];
 
-    const rowClusters = clusters.filter((c) => Math.floor(c.clusterIndex / clustersPerRow) === row);
-    const westClusters = rowClusters.filter((c) => c.centerX < 0).sort((a, b) => b.centerX - a.centerX);
-    const eastClusters = rowClusters.filter((c) => c.centerX >= 0).sort((a, b) => a.centerX - b.centerX);
+    clusters.push({
+      clusterId,
+      clusterIndex: uIndex,
+      zoneCode: pz.code,
+      zoneName: pz.displayName,
+      categoryId: pz.categoryId,
+      centerX,
+      centerZ,
+      width,
+      depth,
+      boothCount: pz.boothCount,
+      openingDirection,
+      backCount,
+      leftCount,
+      rightCount,
+      variationSeed,
+      centerpieceKind,
+    });
 
-    const connectClusterList = (list: GeneratedClusterSpec[]) => {
-      let prevBlvdNode = spineId;
-      for (const c of list) {
-        const entryId = `walk-entry-${c.clusterId}`;
-        const centerId = `walk-center-${c.clusterId}`;
-        nodes.push({ id: entryId, x: c.centerX, z: blvdZ, kind: 'aisle' });
-        nodes.push({ id: centerId, x: c.centerX, z: c.centerZ, kind: 'cluster_center' });
-        edges.push([prevBlvdNode, entryId]);
-        edges.push([entryId, centerId]);
-        prevBlvdNode = entryId;
+    zones.push({
+      code: pz.code,
+      categoryId: pz.categoryId,
+      displayName: pz.displayName,
+      categoryTag: pz.categoryTag,
+      bounds: {
+        minX: round2(centerX - width / 2),
+        maxX: round2(centerX + width / 2),
+        minZ: round2(centerZ - depth / 2),
+        maxZ: round2(centerZ + depth / 2),
+      },
+      sortOrder: uIndex + 1,
+      boothCount: pz.boothCount,
+      clusterCount: 1,
+      openingDirection,
+    });
 
-        const cBooths = placements.filter((p) => p.clusterId === c.clusterId);
-        for (const b of cBooths) {
-          const appId = `walk-approach-${b.slotIndex}`;
-          nodes.push({
-            id: appId,
-            x: b.approachPoint.x,
-            z: b.approachPoint.z,
-            kind: 'approach',
-            boothSlotIndex: b.slotIndex,
-          });
-          edges.push([centerId, appId]);
-        }
-      }
+    // Connect Boulevard -> U-Zone Entrance -> U-Zone Courtyard Center
+    const blvdDropId = `walk-blvd-${clusterId}`;
+    const centerNodeId = `walk-center-${clusterId}`;
+    nodes.push({ id: blvdDropId, x: centerX, z: boulevardCenterZ, kind: 'avenue' });
+    nodes.push({ id: centerNodeId, x: centerX, z: centerZ, kind: 'cluster_center' });
+    edges.push([blvdHubId, blvdDropId]);
+    edges.push([blvdDropId, centerNodeId]);
+
+    const addBooth = (bx: number, bz: number, rotY: number) => {
+      const slotIndex = placements.length;
+      const arch = V28_ARCHETYPES[(slotIndex + layoutSeed) % V28_ARCHETYPES.length];
+      const fx = Math.sin(rotY);
+      const fz = Math.cos(rotY);
+      const approachPoint = {
+        x: round2(bx + fx * (arch.depth / 2 + APPROACH_OFFSET_M)),
+        z: round2(bz + fz * (arch.depth / 2 + APPROACH_OFFSET_M)),
+      };
+      const focusCameraPoint = {
+        x: round2(bx + fx * (arch.depth / 2 + FOCUS_CAMERA_OFFSET_M)),
+        z: round2(bz + fz * (arch.depth / 2 + FOCUS_CAMERA_OFFSET_M)),
+      };
+      placements.push({
+        slotIndex,
+        clusterId,
+        clusterIndex: uIndex,
+        zoneCode: pz.code,
+        categoryId: pz.categoryId,
+        positionX: round2(bx),
+        positionZ: round2(bz),
+        rotationY: rotY,
+        archetypeId: arch.id,
+        footprintWidth: arch.width,
+        footprintDepth: arch.depth,
+        approachPoint,
+        focusCameraPoint,
+      });
+
+      const appId = `walk-approach-${slotIndex}`;
+      nodes.push({ id: appId, x: approachPoint.x, z: approachPoint.z, kind: 'approach', boothSlotIndex: slotIndex });
+      edges.push([centerNodeId, appId]);
     };
 
-    connectClusterList(westClusters);
-    connectClusterList(eastClusters);
+    const dirSign = openingDirection === 'south' ? 1 : -1;
+    // 1. Back Wall booths (facing INWARD toward the open side: +Z if opening south, -Z if opening north)
+    const backZ = centerZ - dirSign * (depth / 2 - BOOTH_EDGE_INSET_M);
+    const backRotY = openingDirection === 'south' ? 0 : Number(Math.PI.toFixed(4));
+    const backStartX = centerX - ((backCount - 1) * BOOTH_PITCH_M) / 2;
+    for (let i = 0; i < backCount; i++) {
+      addBooth(backStartX + i * BOOTH_PITCH_M, backZ, backRotY);
+    }
+
+    // 2. Left Wing booths (West wall, facing East +X into the courtyard)
+    const leftX = centerX - (width / 2 - BOOTH_EDGE_INSET_M);
+    const leftRotY = Number((Math.PI / 2).toFixed(4));
+    const wingStartZ = centerZ - dirSign * (depth / 2 - CORNER_CLEARANCE_M - BOOTH_PITCH_M / 2);
+    for (let i = 0; i < leftCount; i++) {
+      addBooth(leftX, wingStartZ + dirSign * i * BOOTH_PITCH_M, leftRotY);
+    }
+
+    // 3. Right Wing booths (East wall, facing West -X into the courtyard)
+    const rightX = centerX + (width / 2 - BOOTH_EDGE_INSET_M);
+    const rightRotY = Number((-Math.PI / 2).toFixed(4));
+    for (let i = 0; i < rightCount; i++) {
+      addBooth(rightX, wingStartZ + dirSign * i * BOOTH_PITCH_M, rightRotY);
+    }
+  };
+
+  // Place North Row (aligned flush with northRowBottomZ so all open mouths meet the Grand Boulevard cleanly!)
+  let runningIdx = 0;
+  for (let i = 0; i < northZones.length; i++) {
+    const z = northZones[i];
+    const cz = round2(northRowBottomZ - z.dims.depth / 2);
+    placeOneUZone(z, runningIdx++, northCentersX[i], cz, 'south');
+  }
+
+  // Place South Row (aligned flush with southRowTopZ so all open mouths open North onto the Grand Boulevard!)
+  for (let i = 0; i < southZones.length; i++) {
+    const z = southZones[i];
+    const cz = round2(southRowTopZ + z.dims.depth / 2);
+    placeOneUZone(z, runningIdx++, southCentersX[i], cz, 'north');
   }
 
   const radius = round2(Math.hypot(halfHallWidth, halfHallDepth));
@@ -659,13 +738,13 @@ export function generateDynamicExhibitionLayout(
     centerX: 0,
     centerZ: 0,
     radius,
-    recommendedHeight: round2(Math.max(28, radius * 0.78)),
-    recommendedDistance: round2(Math.max(36, radius * 1.08)),
+    recommendedHeight: round2(Math.max(30, radius * 0.78)),
+    recommendedDistance: round2(Math.max(38, radius * 1.05)),
   };
 
-  const eaveHeight = hallWidth > 140 ? 15.0 : hallWidth > 90 ? 12.5 : 10.5;
-  const roofRise = round2(Math.min(22, Math.max(7.0, hallWidth * 0.11)));
-  const ribSpacing = hallDepth > 140 ? 14.0 : 12.0;
+  const eaveHeight = hallWidth > 160 ? 16.0 : hallWidth > 100 ? 13.0 : 10.5;
+  const roofRise = round2(Math.min(24, Math.max(7.0, hallWidth * 0.1)));
+  const ribSpacing = totalDepth > 140 ? 14.0 : 12.0;
 
   return {
     config: {
@@ -680,7 +759,7 @@ export function generateDynamicExhibitionLayout(
       reservedAreas,
     },
     hallWidth,
-    hallDepth,
+    hallDepth: totalDepth,
     hallBounds,
     walkableBounds,
     centralAvenueBounds,
@@ -694,7 +773,7 @@ export function generateDynamicExhibitionLayout(
     cameraOverviewBounds,
     roofBounds: {
       hallWidth,
-      hallDepth,
+      hallDepth: totalDepth,
       bounds: hallBounds,
       eaveHeight,
       roofRise,
@@ -815,7 +894,7 @@ export function validateExhibitionLayout(
     stats: {
       boothCount: layout.placements.length,
       zoneCount: layout.zones.length,
-      clusterCount: layout.clusters?.length ?? Math.ceil(layout.placements.length / MAX_BOOTHS_PER_CLUSTER),
+      clusterCount: layout.clusters?.length ?? layout.zones.length,
       overlapCount,
       outOfBoundsCount,
       blockedWalkwayCount,

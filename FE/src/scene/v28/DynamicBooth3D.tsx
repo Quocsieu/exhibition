@@ -8,7 +8,7 @@ import {
   loadV28ArchetypePrototype,
   releaseSharedTexture,
 } from './v28BoothAssets';
-import { DynamicBoothNpc3D, type V28NpcAnimState } from './DynamicBoothNpc3D';
+import type { V28NpcAnimState } from './DynamicBoothNpc3D';
 
 // Shared lightweight geometries & materials for product display pedestals (reused across all booths)
 const PEDESTAL_GEOM = new THREE.CylinderGeometry(0.28, 0.32, 0.85, 14);
@@ -257,17 +257,6 @@ export const DynamicBooth3D: React.FC<DynamicBooth3DProps> = React.memo(
               onSelect={(prod, sId) => onSelectProduct(booth, prod, sId)}
             />
           ))}
-
-        {/* Booth AI Consultant NPC (Mounted ONLY in Ring 0 Near, positioned at front-right corner without blocking products) */}
-        {lodTier === 0 && (
-          <DynamicBoothNpc3D
-            position={[Math.max(1.8, booth.footprintWidth / 2 - 1.1), 0, booth.footprintDepth / 2 - 0.65]}
-            companyName={booth.companyName}
-            brandColor={booth.color}
-            animState={isFocused ? npcAnimState : 'idle'}
-            onClickNpc={() => onClickNpc?.(booth)}
-          />
-        )}
       </group>
     );
   }

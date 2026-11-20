@@ -610,6 +610,7 @@ export class V28ExhibitionService {
         sortOrder: z.sortOrder,
         boothCount: z.boothCount,
         clusterCount: clusters.filter((c) => c.zoneCode === z.code).length || 1,
+        openingDirection: clusters.find((c) => c.zoneCode === z.code)?.openingDirection || 'south',
       })),
       placements: booths.map((b) => ({
         slotIndex: b.slotIndex,

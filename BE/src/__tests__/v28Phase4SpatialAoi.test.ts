@@ -27,8 +27,8 @@ describe('V28 PHASE 4 — 100 Booths, Spatial AOI, Security Guards, Hotspot Budg
     const exh = exhSvc.createExhibition({ name: 'Grand Expo 100', targetBoothCount: 100, preferredZoneCapacity: 10 });
     const v100 = exhSvc.publishVersion(exh.id, exh.latestDraftVersionId!);
     expect(v100.booths.length).toBe(100);
-    expect(v100.zones.length).toBe(6); // 6 Category-Based Zones (Phase 8.3)
-    expect(v100.clusters.length).toBeGreaterThanOrEqual(17);
+    expect(v100.zones.length).toBe(6); // 6 Category-Based U-Zones
+    expect(v100.clusters.length).toBe(6);
     expect(v100.validation.valid).toBe(true);
 
     const httpServer = http.createServer();

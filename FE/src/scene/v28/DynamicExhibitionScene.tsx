@@ -11,6 +11,10 @@ import { DynamicBooth3D } from './DynamicBooth3D';
 import type { V28NpcAnimState } from './DynamicBoothNpc3D';
 import { getTextureCacheStats } from './v28BoothAssets';
 import { V27VisualKitLayer, useV27TerrazzoFloorTexture } from './V27VisualKit';
+import { AvatarCharacter } from '../LocalPlayer';
+import { SalesAssistantNpc } from '../SalesAssistantNpc';
+import type { Booth as LegacyBooth } from '../../types/expo';
+import type { NpcAnimationClipName } from '../../services/npcPresentationService';
 import {
   DRAG_YAW_SENSITIVITY,
   DRAG_PITCH_SENSITIVITY,
@@ -20,6 +24,34 @@ import {
   MIN_CAMERA_PITCH,
   MAX_CAMERA_PITCH,
 } from '../ExhibitionScene';
+
+function toV27NpcAnim(state: V28NpcAnimState): NpcAnimationClipName {
+  if (state === 'greet' || state === 'farewell') return 'WAVE';
+  if (state === 'point') return 'PRESENT';
+  if (state === 'talk' || state === 'listen') return 'TALKING';
+  return 'IDLE';
+}
+
+function toLegacyBoothAdapter(b: V28BoothPlacementView): LegacyBooth {
+  return {
+    id: b.boothId,
+    name: b.boothName,
+    companyName: b.companyName,
+    tagline: b.tagline,
+    description: b.description,
+    category: b.category,
+    color: b.color,
+    logoUrl: '',
+    bannerUrl: '',
+    contactEmail: '',
+    contactUrl: '',
+    positionX: b.positionX,
+    positionZ: b.positionZ,
+    rotationY: b.rotationY,
+    width: b.footprintWidth,
+    depth: b.footprintDepth,
+  };
+}
 
 export type V28CameraMode = 'overview' | 'explore' | 'focus';
 
@@ -50,6 +82,8 @@ export interface DynamicExhibitionSceneProps {
   boothLodMap?: Record<string, 0 | 1 | 2>;
   remoteAvatars?: V28RemoteAvatarView[];
   npcAnimState?: V28NpcAnimState;
+  playerName?: string;
+  playerColor?: string;
   onPlayerMove?: (pos: V28PlayerState) => void;
   onFloorClick: (x: number, z: number) => void;
   onFocusBooth: (booth: V28BoothPlacementView) => void;
@@ -100,18 +134,16 @@ const ZoneBanner: React.FC<{ zone: V28ZoneRecord }> = React.memo(({ zone }) => {
 const RemoteAvatarsLayer: React.FC<{ avatars: V28RemoteAvatarView[] }> = React.memo(({ avatars }) => {
   if (avatars.length === 0) return null;
   return (
-    <group>
+    <group name="V28RemoteV27Visitors">
       {avatars.map((av) => (
-        <group key={av.sessionId} position={[av.x, 0, av.z]} rotation={[0, av.rotationY, 0]}>
-          <mesh position={[0, 0.85, 0]} castShadow>
-            <capsuleGeometry args={[0.26, 0.85, 6, 12]} />
-            <meshStandardMaterial color={av.color || '#10b981'} roughness={0.45} />
-          </mesh>
-          <mesh position={[0, 1.56, 0]} castShadow>
-            <sphereGeometry args={[0.2, 12, 12]} />
-            <meshStandardMaterial color="#fde68a" roughness={0.5} />
-          </mesh>
-        </group>
+        <AvatarCharacter
+          key={av.sessionId}
+          name={av.name}
+          color={av.color || '#10b981'}
+          position={[av.x, 0, av.z]}
+          rotationY={av.rotationY}
+          state="idle"
+        />
       ))}
     </group>
   );
@@ -131,6 +163,8 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   boothLodMap,
   remoteAvatars = [],
   npcAnimState = 'idle',
+  playerName = 'Khách V28',
+  playerColor = '#0ea5e9',
   onPlayerMove,
   onFloorClick,
   onFocusBooth,
@@ -141,10 +175,11 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
 }) => {
   const { camera, gl } = useThree();
   const avatarRef = useRef<THREE.Group>(null);
-  const playerPosRef = useRef<V28PlayerState>({
+  const playerPosRef = useRef<V28PlayerState & { state: 'idle' | 'walk' }>({
     x: world.spawnPoint.x,
     z: world.spawnPoint.z,
     rotationY: world.spawnPoint.rotationY,
+    state: 'idle',
   });
   const keysRef = useRef<Record<string, boolean>>({});
   const moveTargetRef = useRef<{ x: number; z: number } | null>(null);
@@ -174,6 +209,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       x: world.spawnPoint.x,
       z: world.spawnPoint.z,
       rotationY: world.spawnPoint.rotationY,
+      state: 'idle',
     };
     moveTargetRef.current = null;
     if (avatarRef.current) {
@@ -191,7 +227,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   // Apply instant teleport
   useEffect(() => {
     if (teleportPos) {
-      playerPosRef.current = { ...teleportPos };
+      playerPosRef.current = { ...teleportPos, state: 'idle' };
       moveTargetRef.current = null;
       if (avatarRef.current) {
         avatarRef.current.position.set(teleportPos.x, 0, teleportPos.z);
@@ -346,6 +382,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       }
     }
 
+    p.state = moved ? 'walk' : 'idle';
     if (avatarRef.current) {
       avatarRef.current.position.set(p.x, 0, p.z);
       avatarRef.current.rotation.y = p.rotationY;
@@ -502,27 +539,38 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
         />
       ))}
 
+      {/* Authentic V27.5 Sales Assistant NPCs (Mounted in booth-local space ONLY for Ring 0 Near Booths — 100% V27.5 model, rig & animations!) */}
+      {world.booths
+        .filter((b) => (boothLodMap ? (boothLodMap[b.boothId] ?? 0) === 0 : true))
+        .map((booth) => (
+          <group
+            key={`v27-npc-${booth.boothId}`}
+            position={[booth.positionX, 0, booth.positionZ]}
+            rotation={[0, booth.rotationY, 0]}
+          >
+            <SalesAssistantNpc
+              booth={toLegacyBoothAdapter(booth)}
+              isActiveSession={focusedBooth?.boothId === booth.boothId}
+              activeAnimation={focusedBooth?.boothId === booth.boothId ? toV27NpcAnim(npcAnimState) : 'IDLE'}
+              onActivate={() => onClickNpc?.(booth)}
+            />
+          </group>
+        ))}
+
       {/* Optional Phase 3 Far Instanced Proxies & Parametric Roof */}
       {renderFarProxies?.()}
       {renderRoof?.({ cameraMode, isMobilePortrait })}
 
-      {/* Local Visitor Avatar */}
-      <group ref={avatarRef} position={[world.spawnPoint.x, 0, world.spawnPoint.z]}>
-        <mesh position={[0, 0.85, 0]} castShadow>
-          <capsuleGeometry args={[0.28, 0.9, 6, 12]} />
-          <meshStandardMaterial color="#0284c7" roughness={0.35} />
-        </mesh>
-        <mesh position={[0, 1.6, 0]} castShadow>
-          <sphereGeometry args={[0.22, 14, 14]} />
-          <meshStandardMaterial color="#fde68a" roughness={0.45} />
-        </mesh>
-        <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[0.38, 0.5, 20]} />
-          <meshBasicMaterial color="#0284c7" transparent opacity={0.7} />
-        </mesh>
-      </group>
+      {/* Authentic V27.5 Stylized Visitor Avatar (full character + walk cycle + overhead nametag!) */}
+      <AvatarCharacter
+        name={playerName}
+        color={playerColor}
+        isSelf
+        liveTransform={() => playerPosRef.current}
+        activeBoothName={focusedBooth?.boothName ?? null}
+      />
 
-      {/* Remote Visitors (Phase 4 Spatial AOI) */}
+      {/* Remote Visitors (Authentic V27.5 VisitorAvatar via Phase 4 Spatial AOI) */}
       <RemoteAvatarsLayer avatars={remoteAvatars} />
     </>
   );

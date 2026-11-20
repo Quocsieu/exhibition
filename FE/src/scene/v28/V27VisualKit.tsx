@@ -159,18 +159,34 @@ export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
     const welcomeZ = (world.welcomeAreaBounds.minZ + world.welcomeAreaBounds.maxZ) / 2;
     const clusters: V28ClusterSpec[] = world.clusters || [];
     const avenueW = world.centralAvenueBounds.maxX - world.centralAvenueBounds.minX;
+    const entryLen = world.centralAvenueBounds.maxZ - world.centralAvenueBounds.minZ;
+    const entryCenterZ = (world.centralAvenueBounds.minZ + world.centralAvenueBounds.maxZ) / 2;
+
+    // Horizontal Grand Boulevard between North & South facing U-Zone rows
+    const blvdZ = world.centralAvenueBounds.minZ + 9.0;
 
     return (
       <group name="V27VisualKitHeritageLayer">
-        {/* Central Main Avenue with V27.5 Champagne Inlay Borders */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.014, 0]} receiveShadow material={AVENUE_STRIP_MAT}>
-          <planeGeometry args={[avenueW - 0.6, world.hallDepth - 2]} />
+        {/* Horizontal Grand Boulevard connecting all U-Shaped Category Zones */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.014, blvdZ]} receiveShadow material={AVENUE_STRIP_MAT}>
+          <planeGeometry args={[world.hallWidth - 10, 16.5]} />
         </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-avenueW / 2 + 0.35, 0.02, 0]} material={CHAMPAGNE_MAT}>
-          <planeGeometry args={[0.24, world.hallDepth - 3]} />
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, blvdZ - 8.1]} material={CHAMPAGNE_MAT}>
+          <planeGeometry args={[world.hallWidth - 12, 0.28]} />
         </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[avenueW / 2 - 0.35, 0.02, 0]} material={CHAMPAGNE_MAT}>
-          <planeGeometry args={[0.24, world.hallDepth - 3]} />
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, blvdZ + 8.1]} material={CHAMPAGNE_MAT}>
+          <planeGeometry args={[world.hallWidth - 12, 0.28]} />
+        </mesh>
+
+        {/* South Entry Spine from Spawn to Grand Boulevard */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, entryCenterZ]} receiveShadow material={AVENUE_STRIP_MAT}>
+          <planeGeometry args={[avenueW - 0.6, entryLen]} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-avenueW / 2 + 0.35, 0.021, entryCenterZ]} material={CHAMPAGNE_MAT}>
+          <planeGeometry args={[0.26, entryLen]} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[avenueW / 2 - 0.35, 0.021, entryCenterZ]} material={CHAMPAGNE_MAT}>
+          <planeGeometry args={[0.26, entryLen]} />
         </mesh>
 
         {/* Main Entrance Plaza Heritage GLBs (South Welcome Area) */}

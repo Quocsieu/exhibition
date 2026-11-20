@@ -119,11 +119,18 @@ export function useV28SpatialRealtime({
     });
   }, []);
 
+  const sendProfile = useCallback((name: string, color: string) => {
+    const s = socketRef.current;
+    if (!s || !s.connected) return;
+    s.emit('v28:profile', { name, color });
+  }, []);
+
   return {
     remoteAvatars,
     onlineCount,
     overflowCount,
     sendMove,
     sendTeleport,
+    sendProfile,
   };
 }

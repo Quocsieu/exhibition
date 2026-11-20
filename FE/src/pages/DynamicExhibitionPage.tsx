@@ -34,6 +34,22 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   const [focusedBooth, setFocusedBooth] = useState<V28BoothPlacementView | null>(null);
   const [npcPanelOpen, setNpcPanelOpen] = useState<boolean>(false);
   const [npcAnimState, setNpcAnimState] = useState<V28NpcAnimState>('idle');
+
+  // Exact V27.5 Visitor Profile identity (sessionStorage: expo_visitor_name & expo_visitor_color)
+  const [playerName, setPlayerName] = useState<string>(() => {
+    const saved = sessionStorage.getItem('expo_visitor_name');
+    if (saved) return saved;
+    const generated = `Khách #${Math.floor(100 + Math.random() * 900)}`;
+    sessionStorage.setItem('expo_visitor_name', generated);
+    return generated;
+  });
+  const [playerColor, setPlayerColor] = useState<string>(() => {
+    const saved = sessionStorage.getItem('expo_visitor_color');
+    if (saved) return saved;
+    const defaultCol = '#0ea5e9';
+    sessionStorage.setItem('expo_visitor_color', defaultCol);
+    return defaultCol;
+  });
   const [selectedProduct, setSelectedProduct] = useState<{
     booth: V28BoothPlacementView;
     product: V28Product;
@@ -145,12 +161,25 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     };
   }, [loadActiveWorld]);
 
-  const { remoteAvatars, onlineCount, overflowCount, sendMove, sendTeleport } =
+  const { remoteAvatars, onlineCount, overflowCount, sendMove, sendTeleport, sendProfile } =
     useV28SpatialRealtime({
       versionId: world?.versionId ?? null,
       isMobilePortrait,
       onLayoutChanged: loadActiveWorld,
     });
+
+  const handleUpdateVisitorProfile = useCallback(
+    (nextName: string, nextColor: string) => {
+      const cleaned = nextName.trim().slice(0, 32);
+      if (!cleaned) return;
+      setPlayerName(cleaned);
+      setPlayerColor(nextColor);
+      sessionStorage.setItem('expo_visitor_name', cleaned);
+      sessionStorage.setItem('expo_visitor_color', nextColor);
+      sendProfile(cleaned, nextColor);
+    },
+    [sendProfile]
+  );
 
   const handleTeleportToBooth = useCallback((booth: V28BoothPlacementView) => {
     const lookRot = Math.atan2(
@@ -253,6 +282,8 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         boothLodMap={boothLodMap}
         remoteAvatars={remoteAvatars}
         npcAnimState={npcAnimState}
+        playerName={playerName}
+        playerColor={playerColor}
         onPlayerMove={(pos) => {
           setPlayerPos(pos);
           sendMove(pos.x, pos.z, pos.rotationY);
@@ -281,6 +312,9 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         focusedBooth={focusedBooth}
         selectedProduct={selectedProduct}
         npcPanelOpen={npcPanelOpen}
+        playerName={playerName}
+        playerColor={playerColor}
+        onUpdateVisitorProfile={handleUpdateVisitorProfile}
         onlineCount={onlineCount}
         overflowVisitorCount={overflowCount}
         onChangeCameraMode={(mode) => {
