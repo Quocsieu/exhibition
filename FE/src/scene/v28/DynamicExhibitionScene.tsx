@@ -344,6 +344,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       boothCount: world.booths.length,
       zoneCount: world.zones.length,
       cameraMode,
+      roofCutawayActive: cameraMode === 'overview',
       fps: fpsAccumRef.current.fps,
       drawCalls: gl.info.render.calls,
       triangles: gl.info.render.triangles,
@@ -471,6 +472,17 @@ export const DynamicExhibitionScene: React.FC<DynamicExhibitionSceneProps> = (pr
       dpr={props.isMobilePortrait ? [1, 1.5] : [1, 2]}
       camera={{ fov: 48, near: 0.3, far: 450, position: [0, 32, 48] }}
       gl={{ antialias: true, powerPreference: 'high-performance' }}
+      onCreated={({ gl }) => {
+        const canvas = gl.domElement;
+        const onLost = (ev: Event) => {
+          ev.preventDefault();
+        };
+        const onRestored = () => {
+          gl.resetState();
+        };
+        canvas.addEventListener('webglcontextlost', onLost, false);
+        canvas.addEventListener('webglcontextrestored', onRestored, false);
+      }}
       style={{ width: '100%', height: '100%', display: 'block' }}
     >
       <InnerDynamicScene {...props} />

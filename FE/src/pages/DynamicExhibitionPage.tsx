@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   v28Api,
   type V28BoothPlacementView,
@@ -11,6 +11,14 @@ import {
   type V28PlayerState,
 } from '../scene/v28/DynamicExhibitionScene';
 import { DynamicWorldHud } from '../components/v28/DynamicWorldHud';
+import {
+  computeStreamingLodMap,
+  DEFAULT_DESKTOP_STREAMING,
+  DEFAULT_MOBILE_STREAMING,
+  type BoothLodTier,
+} from '../scene/v28/spatialStreaming';
+import { FarBoothInstancedProxy } from '../scene/v28/FarBoothInstancedProxy';
+import { ParametricExpoRoof } from '../scene/v28/ParametricExpoRoof';
 
 export interface DynamicExhibitionPageProps {
   onOpenAdmin: () => void;
@@ -37,6 +45,36 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   const [isMobilePortrait, setIsMobilePortrait] = useState<boolean>(
     () => window.innerWidth <= 640 && window.innerHeight >= window.innerWidth
   );
+  const [boothLodMap, setBoothLodMap] = useState<Record<string, BoothLodTier>>({});
+  const lodMapRef = useRef<Record<string, BoothLodTier>>({});
+
+  // Recompute 3-Ring Spatial Streaming LOD map with staggered mount queue on movement/camera/focus change
+  useEffect(() => {
+    if (!world) return;
+    const thresholds = isMobilePortrait ? DEFAULT_MOBILE_STREAMING : DEFAULT_DESKTOP_STREAMING;
+    const anchorX = focusedBooth ? focusedBooth.positionX : playerPos.x;
+    const anchorZ = focusedBooth ? focusedBooth.positionZ : playerPos.z;
+
+    const tickStreaming = () => {
+      const next = computeStreamingLodMap({
+        booths: world.booths,
+        anchorX,
+        anchorZ,
+        cameraMode,
+        focusedBoothId: focusedBooth?.boothId ?? null,
+        prevLodMap: lodMapRef.current,
+        thresholds,
+        maxPromotionsPerTick: 6,
+      });
+      lodMapRef.current = next;
+      setBoothLodMap(next);
+    };
+
+    tickStreaming();
+    // Follow-up tick to drain staggered mount queue smoothly after rapid teleport
+    const timer = window.setTimeout(tickStreaming, 180);
+    return () => window.clearTimeout(timer);
+  }, [world, playerPos.x, playerPos.z, cameraMode, focusedBooth, isMobilePortrait]);
 
   const previewVersionId = new URLSearchParams(window.location.search).get('previewVersionId');
 
@@ -165,10 +203,15 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         teleportPos={teleportState.pos}
         joystickVector={joystickVec}
         isMobilePortrait={isMobilePortrait}
+        boothLodMap={boothLodMap}
         onPlayerMove={setPlayerPos}
         onFloorClick={handleFloorClick}
         onFocusBooth={handleFocusBooth}
         onSelectProduct={handleSelectProduct}
+        renderFarProxies={() => <FarBoothInstancedProxy booths={world.booths} lodMap={boothLodMap} />}
+        renderRoof={({ cameraMode: cm, isMobilePortrait: mp }) => (
+          <ParametricExpoRoof roofBounds={world.roofBounds} cameraMode={cm} isMobilePortrait={mp} />
+        )}
       />
 
       <DynamicWorldHud
