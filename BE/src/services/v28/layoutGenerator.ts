@@ -105,6 +105,8 @@ export interface CategoryZoneInput {
 
 export interface LayoutGeneratorInput {
   targetBoothCount: number;
+  zoneCount?: number;
+  boothsPerZone?: number;
   preferredZoneCapacity?: number;
   hallStyle?: 'grand_expo' | 'modular_pavilion';
   mainAvenueWidth?: number;
@@ -137,7 +139,7 @@ export interface GeneratedClusterSpec {
   width: number;
   depth: number;
   boothCount: number;
-  openingDirection: 'south' | 'north';
+  openingDirection: 'south' | 'north' | 'east' | 'west';
   backCount: number;
   leftCount: number;
   rightCount: number;
@@ -154,7 +156,7 @@ export interface GeneratedZoneSpec {
   sortOrder: number;
   boothCount: number;
   clusterCount: number;
-  openingDirection: 'south' | 'north';
+  openingDirection: 'south' | 'north' | 'east' | 'west';
 }
 
 export interface GeneratedBoothPlacement {
@@ -197,7 +199,9 @@ export interface RoofBoundsMetadata {
 }
 
 export interface GeneratedExhibitionLayout {
-  config: Required<Omit<LayoutGeneratorInput, 'reservedAreas' | 'categoryZones'>> & {
+  config: Required<Omit<LayoutGeneratorInput, 'reservedAreas' | 'categoryZones' | 'zoneCount' | 'boothsPerZone'>> & {
+    zoneCount?: number;
+    boothsPerZone?: number;
     categoryZones: CategoryZoneInput[];
     reservedAreas: Array<{ id: string; label: string; bounds: RectBounds }>;
   };
@@ -315,6 +319,14 @@ function computeUZoneDimensions(count: number, boothGap = BOOTH_GAP_M): {
   const sideMax = Math.max(leftCount, rightCount);
   const effectivePitch = MAX_ARCHETYPE_WIDTH_M + boothGap;
 
+  // Compact footprint for very small zones (1..3 booths) so they don't create a giant empty U
+  if (sideMax === 0) {
+    const backSpan = backCount > 0 ? backCount * effectivePitch - boothGap : MAX_ARCHETYPE_WIDTH_M;
+    const width = round2(Math.max(14.0, backSpan + 6.0));
+    const depth = round2(15.0);
+    return { width, depth, backCount, leftCount, rightCount };
+  }
+
   // Back wall needs enough width so back booths don't collide with left/right wings at corners
   const backSpan = backCount > 0 ? backCount * effectivePitch - boothGap : 0;
   const interiorWidth = Math.max(MIN_U_INTERIOR_WIDTH_M, backSpan + 4.4);
@@ -416,10 +428,26 @@ function segmentIntersectsRect(
 export function generateDynamicExhibitionLayout(
   input: LayoutGeneratorInput
 ): GeneratedExhibitionLayout {
-  const targetBoothCount = Math.max(1, Math.min(500, Math.floor(input.targetBoothCount)));
-  const preferredZoneCapacity = Math.max(4, Math.min(50, Math.floor(input.preferredZoneCapacity ?? 20)));
+  const explicitZoneCount =
+    typeof input.zoneCount === 'number' && Number.isFinite(input.zoneCount) && input.zoneCount >= 1
+      ? Math.max(1, Math.min(40, Math.floor(input.zoneCount)))
+      : undefined;
+  const explicitBoothsPerZone =
+    typeof input.boothsPerZone === 'number' && Number.isFinite(input.boothsPerZone) && input.boothsPerZone >= 1
+      ? Math.max(1, Math.min(50, Math.floor(input.boothsPerZone)))
+      : undefined;
+
+  const computedTotal =
+    explicitZoneCount && explicitBoothsPerZone
+      ? explicitZoneCount * explicitBoothsPerZone
+      : input.targetBoothCount;
+  const targetBoothCount = Math.max(1, Math.min(500, Math.floor(computedTotal)));
+  const preferredZoneCapacity = Math.max(
+    1,
+    Math.min(50, Math.floor(explicitBoothsPerZone ?? input.preferredZoneCapacity ?? 10))
+  );
   const hallStyle = input.hallStyle ?? 'grand_expo';
-  const mainAvenueWidth = Math.max(10.0, input.mainAvenueWidth ?? ENTRY_SPINE_WIDTH_M);
+  const mainAvenueWidth = Math.max(12.0, input.mainAvenueWidth ?? GRAND_BOULEVARD_WIDTH_M);
   const aisleWidth = Math.max(8.0, input.aisleWidth ?? 10.0);
   const perimeterWidth = Math.max(6.0, input.perimeterWidth ?? 7.0);
   const boothGap = Math.max(1.2, Math.min(4.5, input.boothGap ?? BOOTH_GAP_M));
@@ -427,7 +455,7 @@ export function generateDynamicExhibitionLayout(
   const reservedAreas = input.reservedAreas ?? [];
   const categoryZones = input.categoryZones ?? [];
 
-  // 1. Build pending U-Zones list (1 U-Zone per Category!)
+  // 1. Build pending U-Zones list (supports explicit zoneCount x boothsPerZone OR categoryZones OR auto-partition)
   interface PendingUZone {
     code: string;
     categoryId: string | null;
@@ -438,7 +466,19 @@ export function generateDynamicExhibitionLayout(
   }
   const pendingZones: PendingUZone[] = [];
 
-  if (categoryZones.length > 0) {
+  if (explicitZoneCount && explicitBoothsPerZone && categoryZones.length === 0) {
+    for (let z = 0; z < explicitZoneCount; z++) {
+      const code = zoneCodeForIndex(z);
+      pendingZones.push({
+        code,
+        categoryId: null,
+        displayName: `Khu ${code}`,
+        categoryTag: `Phân khu ${code}`,
+        boothCount: explicitBoothsPerZone,
+        dims: computeUZoneDimensions(explicitBoothsPerZone, boothGap),
+      });
+    }
+  } else if (categoryZones.length > 0) {
     let zIdx = 0;
     let remaining = targetBoothCount;
     for (const cz of categoryZones) {
@@ -469,8 +509,10 @@ export function generateDynamicExhibitionLayout(
       });
     }
   } else {
-    // Auto-partition into balanced U-zones when no explicit category breakdown is provided
-    const zoneCount = targetBoothCount <= 6 ? 1 : Math.max(2, Math.ceil(targetBoothCount / preferredZoneCapacity));
+    // Auto-partition into balanced U-zones when no explicit breakdown is provided
+    const zoneCount =
+      explicitZoneCount ??
+      (targetBoothCount <= 6 ? 1 : Math.max(2, Math.ceil(targetBoothCount / preferredZoneCapacity)));
     const base = Math.floor(targetBoothCount / zoneCount);
     let rem = targetBoothCount % zoneCount;
     for (let z = 0; z < zoneCount; z++) {
@@ -488,86 +530,40 @@ export function generateDynamicExhibitionLayout(
     }
   }
 
-  // 2. Arrange U-Zones into 2 facing rows (North Row opening South, South Row opening North)
-  //    separated by the wide horizontal Grand Boulevard at z = boulevardZ,
-  //    with the South Row split cleanly around x = 0 so the Entrance Spine from Spawn is 100% unobstructed!
+  // 2. Arrange U-Zones into TWO FACING ROWS (Left Column opening East +X, Right Column opening West -X)
+  //    flanking ONE wide Central Main Avenue running North-South along x = 0!
+  //    Special case: 1 zone -> single centered U-zone opening South toward Spawn.
   const numZones = pendingZones.length;
-  const northZones: PendingUZone[] = [];
-  const southZones: PendingUZone[] = [];
+  const isSingleZone = numZones === 1;
+  const leftColZones: PendingUZone[] = [];
+  const rightColZones: PendingUZone[] = [];
 
-  if (numZones === 1) {
-    northZones.push(pendingZones[0]);
-  } else {
-    // Give South row an EVEN count (so it splits symmetrically around the x=0 Entry Spine),
-    // and put the remaining zones on the North row!
-    const southCount = Math.max(2, Math.floor(numZones / 2) * 2 === numZones ? numZones / 2 : Math.floor(numZones / 2));
-    const evenSouthCount = southCount % 2 === 0 ? southCount : Math.max(0, southCount - 1);
-    const northCount = numZones - evenSouthCount;
-    for (let i = 0; i < northCount; i++) northZones.push(pendingZones[i]);
-    for (let i = northCount; i < numZones; i++) southZones.push(pendingZones[i]);
+  if (!isSingleZone) {
+    const leftColCount = Math.ceil(numZones / 2);
+    for (let i = 0; i < leftColCount; i++) leftColZones.push(pendingZones[i]);
+    for (let i = leftColCount; i < numZones; i++) rightColZones.push(pendingZones[i]);
   }
 
-  const northRowMaxDepth = northZones.reduce((m, z) => Math.max(m, z.dims.depth), 0);
-  const southRowMaxDepth = southZones.reduce((m, z) => Math.max(m, z.dims.depth), 0);
+  // For East/West facing U-zones:
+  //   X extent = dims.depth (from outer back wall to open mouth at ±mainAvenueWidth/2)
+  //   Z extent = dims.width (between North & South wings)
+  const leftColMaxXDepth = leftColZones.reduce((m, z) => Math.max(m, z.dims.depth), 0);
+  const rightColMaxXDepth = rightColZones.reduce((m, z) => Math.max(m, z.dims.depth), 0);
+  const leftColTotalZ =
+    leftColZones.reduce((s, z) => s + z.dims.width, 0) + Math.max(0, leftColZones.length - 1) * ZONE_GAP_X_M;
+  const rightColTotalZ =
+    rightColZones.reduce((s, z) => s + z.dims.width, 0) + Math.max(0, rightColZones.length - 1) * ZONE_GAP_X_M;
 
-  // Compute X centers for North row (centered around x = 0 with ZONE_GAP_X_M between adjacent U-zones)
-  const northTotalWidth =
-    northZones.reduce((s, z) => s + z.dims.width, 0) + Math.max(0, northZones.length - 1) * ZONE_GAP_X_M;
-  const northCentersX: number[] = [];
-  {
-    let curX = -northTotalWidth / 2;
-    for (const z of northZones) {
-      northCentersX.push(round2(curX + z.dims.width / 2));
-      curX += z.dims.width + ZONE_GAP_X_M;
-    }
-  }
-
-  // Compute X centers for South row (split symmetrically West & East of x = 0 Entry Spine!)
-  const halfSouth = southZones.length / 2;
-  const southWestZones = southZones.slice(0, halfSouth);
-  const southEastZones = southZones.slice(halfSouth);
-  const southWestWidth =
-    southWestZones.reduce((s, z) => s + z.dims.width, 0) + Math.max(0, southWestZones.length - 1) * ZONE_GAP_X_M;
-  const southEastWidth =
-    southEastZones.reduce((s, z) => s + z.dims.width, 0) + Math.max(0, southEastZones.length - 1) * ZONE_GAP_X_M;
-  const southCentersX: number[] = [];
-  {
-    // West side going left from -ENTRY_SPINE_WIDTH_M/2
-    let curX = -(mainAvenueWidth / 2 + ZONE_GAP_X_M / 2);
-    const westXs: number[] = [];
-    for (let i = southWestZones.length - 1; i >= 0; i--) {
-      const z = southWestZones[i];
-      westXs.unshift(round2(curX - z.dims.width / 2));
-      curX -= z.dims.width + ZONE_GAP_X_M;
-    }
-    // East side going right from +ENTRY_SPINE_WIDTH_M/2
-    curX = mainAvenueWidth / 2 + ZONE_GAP_X_M / 2;
-    const eastXs: number[] = [];
-    for (const z of southEastZones) {
-      eastXs.push(round2(curX + z.dims.width / 2));
-      curX += z.dims.width + ZONE_GAP_X_M;
-    }
-    southCentersX.push(...westXs, ...eastXs);
-  }
-
-  const maxHalfRowW = Math.max(
-    northTotalWidth / 2,
-    mainAvenueWidth / 2 + ZONE_GAP_X_M / 2 + southWestWidth,
-    mainAvenueWidth / 2 + ZONE_GAP_X_M / 2 + southEastWidth
-  );
-  const halfHallWidth = round2(maxHalfRowW + perimeterWidth);
+  const maxHalfX = isSingleZone
+    ? pendingZones[0].dims.width / 2
+    : Math.max(mainAvenueWidth / 2 + leftColMaxXDepth, mainAvenueWidth / 2 + rightColMaxXDepth);
+  const halfHallWidth = round2(Math.max(maxHalfX + perimeterWidth, mainAvenueWidth / 2 + 12.0));
   const hallWidth = round2(halfHallWidth * 2);
 
-  // Compute vertical Z layout:
-  // [Perimeter] [North Row U-Zones] [Grand Boulevard] [South Row U-Zones (if any)] [Welcome Area] [Perimeter]
-  const hasSouthRow = southZones.length > 0;
-  const totalDepth = round2(
-    perimeterWidth +
-      northRowMaxDepth +
-      (hasSouthRow ? GRAND_BOULEVARD_WIDTH_M + southRowMaxDepth : 0) +
-      WELCOME_AREA_DEPTH +
-      perimeterWidth
-  );
+  const zonesSpanZ = isSingleZone
+    ? pendingZones[0].dims.depth
+    : Math.max(leftColTotalZ, rightColTotalZ);
+  const totalDepth = round2(perimeterWidth + zonesSpanZ + WELCOME_AREA_DEPTH + perimeterWidth);
   const halfHallDepth = round2(totalDepth / 2);
 
   const hallBounds: RectBounds = {
@@ -583,17 +579,14 @@ export function generateDynamicExhibitionLayout(
     maxZ: round2(hallBounds.maxZ - 1.5),
   };
 
-  const northRowTopZ = round2(hallBounds.minZ + perimeterWidth);
-  const northRowBottomZ = round2(northRowTopZ + northRowMaxDepth);
-  const boulevardCenterZ = round2(northRowBottomZ + (hasSouthRow ? GRAND_BOULEVARD_WIDTH_M / 2 : 5.0));
-  const southRowTopZ = round2(northRowBottomZ + GRAND_BOULEVARD_WIDTH_M);
-  const zonesEndZ = round2(hasSouthRow ? southRowTopZ + southRowMaxDepth : northRowBottomZ);
+  const zonesStartZ = round2(hallBounds.minZ + perimeterWidth);
+  const zonesEndZ = round2(zonesStartZ + zonesSpanZ);
 
-  // Central Entry Spine (South Welcome -> Grand Boulevard)
+  // Central Main Avenue running North-South right down the middle (x = 0) between Left & Right U-columns!
   const centralAvenueBounds: RectBounds = {
     minX: round2(-mainAvenueWidth / 2),
     maxX: round2(mainAvenueWidth / 2),
-    minZ: hasSouthRow ? boulevardCenterZ - GRAND_BOULEVARD_WIDTH_M / 2 : northRowBottomZ,
+    minZ: isSingleZone ? zonesEndZ : zonesStartZ,
     maxZ: hallBounds.maxZ,
   };
 
@@ -622,19 +615,21 @@ export function generateDynamicExhibitionLayout(
   const edges: Array<[string, string]> = [];
 
   const spawnNodeId = 'walk-spawn';
-  const blvdHubId = 'walk-boulevard-hub';
   nodes.push({ id: spawnNodeId, x: spawnPoint.x, z: spawnPoint.z, kind: 'spawn' });
-  nodes.push({ id: blvdHubId, x: 0, z: boulevardCenterZ, kind: 'avenue' });
-  edges.push([spawnNodeId, blvdHubId]);
+  let prevSpineNodeId = spawnNodeId;
 
   const placeOneUZone = (
     pz: PendingUZone,
     uIndex: number,
     centerX: number,
     centerZ: number,
-    openingDirection: 'south' | 'north'
+    openingDirection: 'south' | 'north' | 'east' | 'west'
   ) => {
     const { width, depth, backCount, leftCount, rightCount } = pz.dims;
+    const isHorizontalU = openingDirection === 'east' || openingDirection === 'west';
+    const worldSpanX = isHorizontalU ? depth : width;
+    const worldSpanZ = isHorizontalU ? width : depth;
+
     const clusterId = `u-zone-${String(uIndex + 1).padStart(2, '0')}`;
     const variationSeed = (uIndex * 41 + layoutSeed) % 997;
     const centerpieceKind = CENTERPIECE_VARIANTS[(uIndex + layoutSeed) % CENTERPIECE_VARIANTS.length];
@@ -647,8 +642,8 @@ export function generateDynamicExhibitionLayout(
       categoryId: pz.categoryId,
       centerX,
       centerZ,
-      width,
-      depth,
+      width: worldSpanX,
+      depth: worldSpanZ,
       boothCount: pz.boothCount,
       openingDirection,
       backCount,
@@ -664,10 +659,10 @@ export function generateDynamicExhibitionLayout(
       displayName: pz.displayName,
       categoryTag: pz.categoryTag,
       bounds: {
-        minX: round2(centerX - width / 2),
-        maxX: round2(centerX + width / 2),
-        minZ: round2(centerZ - depth / 2),
-        maxZ: round2(centerZ + depth / 2),
+        minX: round2(centerX - worldSpanX / 2),
+        maxX: round2(centerX + worldSpanX / 2),
+        minZ: round2(centerZ - worldSpanZ / 2),
+        maxZ: round2(centerZ + worldSpanZ / 2),
       },
       sortOrder: uIndex + 1,
       boothCount: pz.boothCount,
@@ -675,13 +670,14 @@ export function generateDynamicExhibitionLayout(
       openingDirection,
     });
 
-    // Connect Boulevard -> U-Zone Entrance -> U-Zone Courtyard Center
-    const blvdDropId = `walk-blvd-${clusterId}`;
+    // Connect Central Main Avenue Spine -> U-Zone Courtyard Center
+    const spineNodeId = `walk-spine-${clusterId}`;
     const centerNodeId = `walk-center-${clusterId}`;
-    nodes.push({ id: blvdDropId, x: centerX, z: boulevardCenterZ, kind: 'avenue' });
+    nodes.push({ id: spineNodeId, x: 0, z: isHorizontalU ? centerZ : zonesEndZ + 2.0, kind: 'avenue' });
     nodes.push({ id: centerNodeId, x: centerX, z: centerZ, kind: 'cluster_center' });
-    edges.push([blvdHubId, blvdDropId]);
-    edges.push([blvdDropId, centerNodeId]);
+    edges.push([prevSpineNodeId, spineNodeId]);
+    edges.push([spineNodeId, centerNodeId]);
+    prevSpineNodeId = spineNodeId;
 
     const addBooth = (bx: number, bz: number, rotY: number) => {
       const slotIndex = placements.length;
@@ -717,121 +713,159 @@ export function generateDynamicExhibitionLayout(
       edges.push([centerNodeId, appId]);
     };
 
-    const dirSign = openingDirection === 'south' ? 1 : -1;
     const peekArch = (offsetIdx: number) =>
       V28_ARCHETYPES[(placements.length + offsetIdx + layoutSeed) % V28_ARCHETYPES.length];
 
-    // 1. Back Wall booths (facing INWARD toward the open side: +Z if opening south, -Z if opening north)
-    const backZ = centerZ - dirSign * (depth / 2 - BOOTH_EDGE_INSET_M);
-    const backRotY = openingDirection === 'south' ? 0 : Number(Math.PI.toFixed(4));
-    const backWidths = Array.from({ length: backCount }, (_, i) => peekArch(i).width);
-    const backOffsets = computeSideCenteredOffsets(backWidths, boothGap);
-    for (let i = 0; i < backCount; i++) {
-      addBooth(centerX + backOffsets[i], backZ, backRotY);
-    }
+    if (!isHorizontalU) {
+      // Single-zone South-opening U (exact V27.5 orientation!)
+      const dirSign = openingDirection === 'south' ? 1 : -1;
+      const backZ = centerZ - dirSign * (depth / 2 - BOOTH_EDGE_INSET_M);
+      const backRotY = openingDirection === 'south' ? 0 : Number(Math.PI.toFixed(4));
+      const backWidths = Array.from({ length: backCount }, (_, i) => peekArch(i).width);
+      const backOffsets = computeSideCenteredOffsets(backWidths, boothGap);
+      for (let i = 0; i < backCount; i++) addBooth(centerX + backOffsets[i], backZ, backRotY);
 
-    // 2. Left Wing booths (West wall, facing East +X into the courtyard)
-    const leftX = centerX - (width / 2 - BOOTH_EDGE_INSET_M);
-    const leftRotY = Number((Math.PI / 2).toFixed(4));
-    const leftWidths = Array.from({ length: leftCount }, (_, i) => peekArch(i).width);
-    const leftSpan = leftWidths.reduce((s, w) => s + w, 0) + Math.max(0, leftCount - 1) * boothGap;
-    const leftOffsets = computeSideCenteredOffsets(leftWidths, boothGap);
-    const leftCenterZ = centerZ - dirSign * (depth / 2 - CORNER_CLEARANCE_M - leftSpan / 2);
-    for (let i = 0; i < leftCount; i++) {
-      addBooth(leftX, leftCenterZ + dirSign * leftOffsets[i], leftRotY);
-    }
+      const leftX = centerX - (width / 2 - BOOTH_EDGE_INSET_M);
+      const leftRotY = Number((Math.PI / 2).toFixed(4));
+      const leftWidths = Array.from({ length: leftCount }, (_, i) => peekArch(i).width);
+      const leftSpan = leftWidths.reduce((s, w) => s + w, 0) + Math.max(0, leftCount - 1) * boothGap;
+      const leftOffsets = computeSideCenteredOffsets(leftWidths, boothGap);
+      const leftCenterZ = centerZ - dirSign * (depth / 2 - CORNER_CLEARANCE_M - leftSpan / 2);
+      for (let i = 0; i < leftCount; i++) addBooth(leftX, leftCenterZ + dirSign * leftOffsets[i], leftRotY);
 
-    // 3. Right Wing booths (East wall, facing West -X into the courtyard)
-    const rightX = centerX + (width / 2 - BOOTH_EDGE_INSET_M);
-    const rightRotY = Number((-Math.PI / 2).toFixed(4));
-    const rightWidths = Array.from({ length: rightCount }, (_, i) => peekArch(i).width);
-    const rightSpan = rightWidths.reduce((s, w) => s + w, 0) + Math.max(0, rightCount - 1) * boothGap;
-    const rightOffsets = computeSideCenteredOffsets(rightWidths, boothGap);
-    const rightCenterZ = centerZ - dirSign * (depth / 2 - CORNER_CLEARANCE_M - rightSpan / 2);
-    for (let i = 0; i < rightCount; i++) {
-      addBooth(rightX, rightCenterZ + dirSign * rightOffsets[i], rightRotY);
+      const rightX = centerX + (width / 2 - BOOTH_EDGE_INSET_M);
+      const rightRotY = Number((-Math.PI / 2).toFixed(4));
+      const rightWidths = Array.from({ length: rightCount }, (_, i) => peekArch(i).width);
+      const rightSpan = rightWidths.reduce((s, w) => s + w, 0) + Math.max(0, rightCount - 1) * boothGap;
+      const rightOffsets = computeSideCenteredOffsets(rightWidths, boothGap);
+      const rightCenterZ = centerZ - dirSign * (depth / 2 - CORNER_CLEARANCE_M - rightSpan / 2);
+      for (let i = 0; i < rightCount; i++) addBooth(rightX, rightCenterZ + dirSign * rightOffsets[i], rightRotY);
+    } else {
+      // Facing Left ('east', opens +X) or Right ('west', opens -X) U-Zone!
+      const dirSign = openingDirection === 'east' ? 1 : -1;
+      // 1. Back wall (aligned along Z, facing INWARD +X for east-opening or -X for west-opening)
+      const backX = centerX - dirSign * (depth / 2 - BOOTH_EDGE_INSET_M);
+      const backRotY = Number(((dirSign * Math.PI) / 2).toFixed(4));
+      const backWidths = Array.from({ length: backCount }, (_, i) => peekArch(i).width);
+      const backOffsets = computeSideCenteredOffsets(backWidths, boothGap);
+      for (let i = 0; i < backCount; i++) {
+        addBooth(backX, centerZ + backOffsets[i], backRotY);
+      }
+
+      // 2. North wing (top of U, aligned along X, facing South +Z into courtyard)
+      const northZ = centerZ - (width / 2 - BOOTH_EDGE_INSET_M);
+      const northRotY = 0;
+      const northWidths = Array.from({ length: leftCount }, (_, i) => peekArch(i).width);
+      const northSpan = northWidths.reduce((s, w) => s + w, 0) + Math.max(0, leftCount - 1) * boothGap;
+      const northOffsets = computeSideCenteredOffsets(northWidths, boothGap);
+      const wingCenterX = centerX - dirSign * (depth / 2 - CORNER_CLEARANCE_M - northSpan / 2);
+      for (let i = 0; i < leftCount; i++) {
+        addBooth(wingCenterX + dirSign * northOffsets[i], northZ, northRotY);
+      }
+
+      // 3. South wing (bottom of U, aligned along X, facing North -Z into courtyard)
+      const southZ = centerZ + (width / 2 - BOOTH_EDGE_INSET_M);
+      const southRotY = Number(Math.PI.toFixed(4));
+      const southWidths = Array.from({ length: rightCount }, (_, i) => peekArch(i).width);
+      const southSpan = southWidths.reduce((s, w) => s + w, 0) + Math.max(0, rightCount - 1) * boothGap;
+      const southOffsets = computeSideCenteredOffsets(southWidths, boothGap);
+      const southWingCenterX = centerX - dirSign * (depth / 2 - CORNER_CLEARANCE_M - southSpan / 2);
+      for (let i = 0; i < rightCount; i++) {
+        addBooth(southWingCenterX + dirSign * southOffsets[i], southZ, southRotY);
+      }
     }
   };
 
-  // Place North Row (aligned flush with northRowBottomZ so all open mouths meet the Grand Boulevard cleanly!)
+  // Place zones cleanly: either single centered zone OR 2 facing columns (Left East-opening, Right West-opening)
   let runningIdx = 0;
-  for (let i = 0; i < northZones.length; i++) {
-    const z = northZones[i];
-    const cz = round2(northRowBottomZ - z.dims.depth / 2);
-    placeOneUZone(z, runningIdx++, northCentersX[i], cz, 'south');
+  if (isSingleZone) {
+    const z0 = pendingZones[0];
+    placeOneUZone(z0, runningIdx++, 0, round2(zonesStartZ + z0.dims.depth / 2), 'south');
+  } else {
+    // Left Column (West of Central Avenue, opening East +X onto x = -mainAvenueWidth/2)
+    let curZ = round2(zonesStartZ + (zonesSpanZ - leftColTotalZ) / 2);
+    for (const z of leftColZones) {
+      const cx = round2(-mainAvenueWidth / 2 - z.dims.depth / 2);
+      const cz = round2(curZ + z.dims.width / 2);
+      placeOneUZone(z, runningIdx++, cx, cz, 'east');
+      curZ += z.dims.width + ZONE_GAP_X_M;
+    }
+
+    // Right Column (East of Central Avenue, opening West -X onto x = +mainAvenueWidth/2)
+    // Reset spine chain from Spawn so Right Column links cleanly along Central Avenue too!
+    prevSpineNodeId = spawnNodeId;
+    curZ = round2(zonesStartZ + (zonesSpanZ - rightColTotalZ) / 2);
+    for (const z of rightColZones) {
+      const cx = round2(mainAvenueWidth / 2 + z.dims.depth / 2);
+      const cz = round2(curZ + z.dims.width / 2);
+      placeOneUZone(z, runningIdx++, cx, cz, 'west');
+      curZ += z.dims.width + ZONE_GAP_X_M;
+    }
   }
 
-  // Place South Row (aligned flush with southRowTopZ so all open mouths open North onto the Grand Boulevard!)
-  for (let i = 0; i < southZones.length; i++) {
-    const z = southZones[i];
-    const cz = round2(southRowTopZ + z.dims.depth / 2);
-    placeOneUZone(z, runningIdx++, southCentersX[i], cz, 'north');
-  }
-
-  // 4. Build Adaptive Walkable Regions (union of U-zone courtyards, Grand Boulevard, Entry Spine, Welcome Area,
-  //    and inter-U-zone connecting walkways — strictly EXCLUDING empty void outside narrower rows or behind walls!)
+  // 4. Build Adaptive Walkable Regions (Central Main Avenue + Welcome Area + U-Zone Courtyards/Mouths + Inter-Zone Walkways)
   const walkableRegions: RectBounds[] = [];
-  const allZoneMinX = zones.reduce((m, z) => Math.min(m, z.bounds.minX), -mainAvenueWidth / 2);
-  const allZoneMaxX = zones.reduce((m, z) => Math.max(m, z.bounds.maxX), mainAvenueWidth / 2);
 
-  // 4a. Grand Central Boulevard (horizontal spine connecting all facing U-zone mouths)
-  walkableRegions.push({
-    minX: round2(allZoneMinX),
-    maxX: round2(allZoneMaxX),
-    minZ: round2(northRowBottomZ - 1.5),
-    maxZ: round2(hasSouthRow ? southRowTopZ + 1.5 : northRowBottomZ + WELCOME_AREA_DEPTH),
-  });
-
-  // 4b. South Entry Spine (from Grand Boulevard down to Spawn & Welcome Area)
+  // 4a. Central Main Avenue (North-South spine down x = 0)
   walkableRegions.push({
     minX: round2(-mainAvenueWidth / 2 - 1.5),
     maxX: round2(mainAvenueWidth / 2 + 1.5),
-    minZ: round2(northRowBottomZ - 1.5),
+    minZ: round2(isSingleZone ? zonesEndZ - 1.5 : zonesStartZ),
     maxZ: round2(hallBounds.maxZ - 2.0),
   });
 
-  // 4c. Welcome Area apron around Spawn (bounded horizontally to Entry Spine + South row span)
-  const southSpanMinX = southZones.length > 0
-    ? Math.min(...zones.filter((z) => z.openingDirection === 'north').map((z) => z.bounds.minX))
-    : -mainAvenueWidth / 2 - 8.0;
-  const southSpanMaxX = southZones.length > 0
-    ? Math.max(...zones.filter((z) => z.openingDirection === 'north').map((z) => z.bounds.maxX))
-    : mainAvenueWidth / 2 + 8.0;
+  // 4b. Welcome Area apron around Spawn
   walkableRegions.push({
-    minX: round2(Math.max(walkableBounds.minX, southSpanMinX)),
-    maxX: round2(Math.min(walkableBounds.maxX, southSpanMaxX)),
+    minX: round2(Math.max(walkableBounds.minX, -mainAvenueWidth / 2 - 12.0)),
+    maxX: round2(Math.min(walkableBounds.maxX, mainAvenueWidth / 2 + 12.0)),
     minZ: round2(zonesEndZ - 1.0),
     maxZ: round2(hallBounds.maxZ - 2.0),
   });
 
-  // 4d. Each U-Zone's Interior Courtyard & Open Entrance Apron
+  // 4c. Each U-Zone's Courtyard & Open Entrance Threshold
   for (const z of zones) {
-    walkableRegions.push({
-      minX: round2(z.bounds.minX + 0.8),
-      maxX: round2(z.bounds.maxX - 0.8),
-      minZ: round2(z.openingDirection === 'south' ? z.bounds.minZ + 0.8 : z.bounds.minZ - 1.5),
-      maxZ: round2(z.openingDirection === 'south' ? z.bounds.maxZ + 1.5 : z.bounds.maxZ - 0.8),
-    });
+    if (z.openingDirection === 'east') {
+      walkableRegions.push({
+        minX: round2(z.bounds.minX + 0.8),
+        maxX: round2(z.bounds.maxX + 1.8),
+        minZ: round2(z.bounds.minZ + 0.8),
+        maxZ: round2(z.bounds.maxZ - 0.8),
+      });
+    } else if (z.openingDirection === 'west') {
+      walkableRegions.push({
+        minX: round2(z.bounds.minX - 1.8),
+        maxX: round2(z.bounds.maxX - 0.8),
+        minZ: round2(z.bounds.minZ + 0.8),
+        maxZ: round2(z.bounds.maxZ - 0.8),
+      });
+    } else {
+      walkableRegions.push({
+        minX: round2(z.bounds.minX + 0.8),
+        maxX: round2(z.bounds.maxX - 0.8),
+        minZ: round2(z.openingDirection === 'south' ? z.bounds.minZ + 0.8 : z.bounds.minZ - 1.8),
+        maxZ: round2(z.openingDirection === 'south' ? z.bounds.maxZ + 1.8 : z.bounds.maxZ - 0.8),
+      });
+    }
   }
 
-  // 4e. Inter-U-Zone Walkways ONLY between adjacent U-zones in the same row
-  const addRowInterWalkways = (rowZones: GeneratedZoneSpec[]) => {
-    const sorted = [...rowZones].sort((a, b) => a.bounds.minX - b.bounds.minX);
+  // 4d. Inter-U-Zone Walkways between consecutive U-zones in the same column
+  const addColInterWalkways = (colZones: GeneratedZoneSpec[]) => {
+    const sorted = [...colZones].sort((a, b) => a.bounds.minZ - b.bounds.minZ);
     for (let i = 0; i < sorted.length - 1; i++) {
-      const left = sorted[i];
-      const right = sorted[i + 1];
-      if (right.bounds.minX > left.bounds.maxX) {
+      const top = sorted[i];
+      const bot = sorted[i + 1];
+      if (bot.bounds.minZ > top.bounds.maxZ) {
         walkableRegions.push({
-          minX: round2(left.bounds.maxX - 0.5),
-          maxX: round2(right.bounds.minX + 0.5),
-          minZ: round2(Math.max(left.bounds.minZ, right.bounds.minZ)),
-          maxZ: round2(Math.min(left.bounds.maxZ, right.bounds.maxZ)),
+          minX: round2(Math.max(top.bounds.minX, bot.bounds.minX)),
+          maxX: round2(Math.min(top.bounds.maxX, bot.bounds.maxX)),
+          minZ: round2(top.bounds.maxZ - 0.5),
+          maxZ: round2(bot.bounds.minZ + 0.5),
         });
       }
     }
   };
-  addRowInterWalkways(zones.filter((z) => z.openingDirection === 'south'));
-  addRowInterWalkways(zones.filter((z) => z.openingDirection === 'north'));
+  addColInterWalkways(zones.filter((z) => z.openingDirection === 'east'));
+  addColInterWalkways(zones.filter((z) => z.openingDirection === 'west'));
 
   const radius = round2(Math.hypot(halfHallWidth, halfHallDepth));
   const cameraOverviewBounds = {
@@ -849,6 +883,8 @@ export function generateDynamicExhibitionLayout(
   return {
     config: {
       targetBoothCount,
+      zoneCount: explicitZoneCount,
+      boothsPerZone: explicitBoothsPerZone,
       preferredZoneCapacity,
       hallStyle,
       mainAvenueWidth,

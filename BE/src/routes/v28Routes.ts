@@ -431,6 +431,191 @@ export function createV28ApiRoutes(
     }
   });
 
+  // Business Website Product Discovery (bounded max 6 pages, SSRF/PrivateIP/Redirect/XSS/RateLimit guarded)
+  router.post('/imports/website', requireAdminAuth, async (req: Request, res: Response) => {
+    const actorKey = `${(res.locals.adminUsername as string | undefined) || 'admin'}:${req.ip || 'local'}`;
+    if (!checkUrlImportRateLimit(actorKey)) {
+      res.status(429).json({
+        error: `Vượt quá giới hạn trích xuất URL (${URL_IMPORT_MAX_PER_WINDOW} lượt/phút). Vui lòng thử lại sau.`,
+      });
+      return;
+    }
+
+    const body = (req.body || {}) as { companyId?: string; url?: string; maxPages?: number };
+    if (!body.companyId || !body.url) {
+      res.status(400).json({ error: 'Vui lòng chọn doanh nghiệp và nhập URL website.' });
+      return;
+    }
+
+    const company = v28Db.getCompanyById(body.companyId);
+    if (!company || company.status !== 'active') {
+      res.status(404).json({ error: 'Doanh nghiệp không tồn tại hoặc đang bị vô hiệu hóa.' });
+      return;
+    }
+
+    const maxPages = Math.max(1, Math.min(6, Number(body.maxPages) || 6));
+
+    try {
+      const { html: rootHtml, finalUrl } = await fetchExternalProductHtml(body.url.trim());
+      const rootOrigin = new URL(finalUrl).origin;
+      const discovered: Array<{
+        name: string;
+        sku: string;
+        price: number;
+        currency: string;
+        description: string;
+        images: string[];
+        sourceUrl: string;
+        inStock: boolean;
+        alreadyInCatalog: boolean;
+      }> = [];
+      const seenUrls = new Set<string>();
+      const seenNames = new Set<string>();
+
+      const pushCandidate = (draft: ReturnType<typeof extractProductFromHtml>, urlKey: string) => {
+        const cleanName = sanitizePlainText(draft.name || '', 180);
+        if (!cleanName || cleanName.length < 2) return;
+        const normUrl = urlKey.replace(/#.*$/, '').replace(/\/+$/, '');
+        const normName = cleanName.toLowerCase();
+        if (seenUrls.has(normUrl) || seenNames.has(normName)) return;
+        seenUrls.add(normUrl);
+        seenNames.add(normName);
+        const dup = categoryService.findDuplicateProductBySourceUrl(company.id, normUrl);
+        discovered.push({
+          name: cleanName,
+          sku: sanitizePlainText(draft.sku || '', 80),
+          price: typeof draft.price === 'number' && Number.isFinite(draft.price) && draft.price > 0 ? draft.price : 0,
+          currency: draft.currency || 'VND',
+          description: sanitizePlainText(draft.description || '', 1200),
+          images: Array.isArray(draft.images) ? draft.images.slice(0, 4) : [],
+          sourceUrl: normUrl,
+          inStock: draft.inStock ?? true,
+          alreadyInCatalog: Boolean(dup),
+        });
+      };
+
+      // 1. Parse JSON-LD Product / ItemList directly on landing page if present
+      const ldMatches = rootHtml.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+      const candidateLinks: string[] = [];
+      const seenLinks = new Set<string>([finalUrl.replace(/#.*$/, '')]);
+
+      for (const m of ldMatches) {
+        try {
+          const parsedLd = JSON.parse(m[1].trim());
+          const nodes: Array<Record<string, unknown>> = Array.isArray(parsedLd)
+            ? parsedLd
+            : Array.isArray(parsedLd?.['@graph'])
+              ? parsedLd['@graph']
+              : [parsedLd];
+          for (const node of nodes) {
+            if (!node || typeof node !== 'object') continue;
+            if (node['@type'] === 'Product' && typeof node.name === 'string') {
+              const offers = Array.isArray(node.offers) ? node.offers[0] : node.offers;
+              const rawPrice = Number((offers as Record<string, unknown> | undefined)?.price || 0);
+              const rawImg = Array.isArray(node.image) ? node.image[0] : node.image;
+              const imgUrl = typeof rawImg === 'string' ? rawImg : (rawImg as { url?: string } | undefined)?.url || '';
+              const itemUrl = typeof node.url === 'string' ? new URL(node.url, finalUrl).toString() : finalUrl;
+              pushCandidate(
+                {
+                  name: node.name,
+                  sku: typeof node.sku === 'string' ? node.sku : '',
+                  price: Number.isFinite(rawPrice) ? rawPrice : 0,
+                  currency: typeof (offers as Record<string, unknown> | undefined)?.priceCurrency === 'string'
+                    ? String((offers as Record<string, unknown>).priceCurrency)
+                    : 'VND',
+                  description: typeof node.description === 'string' ? node.description : '',
+                  images: imgUrl && /^https?:\/\//i.test(imgUrl) ? [imgUrl] : [],
+                  videoUrl: '',
+                  sourceUrl: itemUrl,
+                  inStock: true,
+                  extractionMethod: 'json-ld',
+                  warnings: [],
+                },
+                itemUrl
+              );
+            } else if (node['@type'] === 'ItemList' && Array.isArray(node.itemListElement)) {
+              for (const el of node.itemListElement) {
+                const u = typeof el?.url === 'string' ? el.url : typeof el?.item?.url === 'string' ? el.item.url : '';
+                if (u) {
+                  try {
+                    const abs = new URL(u, finalUrl).toString().replace(/#.*$/, '');
+                    if (new URL(abs).origin === rootOrigin && !seenLinks.has(abs)) {
+                      seenLinks.add(abs);
+                      candidateLinks.push(abs);
+                    }
+                  } catch {}
+                }
+              }
+            }
+          }
+        } catch {
+          // ignore malformed JSON-LD block
+        }
+      }
+
+      // 2. Discover same-origin public product links on landing page (strictly bounded to maxPages)
+      const hrefMatches = rootHtml.matchAll(/<a[^>]+href=["']([^"']+)["']/gi);
+      for (const m of hrefMatches) {
+        if (candidateLinks.length >= maxPages) break;
+        const href = m[1].trim();
+        if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) continue;
+        try {
+          const absUrl = new URL(href, finalUrl);
+          if (absUrl.origin !== rootOrigin) continue;
+          const p = absUrl.pathname.toLowerCase();
+          if (
+            p.includes('/product') ||
+            p.includes('/san-pham') ||
+            p.includes('/item') ||
+            p.includes('/shop/') ||
+            p.includes('/p/') ||
+            p.includes('/sp/')
+          ) {
+            const cleaned = absUrl.toString().replace(/#.*$/, '');
+            if (!seenLinks.has(cleaned)) {
+              seenLinks.add(cleaned);
+              candidateLinks.push(cleaned);
+            }
+          }
+        } catch {
+          // ignore invalid href
+        }
+      }
+
+      let pagesScanned = 1;
+      for (const link of candidateLinks.slice(0, maxPages - 1)) {
+        try {
+          const sub = await fetchExternalProductHtml(link);
+          pagesScanned++;
+          const subDraft = extractProductFromHtml(sub.html, sub.finalUrl);
+          pushCandidate(subDraft, sub.finalUrl);
+        } catch {
+          // skip blocked/unparseable subpage safely
+        }
+      }
+
+      // 3. Fallback: if landing page itself is a single product page and nothing else matched
+      if (discovered.length === 0) {
+        const rootDraft = extractProductFromHtml(rootHtml, finalUrl);
+        if (rootDraft.name && rootDraft.name.trim().length >= 2) {
+          pushCandidate(rootDraft, finalUrl);
+        }
+      }
+
+      res.json({
+        siteUrl: finalUrl,
+        pagesScanned,
+        discoveredProducts: discovered,
+        note:
+          discovered.length > 0
+            ? `Đã tìm thấy ${discovered.length} sản phẩm công khai từ ${pagesScanned} trang (giới hạn an toàn tối đa ${maxPages} trang).`
+            : 'Không tìm thấy dữ liệu sản phẩm có cấu trúc trên trang này. Bạn có thể nhập thủ công bên dưới.',
+      });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
   // ============================================================================
   // E. PHASE 2 — DYNAMIC EXHIBITIONS, VERSIONS, ZONES, PLACEMENTS & PUBLISH
   // ============================================================================
@@ -476,8 +661,20 @@ export function createV28ApiRoutes(
       res.status(400).json({ error: parsed.error.issues[0]?.message || 'Cấu hình layout không hợp lệ.' });
       return;
     }
+    const { zoneCount, boothsPerZone } = parsed.data;
+    const computedTotal =
+      zoneCount && boothsPerZone
+        ? zoneCount * boothsPerZone
+        : parsed.data.targetBoothCount ?? 100;
+    if (computedTotal < 1 || computedTotal > 300) {
+      res.status(400).json({ error: 'Tổng số gian hàng phải nằm trong khoảng 1 đến 300 gian.' });
+      return;
+    }
     try {
-      const version = exhibitionService.createDraftVersion(getParam(req.params.id), parsed.data);
+      const version = exhibitionService.createDraftVersion(getParam(req.params.id), {
+        ...parsed.data,
+        targetBoothCount: computedTotal,
+      });
       res.status(201).json({ version });
     } catch (err) {
       res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
@@ -525,6 +722,24 @@ export function createV28ApiRoutes(
           getParam(req.params.versionId),
           getParam(req.params.boothId),
           parsed.data
+        );
+        res.json({ version });
+      } catch (err) {
+        res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+      }
+    }
+  );
+
+  router.delete(
+    '/exhibitions/:id/versions/:versionId/booths/:boothId',
+    requireAdminAuth,
+    (req: Request, res: Response) => {
+      try {
+        const forceUnassign = req.query.forceUnassign === 'true';
+        const version = exhibitionService.deleteDraftBoothPlacement(
+          getParam(req.params.versionId),
+          getParam(req.params.boothId),
+          { forceUnassign }
         );
         res.json({ version });
       } catch (err) {

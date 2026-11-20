@@ -25,6 +25,24 @@ export const UrlProductImport: React.FC<UrlProductImportProps> = ({
 
   const [sourceUrl, setSourceUrl] = useState<string>('');
   const [extracting, setExtracting] = useState<boolean>(false);
+  const [discovering, setDiscovering] = useState<boolean>(false);
+  const [discoverNote, setDiscoverNote] = useState<string>('');
+  const [discoveredItems, setDiscoveredItems] = useState<
+    Array<{
+      selected: boolean;
+      name: string;
+      sku: string;
+      price: number;
+      currency: string;
+      description: string;
+      images: string[];
+      sourceUrl: string;
+      inStock: boolean;
+      alreadyInCatalog: boolean;
+      assignSlot: string;
+    }>
+  >([]);
+  const [batchSavedCount, setBatchSavedCount] = useState<number>(0);
   const [extractError, setExtractError] = useState<string>('');
   const [duplicateWarn, setDuplicateWarn] = useState<string>('');
   const [showEditor, setShowEditor] = useState<boolean>(false);
@@ -69,6 +87,81 @@ export const UrlProductImport: React.FC<UrlProductImportProps> = ({
       setSlotId('');
     }
   }, [boothId, ownedBooths]);
+
+  const handleDiscoverWebsite = async () => {
+    if (!companyId || !sourceUrl.trim()) return;
+    setDiscovering(true);
+    setExtractError('');
+    setDiscoverNote('');
+    setDiscoveredItems([]);
+    setBatchSavedCount(0);
+    setSavedResult(null);
+    try {
+      const res = await v28Api.discoverWebsiteProducts({
+        companyId,
+        url: sourceUrl.trim(),
+        maxPages: 6,
+      });
+      setDiscoverNote(res.note);
+      if (res.discoveredProducts.length === 0) {
+        setShowEditor(true);
+      } else {
+        setDiscoveredItems(
+          res.discoveredProducts.map((item, idx) => ({
+            ...item,
+            selected: !item.alreadyInCatalog,
+            assignSlot: idx < SLOT_IDS.length ? SLOT_IDS[idx] : '',
+          }))
+        );
+      }
+    } catch (err) {
+      setExtractError(
+        `${(err as Error).message || 'Không thể quét website nguồn.'} Bạn vẫn có thể nhập thông tin sản phẩm thủ công bên dưới.`
+      );
+      setShowEditor(true);
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const handleSaveDiscoveredBatch = async () => {
+    if (!companyId) return;
+    const chosen = discoveredItems.filter((it) => it.selected && it.name.trim().length >= 2);
+    if (chosen.length === 0) {
+      setSaveError('Vui lòng chọn ít nhất 1 sản phẩm để lưu vào Catalog.');
+      return;
+    }
+    setSaving(true);
+    setSaveError('');
+    let okCount = 0;
+    try {
+      for (const item of chosen) {
+        const { product } = await v28Api.createProduct({
+          companyId,
+          boothId: boothId || null,
+          name: item.name.trim(),
+          sku: item.sku.trim(),
+          price: Math.max(0, Number(item.price) || 0),
+          currency: item.currency || 'VND',
+          description: item.description.trim(),
+          images: item.images,
+          sourceUrl: item.sourceUrl,
+          inStock: item.inStock,
+        });
+        if (boothId && item.assignSlot) {
+          await v28Api.assignSlot(boothId, item.assignSlot, product.id);
+        }
+        okCount++;
+      }
+      setBatchSavedCount(okCount);
+      setDiscoveredItems([]);
+      onDataChanged?.();
+    } catch (err) {
+      setSaveError((err as Error).message || 'Lưu danh sách sản phẩm thất bại.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleExtractPreview = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -259,24 +352,53 @@ export const UrlProductImport: React.FC<UrlProductImportProps> = ({
               />
             </label>
             <button
-              type="submit"
-              disabled={extracting || !companyId}
+              type="button"
+              onClick={handleDiscoverWebsite}
+              disabled={discovering || extracting || !companyId || !sourceUrl.trim()}
               style={{
-                padding: '10px 18px',
+                padding: '10px 16px',
+                borderRadius: 10,
+                border: 'none',
+                background: '#0f172a',
+                color: '#fff',
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontSize: 13.5,
+                minHeight: 42,
+              }}
+            >
+              {discovering ? '⏳ Đang quét website...' : '🌐 Quét Website Tìm Sản phẩm'}
+            </button>
+            <button
+              type="submit"
+              disabled={extracting || discovering || !companyId}
+              style={{
+                padding: '10px 16px',
                 borderRadius: 10,
                 border: 'none',
                 background: '#0ea5e9',
                 color: '#fff',
                 fontWeight: 700,
                 cursor: 'pointer',
-                fontSize: 14,
+                fontSize: 13.5,
                 minHeight: 42,
               }}
             >
-              {extracting ? '⏳ Đang kiểm tra & trích xuất...' : '🔍 Trích xuất & Xem trước'}
+              {extracting ? '⏳ Đang trích xuất...' : '🔍 Trích xuất 1 trang SP'}
             </button>
           </div>
         </form>
+
+        {discoverNote && (
+          <div style={{ marginTop: 12, padding: 12, borderRadius: 10, background: '#f0f9ff', border: '1px solid #bae6fd', color: '#0369a1', fontSize: 13 }}>
+            ℹ️ {discoverNote}
+          </div>
+        )}
+        {batchSavedCount > 0 && (
+          <div style={{ marginTop: 12, padding: 12, borderRadius: 10, background: '#ecfdf5', border: '1px solid #6ee7b7', color: '#065f46', fontSize: 13, fontWeight: 700 }}>
+            ✅ Đã lưu thành công {batchSavedCount} sản phẩm vào Catalog{boothId ? ' & phân bổ vào các slot đã chọn' : ''}!
+          </div>
+        )}
 
         {extractError && (
           <div style={{ marginTop: 12, padding: 12, borderRadius: 10, background: '#fff7ed', border: '1px solid #fdba74', color: '#9a3412', fontSize: 13 }}>
@@ -289,6 +411,109 @@ export const UrlProductImport: React.FC<UrlProductImportProps> = ({
           </div>
         )}
       </div>
+
+      {/* Discovered Website Products Preview & Batch Allocation */}
+      {discoveredItems.length > 0 && (
+        <div
+          style={{
+            background: '#fff',
+            borderRadius: 16,
+            padding: 18,
+            border: '1px solid #e2e8f0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <strong style={{ fontSize: 15, color: '#0f172a' }}>
+              📦 Sản phẩm tìm thấy từ Website ({discoveredItems.filter((i) => i.selected).length} / {discoveredItems.length} được chọn)
+            </strong>
+            <button
+              type="button"
+              onClick={handleSaveDiscoveredBatch}
+              disabled={saving}
+              style={{
+                padding: '9px 16px',
+                borderRadius: 10,
+                border: 'none',
+                background: '#059669',
+                color: '#fff',
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontSize: 13,
+              }}
+            >
+              {saving ? '⏳ Đang lưu...' : `💾 Lưu ${discoveredItems.filter((i) => i.selected).length} SP đã chọn vào Catalog`}
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {discoveredItems.map((it, idx) => (
+              <div
+                key={`${it.sourceUrl}-${idx}`}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'auto 1fr auto',
+                  gap: 10,
+                  alignItems: 'center',
+                  padding: 10,
+                  borderRadius: 10,
+                  border: '1px solid #e2e8f0',
+                  background: it.selected ? '#f8fafc' : '#f1f5f9',
+                  opacity: it.selected ? 1 : 0.65,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={it.selected}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setDiscoveredItems((prev) =>
+                      prev.map((row, i) => (i === idx ? { ...row, selected: checked } : row))
+                    );
+                  }}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <input
+                    type="text"
+                    value={it.name}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDiscoveredItems((prev) =>
+                        prev.map((row, i) => (i === idx ? { ...row, name: val } : row))
+                      );
+                    }}
+                    style={{ padding: '6px 9px', borderRadius: 8, border: '1px solid #cbd5e1', fontWeight: 700, fontSize: 13 }}
+                  />
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 12, color: '#64748b' }}>
+                    <span>Giá: {it.price > 0 ? `${it.price.toLocaleString('vi-VN')} ${it.currency}` : 'Liên hệ'}</span>
+                    <span>· URL: {it.sourceUrl}</span>
+                    {it.alreadyInCatalog && <span style={{ color: '#b45309', fontWeight: 700 }}>⚠️ Đã có trong Catalog</span>}
+                  </div>
+                </div>
+                {boothId && (
+                  <select
+                    value={it.assignSlot}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDiscoveredItems((prev) =>
+                        prev.map((row, i) => (i === idx ? { ...row, assignSlot: val } : row))
+                      );
+                    }}
+                    style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12 }}
+                  >
+                    <option value="">Chỉ lưu Catalog</option>
+                    {SLOT_IDS.map((s, si) => (
+                      <option key={s} value={s}>Gán Slot #{si + 1}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Preview & Confirm / Manual Edit Form */}
       {showEditor && (

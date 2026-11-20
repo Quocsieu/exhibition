@@ -35,11 +35,35 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
   const [archetypes, setArchetypes] = useState<V28ArchetypeSpec[]>([]);
   const [companyCatalogProducts, setCompanyCatalogProducts] = useState<V28Product[]>([]);
 
-  const [targetBoothCount, setTargetBoothCount] = useState<number>(100);
-  const [zoneCapacity, setZoneCapacity] = useState<number>(10);
+  // String-backed numeric inputs (allow clearing completely, typing/pasting freely, zero wheel jumps or focus loss!)
+  const [zoneCountInput, setZoneCountInput] = useState<string>('10');
+  const [boothsPerZoneInput, setBoothsPerZoneInput] = useState<string>('10');
+  const [showCreateConfirm, setShowCreateConfirm] = useState<boolean>(false);
+  const [confirmDeleteBooth, setConfirmDeleteBooth] = useState<V28BoothPlacementView | null>(null);
   const [selectedBooth, setSelectedBooth] = useState<V28BoothPlacementView | null>(null);
   const [editBoothName, setEditBoothName] = useState<string>('');
   const [editZoneName, setEditZoneName] = useState<Record<string, string>>({});
+
+  const parsedZoneCount = /^\d+$/.test(zoneCountInput.trim()) ? Number(zoneCountInput.trim()) : NaN;
+  const parsedBoothsPerZone = /^\d+$/.test(boothsPerZoneInput.trim()) ? Number(boothsPerZoneInput.trim()) : NaN;
+  const computedTotalBooths =
+    Number.isFinite(parsedZoneCount) && Number.isFinite(parsedBoothsPerZone)
+      ? parsedZoneCount * parsedBoothsPerZone
+      : 0;
+  const configValidationError = (() => {
+    if (!zoneCountInput.trim()) return 'Vui lòng nhập số khu triển lãm.';
+    if (!Number.isFinite(parsedZoneCount) || parsedZoneCount < 1 || parsedZoneCount > 30) {
+      return 'Số khu phải là số nguyên từ 1 đến 30.';
+    }
+    if (!boothsPerZoneInput.trim()) return 'Vui lòng nhập số gian hàng mỗi khu.';
+    if (!Number.isFinite(parsedBoothsPerZone) || parsedBoothsPerZone < 1 || parsedBoothsPerZone > 50) {
+      return 'Số gian mỗi khu phải là số nguyên từ 1 đến 50.';
+    }
+    if (computedTotalBooths > 300) {
+      return `Tổng số gian (${computedTotalBooths}) vượt quá giới hạn an toàn 300 gian của hệ thống.`;
+    }
+    return '';
+  })();
 
   // Search, Filter & Pagination for 100+ booths dashboard
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -88,7 +112,6 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
     try {
       const { version } = await v28Api.getVersionDetail(exhId, verId);
       setVersionDetail(version);
-      setTargetBoothCount(version.targetBoothCount);
       const zn: Record<string, string> = {};
       for (const z of version.zones) zn[z.id] = z.displayName;
       setEditZoneName(zn);
@@ -186,21 +209,55 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
   };
 
   const handleCreateDraft = async () => {
-    if (!selectedExhId) return;
+    if (!selectedExhId || configValidationError) return;
     setLoading(true);
     setError('');
     setMessage('');
     try {
       const { version } = await v28Api.createDraftVersion(selectedExhId, {
-        targetBoothCount,
-        preferredZoneCapacity: zoneCapacity,
+        zoneCount: parsedZoneCount,
+        boothsPerZone: parsedBoothsPerZone,
+        targetBoothCount: computedTotalBooths,
+        preferredZoneCapacity: parsedBoothsPerZone,
         baseVersionId: selectedVersionId || undefined,
       });
       await loadExhibitions();
       setSelectedVersionId(version.versionId);
       setVersionDetail(version);
+      setShowCreateConfirm(false);
+      setFilterZoneCode('ALL');
       setPage(1);
-      setMessage(`Đã tạo bản Draft v${version.versionNumber} (${version.booths.length} gian, ${version.zones.length} khu).`);
+      setMessage(
+        `Đã tạo bản Draft v${version.versionNumber} (${version.zones.length} khu × ${parsedBoothsPerZone} gian = ${version.booths.length} gian). World công khai chưa thay đổi cho đến khi bấm Publish.`
+      );
+      onDataChanged?.();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmDeleteBooth = async () => {
+    if (!selectedExhId || !selectedVersionId || !confirmDeleteBooth) return;
+    setLoading(true);
+    setError('');
+    setMessage('');
+    try {
+      const { version } = await v28Api.deleteDraftBooth(
+        selectedExhId,
+        selectedVersionId,
+        confirmDeleteBooth.boothId,
+        confirmDeleteBooth.assignedSlotCount > 0
+      );
+      setVersionDetail(version);
+      if (selectedBooth?.boothId === confirmDeleteBooth.boothId) {
+        setSelectedBooth(null);
+      }
+      setMessage(
+        `Đã xóa gian hàng "${confirmDeleteBooth.boothName}" (${confirmDeleteBooth.boothId}) khỏi Draft v${version.versionNumber}. Sản phẩm trong Catalog & Doanh nghiệp vẫn được giữ nguyên. Bấm Publish để đồng bộ World 3D.`
+      );
+      setConfirmDeleteBooth(null);
       onDataChanged?.();
     } catch (e) {
       setError((e as Error).message);
@@ -347,60 +404,102 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
         </div>
       </div>
 
-      {/* Top Overview & Resize Controls */}
+      {/* Step 1: Easy-to-Use Zone x Booth Creator Controls + Draft/Preview/Publish */}
       <div
         style={{
           background: '#fff',
-          borderRadius: 12,
-          padding: 16,
+          borderRadius: 14,
+          padding: 18,
           border: '1px solid #e2e8f0',
           display: 'flex',
-          flexWrap: 'wrap',
-          gap: 12,
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          flexDirection: 'column',
+          gap: 14,
         }}
       >
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <label style={{ fontSize: 13 }}>
-            Số gian:{' '}
-            <input
-              type="number"
-              min={1}
-              max={200}
-              value={targetBoothCount}
-              onChange={(e) => setTargetBoothCount(Math.max(1, Math.min(200, Number(e.target.value) || 20)))}
-              style={{ width: 72, padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1' }}
-            />
-          </label>
-          <label style={{ fontSize: 13 }}>
-            Gian/Khu:{' '}
-            <input
-              type="number"
-              min={4}
-              max={50}
-              value={zoneCapacity}
-              onChange={(e) => setZoneCapacity(Math.max(4, Math.min(50, Number(e.target.value) || 10)))}
-              style={{ width: 64, padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1' }}
-            />
-          </label>
-          <button
-            type="button"
-            onClick={handleCreateDraft}
-            disabled={loading}
-            style={{
-              padding: '8px 14px',
-              borderRadius: 8,
-              border: 'none',
-              background: '#0f172a',
-              color: '#fff',
-              cursor: 'pointer',
-              fontWeight: 600,
-            }}
-          >
-            + Tạo Draft mới ({targetBoothCount} gian)
-          </button>
-        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+              Số khu triển lãm (1–30)
+              <input
+                type="text"
+                inputMode="numeric"
+                aria-label="Số khu triển lãm"
+                value={zoneCountInput}
+                onChange={(e) => {
+                  setZoneCountInput(e.target.value.replace(/[^\d]/g, ''));
+                  setShowCreateConfirm(false);
+                }}
+                onWheel={(e) => e.currentTarget.blur()}
+                placeholder="VD: 10"
+                style={{
+                  width: 140,
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: configValidationError && !Number.isFinite(parsedZoneCount) ? '1.5px solid #ef4444' : '1px solid #cbd5e1',
+                  fontSize: 15,
+                  fontWeight: 700,
+                }}
+              />
+            </label>
+
+            <span style={{ fontSize: 18, fontWeight: 800, color: '#64748b', paddingBottom: 10 }}>×</span>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+              Số gian hàng mỗi khu (1–50)
+              <input
+                type="text"
+                inputMode="numeric"
+                aria-label="Số gian hàng mỗi khu"
+                value={boothsPerZoneInput}
+                onChange={(e) => {
+                  setBoothsPerZoneInput(e.target.value.replace(/[^\d]/g, ''));
+                  setShowCreateConfirm(false);
+                }}
+                onWheel={(e) => e.currentTarget.blur()}
+                placeholder="VD: 10"
+                style={{
+                  width: 160,
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: configValidationError && !Number.isFinite(parsedBoothsPerZone) ? '1.5px solid #ef4444' : '1px solid #cbd5e1',
+                  fontSize: 15,
+                  fontWeight: 700,
+                }}
+              />
+            </label>
+
+            <div
+              style={{
+                padding: '9px 14px',
+                borderRadius: 10,
+                background: '#f0f9ff',
+                border: '1px solid #bae6fd',
+                color: '#0369a1',
+                fontSize: 13.5,
+                fontWeight: 700,
+              }}
+            >
+              Tổng dự kiến: <strong style={{ fontSize: 16 }}>{computedTotalBooths}</strong> gian hàng
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowCreateConfirm(true)}
+              disabled={loading || Boolean(configValidationError)}
+              style={{
+                padding: '10px 18px',
+                borderRadius: 10,
+                border: 'none',
+                background: configValidationError ? '#94a3b8' : '#0f172a',
+                color: '#fff',
+                cursor: configValidationError ? 'not-allowed' : 'pointer',
+                fontWeight: 700,
+                fontSize: 14,
+              }}
+            >
+              🏛️ Tạo không gian triển lãm
+            </button>
+          </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {selectedExh && (
@@ -474,6 +573,76 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
             </button>
           )}
         </div>
+        </div>
+
+        {configValidationError && (
+          <div style={{ padding: '9px 12px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 13, fontWeight: 600 }}>
+            ⚠️ {configValidationError}
+          </div>
+        )}
+
+        {showCreateConfirm && !configValidationError && (
+          <div
+            style={{
+              padding: 14,
+              borderRadius: 12,
+              background: '#f8fafc',
+              border: '1.5px solid #0ea5e9',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
+            <strong style={{ fontSize: 14, color: '#0f172a' }}>
+              📋 Xác nhận cấu hình trước khi tạo không gian triển lãm (Draft)
+            </strong>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, fontSize: 13 }}>
+              <div>• Số khu chữ U: <strong>{parsedZoneCount} khu</strong></div>
+              <div>• Số gian / khu: <strong>{parsedBoothsPerZone} gian</strong></div>
+              <div>• Tổng số gian: <strong>{computedTotalBooths} gian</strong></div>
+              <div>• Bố cục: <strong>{parsedZoneCount === 1 ? '1 chữ U trung tâm' : `${Math.ceil(parsedZoneCount / 2)} Trái + ${parsedZoneCount - Math.ceil(parsedZoneCount / 2)} Phải đối diện`}</strong></div>
+              <div>• Gian đang có SP: <strong>{stats.boothsWithProducts} gian</strong></div>
+              <div>• Gian trống dự kiến: <strong style={{ color: '#dc2626' }}>{Math.max(0, computedTotalBooths - stats.boothsWithProducts)} gian</strong></div>
+            </div>
+            <div style={{ fontSize: 12, color: '#475569' }}>
+              Lưu ý: Hệ thống sẽ tạo bản <strong>Draft</strong> mới để bạn xem trước và chỉnh sửa. World 3D công khai chỉ cập nhật sau khi bạn bấm nút <strong>🚀 Publish</strong>.
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleCreateDraft}
+                disabled={loading}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#0ea5e9',
+                  color: '#fff',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontSize: 13,
+                }}
+              >
+                {loading ? '⏳ Đang tạo...' : `✅ Xác nhận Tạo Draft (${parsedZoneCount} khu × ${parsedBoothsPerZone} gian)`}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCreateConfirm(false)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  color: '#334155',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                }}
+              >
+                Hủy
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -721,7 +890,74 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
         </div>
       )}
 
-      {/* Paginated, Searchable, Filterable 100-Booth Table */}
+      {/* Interactive Zone Cards Overview (Section 7: click zone -> filter booths, shows empty booth counts) */}
+      {versionDetail && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+            <strong style={{ fontSize: 15, color: '#0f172a' }}>
+              🗂️ Danh sách Phân khu chữ U ({versionDetail.zones.length} khu · {versionDetail.booths.length} gian)
+            </strong>
+            {filterZoneCode !== 'ALL' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterZoneCode('ALL');
+                  setPage(1);
+                }}
+                style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#f8fafc', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+              >
+                Hiện tất cả {versionDetail.zones.length} khu
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 10 }}>
+            {versionDetail.zones.map((z) => {
+              const zoneBooths = versionDetail.booths.filter((b) => b.zoneCode === z.code);
+              const withProducts = zoneBooths.filter((b) => b.assignedSlotCount > 0).length;
+              const emptyCount = zoneBooths.length - withProducts;
+              const isSelected = filterZoneCode === z.code;
+              return (
+                <button
+                  key={z.id}
+                  type="button"
+                  onClick={() => {
+                    setFilterZoneCode(isSelected ? 'ALL' : z.code);
+                    setPage(1);
+                  }}
+                  style={{
+                    textAlign: 'left',
+                    padding: '11px 13px',
+                    borderRadius: 12,
+                    border: isSelected ? '2px solid #0ea5e9' : '1px solid #e2e8f0',
+                    background: isSelected ? '#f0f9ff' : '#f8fafc',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                    <strong style={{ fontSize: 13.5, color: '#0f172a' }}>{z.displayName}</strong>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 999, background: versionDetail.status === 'published' ? '#dcfce7' : '#e0e7ff', color: versionDetail.status === 'published' ? '#166534' : '#3730a3' }}>
+                      {versionDetail.status.toUpperCase()}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>{z.categoryTag || `Khu ${z.code}`}</div>
+                  <div style={{ display: 'flex', gap: 8, fontSize: 12, marginTop: 2, flexWrap: 'wrap' }}>
+                    <span><strong>{zoneBooths.length}</strong> gian</span>
+                    <span style={{ color: '#059669' }}><strong>{withProducts}</strong> có SP</span>
+                    {emptyCount > 0 && (
+                      <span style={{ color: '#dc2626', fontWeight: 700 }}>🔴 {emptyCount} trống</span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Paginated, Searchable, Filterable Booth Table (with Red Empty-Booth Highlight & Safe Delete) */}
       {versionDetail && (
         <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -796,55 +1032,104 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
                 </tr>
               </thead>
               <tbody>
-                {pagedBooths.map((b) => (
-                  <tr
-                    key={b.boothId}
-                    style={{
-                      borderBottom: '1px solid #f1f5f9',
-                      background: selectedBooth?.boothId === b.boothId ? '#eff6ff' : 'transparent',
-                    }}
-                  >
-                    <td style={{ padding: '8px 10px', color: '#64748b' }}>{b.slotIndex + 1}</td>
-                    <td style={{ padding: '8px 10px', fontWeight: 600 }}>
-                      {b.boothName}
-                      <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>{b.boothId}</div>
-                    </td>
-                    <td style={{ padding: '8px 10px' }}>{b.zoneName}</td>
-                    <td style={{ padding: '8px 10px' }}>{b.companyName || '— Chưa gán —'}</td>
-                    <td style={{ padding: '8px 10px' }}>{b.archetypeLabel}</td>
-                    <td style={{ padding: '8px 10px' }}>
-                      <span
-                        style={{
-                          padding: '2px 8px',
-                          borderRadius: 999,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          background: b.assignedSlotCount > 0 ? '#dcfce7' : '#f1f5f9',
-                          color: b.assignedSlotCount > 0 ? '#166534' : '#64748b',
-                        }}
-                      >
-                        {b.assignedSlotCount} / 6 SP
-                      </span>
-                    </td>
-                    <td style={{ padding: '8px 10px' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleSelectBooth(b)}
-                        style={{
-                          padding: '5px 10px',
-                          borderRadius: 6,
-                          border: '1px solid #cbd5e1',
-                          background: '#fff',
-                          cursor: 'pointer',
-                          fontSize: 12,
-                          fontWeight: 600,
-                        }}
-                      >
-                        Quản lý / 6 Slot
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {pagedBooths.map((b) => {
+                  const isEmptyBooth = b.assignedSlotCount === 0;
+                  return (
+                    <tr
+                      key={b.boothId}
+                      style={{
+                        borderBottom: '1px solid #f1f5f9',
+                        borderLeft: isEmptyBooth ? '4px solid #ef4444' : '4px solid transparent',
+                        background:
+                          selectedBooth?.boothId === b.boothId
+                            ? '#eff6ff'
+                            : isEmptyBooth
+                              ? '#fef2f2'
+                              : 'transparent',
+                      }}
+                    >
+                      <td style={{ padding: '8px 10px', color: '#64748b' }}>{b.slotIndex + 1}</td>
+                      <td style={{ padding: '8px 10px', fontWeight: 600 }}>
+                        {b.boothName}
+                        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>{b.boothId}</div>
+                      </td>
+                      <td style={{ padding: '8px 10px' }}>{b.zoneName}</td>
+                      <td style={{ padding: '8px 10px' }}>{b.companyName || '— Chưa gán —'}</td>
+                      <td style={{ padding: '8px 10px' }}>{b.archetypeLabel}</td>
+                      <td style={{ padding: '8px 10px' }}>
+                        {isEmptyBooth ? (
+                          <span
+                            style={{
+                              padding: '3px 9px',
+                              borderRadius: 999,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              background: '#fee2e2',
+                              color: '#b91c1c',
+                              border: '1px solid #fca5a5',
+                            }}
+                          >
+                            🔴 Chưa có sản phẩm (0/6)
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              padding: '3px 9px',
+                              borderRadius: 999,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              background: '#dcfce7',
+                              color: '#166534',
+                            }}
+                          >
+                            {b.assignedSlotCount} / 6 SP
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: '8px 10px' }}>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectBooth(b)}
+                            style={{
+                              padding: '5px 10px',
+                              borderRadius: 6,
+                              border: '1px solid #cbd5e1',
+                              background: '#fff',
+                              cursor: 'pointer',
+                              fontSize: 12,
+                              fontWeight: 600,
+                            }}
+                          >
+                            {isEmptyBooth ? '+ Thêm SP' : 'Quản lý / 6 Slot'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteBooth(b)}
+                            disabled={!isDraft}
+                            title={
+                              isDraft
+                                ? 'Xóa gian hàng khỏi bản Draft (không xóa sản phẩm khỏi Catalog)'
+                                : 'Chỉ xóa được gian hàng khi đang ở bản Draft'
+                            }
+                            style={{
+                              padding: '5px 9px',
+                              borderRadius: 6,
+                              border: '1px solid #fecaca',
+                              background: isDraft ? '#fff1f2' : '#f8fafc',
+                              color: isDraft ? '#be123c' : '#94a3b8',
+                              cursor: isDraft ? 'pointer' : 'not-allowed',
+                              fontSize: 12,
+                              fontWeight: 600,
+                            }}
+                          >
+                            🗑️ Xóa
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -870,6 +1155,72 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
                 style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: safePage >= totalPages ? 'not-allowed' : 'pointer' }}
               >
                 Sau →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Safe Booth Deletion Confirmation Modal (Section 9) */}
+      {confirmDeleteBooth && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Xác nhận xóa gian hàng"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,23,42,0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 460,
+              background: '#fff',
+              borderRadius: 16,
+              padding: 20,
+              boxShadow: '0 20px 50px rgba(0,0,0,0.28)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: 17, color: '#991b1b' }}>🗑️ Xác nhận xóa gian hàng khỏi bản Draft</h3>
+            <div style={{ fontSize: 13.5, color: '#334155', lineHeight: 1.5 }}>
+              <div><strong>Mã gian (Booth ID):</strong> <code>{confirmDeleteBooth.boothId}</code></div>
+              <div><strong>Tên gian:</strong> {confirmDeleteBooth.boothName}</div>
+              <div><strong>Thuộc khu:</strong> {confirmDeleteBooth.zoneName}</div>
+              <div><strong>Sản phẩm đang gán:</strong> {confirmDeleteBooth.assignedSlotCount} / 6 slot</div>
+            </div>
+            {confirmDeleteBooth.assignedSlotCount > 0 && (
+              <div style={{ padding: 10, borderRadius: 10, background: '#fff7ed', border: '1px solid #fdba74', color: '#9a3412', fontSize: 12.5 }}>
+                ⚠️ Gian này đang có {confirmDeleteBooth.assignedSlotCount} sản phẩm được gán. Xác nhận sẽ <strong>chỉ gỡ liên kết khỏi slot</strong>, <strong>KHÔNG xóa sản phẩm khỏi Catalog</strong> và <strong>KHÔNG xóa doanh nghiệp</strong>.
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: '#64748b' }}>
+              Hệ thống sẽ cập nhật số gian mục tiêu của bản Draft để gian này không bị tự động tạo lại. World 3D công khai chỉ cập nhật sau khi bạn bấm Publish.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteBooth(null)}
+                style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', fontSize: 13 }}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteBooth}
+                disabled={loading}
+                style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#dc2626', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
+              >
+                {loading ? '⏳ Đang xóa...' : 'Xác nhận xóa gian'}
               </button>
             </div>
           </div>

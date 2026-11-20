@@ -260,12 +260,14 @@ export const CreateExhibitionInputSchema = z.object({
 });
 
 export const CreateDraftLayoutInputSchema = z.object({
-  targetBoothCount: z.number().int().min(1, 'Tối thiểu 1 gian hàng').max(200, 'Tối đa 200 gian hàng'),
-  preferredZoneCapacity: z.number().int().min(4).max(50).optional().default(10),
+  targetBoothCount: z.number().int().min(1, 'Tối thiểu 1 gian hàng').max(300, 'Tối đa 300 gian hàng').optional(),
+  zoneCount: z.number().int().min(1, 'Tối thiểu 1 khu').max(30, 'Tối đa 30 khu').optional(),
+  boothsPerZone: z.number().int().min(1, 'Tối thiểu 1 gian/khu').max(50, 'Tối đa 50 gian/khu').optional(),
+  preferredZoneCapacity: z.number().int().min(1).max(50).optional().default(10),
   hallStyle: z.enum(['grand_expo', 'modular_pavilion']).optional().default('grand_expo'),
-  mainAvenueWidth: z.number().min(8).max(20).optional().default(10),
-  aisleWidth: z.number().min(7.6).max(16).optional().default(8.4),
-  perimeterWidth: z.number().min(5).max(15).optional().default(6),
+  mainAvenueWidth: z.number().min(8).max(20).optional().default(14),
+  aisleWidth: z.number().min(7.6).max(16).optional().default(10),
+  perimeterWidth: z.number().min(5).max(15).optional().default(7),
   layoutSeed: z.number().int().min(0).max(9999).optional().default(28),
   baseVersionId: z.string().trim().optional(),
 });

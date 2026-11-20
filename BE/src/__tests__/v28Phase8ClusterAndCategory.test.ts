@@ -52,9 +52,9 @@ describe('V28 PHASE 8 — Multiple Variable-Size U-Shaped Category Zones & V27.5
     expect(layout.clusters.length).toBe(5);
     expect(layout.zones.map((z) => z.boothCount)).toEqual([25, 20, 20, 15, 20]);
     expect(layout.zones[0].displayName).toBe('Khu Công nghệ & Điện tử');
-    // Both South-opening (North row) and North-opening (South row) U-zones present!
-    expect(layout.clusters.some((c) => c.openingDirection === 'south')).toBe(true);
-    expect(layout.clusters.some((c) => c.openingDirection === 'north')).toBe(true);
+    // Both East-opening (Left row) and West-opening (Right row) facing U-zones present!
+    expect(layout.clusters.some((c) => c.openingDirection === 'east')).toBe(true);
+    expect(layout.clusters.some((c) => c.openingDirection === 'west')).toBe(true);
     // 6-booth U matches V27.5 exact (2 back, 2 left, 2 right)
     expect(computeUZoneSideCounts(6)).toEqual({ backCount: 2, leftCount: 2, rightCount: 2 });
   });

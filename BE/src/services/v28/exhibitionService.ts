@@ -251,28 +251,48 @@ export class V28ExhibitionService {
       throw httpError(404, 'Không tìm thấy triển lãm.');
     }
 
-    // Phase 8.3: Auto-derive Category-Based Zones (`Khu + Tên danh mục`) from DB categories when not explicitly supplied
+    // Derive Category-Based Zones:
+    // - If Admin explicitly specifies `zoneCount` x `boothsPerZone`, create EXACTLY `zoneCount` zones
+    //   with `boothsPerZone` booths each (attaching DB categories in order, and clean Khu X for extra zones).
+    // - Otherwise auto-derive from DB categories as before.
     let effectiveCategoryZones = input.categoryZones;
-    if (!effectiveCategoryZones || effectiveCategoryZones.length === 0) {
-      const catRows = this.db
-        .prepare('SELECT id, name FROM categories ORDER BY sort_order ASC, name ASC')
-        .all() as Array<{ id: string; name: string }>;
-      if (catRows.length > 0) {
-        const count = Math.max(1, Math.floor(input.targetBoothCount));
-        const activeCatCount = Math.min(catRows.length, Math.max(1, Math.ceil(count / 12)));
-        const chosen = catRows.slice(0, activeCatCount);
-        const base = Math.floor(count / chosen.length);
-        let rem = count % chosen.length;
-        effectiveCategoryZones = chosen.map((c) => {
-          const extra = rem > 0 ? 1 : 0;
-          if (rem > 0) rem--;
-          return { categoryId: c.id, categoryName: c.name, boothCount: base + extra };
-        });
-      }
+    const catRows = this.db
+      .prepare('SELECT id, name FROM categories ORDER BY sort_order ASC, name ASC')
+      .all() as Array<{ id: string; name: string }>;
+
+    if ((!effectiveCategoryZones || effectiveCategoryZones.length === 0) && input.zoneCount && input.boothsPerZone) {
+      const zc = Math.max(1, Math.min(30, Math.floor(input.zoneCount)));
+      const bpz = Math.max(1, Math.min(50, Math.floor(input.boothsPerZone)));
+      effectiveCategoryZones = Array.from({ length: zc }, (_, idx) => {
+        const cat = catRows[idx];
+        const code = String.fromCharCode(65 + (idx % 26)) + (idx >= 26 ? String(Math.floor(idx / 26)) : '');
+        return {
+          categoryId: cat ? cat.id : '',
+          categoryName: cat ? cat.name : `Khu ${code}`,
+          boothCount: bpz,
+        };
+      });
+    } else if ((!effectiveCategoryZones || effectiveCategoryZones.length === 0) && catRows.length > 0) {
+      const count = Math.max(1, Math.floor(input.targetBoothCount));
+      const activeCatCount = Math.min(catRows.length, Math.max(1, Math.ceil(count / 12)));
+      const chosen = catRows.slice(0, activeCatCount);
+      const base = Math.floor(count / chosen.length);
+      let rem = count % chosen.length;
+      effectiveCategoryZones = chosen.map((c) => {
+        const extra = rem > 0 ? 1 : 0;
+        if (rem > 0) rem--;
+        return { categoryId: c.id, categoryName: c.name, boothCount: base + extra };
+      });
     }
+
+    const effectiveTargetBoothCount =
+      input.zoneCount && input.boothsPerZone
+        ? Math.floor(input.zoneCount) * Math.floor(input.boothsPerZone)
+        : input.targetBoothCount;
 
     const layout = generateDynamicExhibitionLayout({
       ...input,
+      targetBoothCount: effectiveTargetBoothCount,
       categoryZones: effectiveCategoryZones,
     });
     const activeCompanies = this.v28Db.listCompanies({ status: 'active' });
@@ -804,6 +824,60 @@ export class V28ExhibitionService {
       if (patch.boothName) {
         this.db.prepare('UPDATE booths SET name = ? WHERE id = ?').run(patch.boothName, boothId);
       }
+    });
+
+    return this.getVersionDetail(versionId)!;
+  }
+
+  /**
+   * Safely remove a booth from a Draft version (Section 9):
+   * - NEVER deletes products from Catalog or deletes Companies.
+   * - If the booth currently has assigned products in its 6 slots, requires explicit `forceUnassign=true`
+   *   (and only clears slot assignments without deleting Catalog products).
+   * - Updates `target_booth_count` on the draft version so the deleted booth is NEVER auto-recreated.
+   * - Preserves all remaining Booth IDs untouched.
+   */
+  public deleteDraftBoothPlacement(
+    versionId: string,
+    boothId: string,
+    options?: { forceUnassign?: boolean }
+  ): ExhibitionVersionDetail {
+    const ver = this.db
+      .prepare('SELECT id, status, target_booth_count FROM exhibition_versions WHERE id = ?')
+      .get(versionId) as { id: string; status: string; target_booth_count: number } | undefined;
+    if (!ver) {
+      throw httpError(404, 'Không tìm thấy phiên bản triển lãm.');
+    }
+    if (ver.status !== 'draft') {
+      throw httpError(409, 'Chỉ được xóa gian hàng trong phiên bản Draft. Hãy tạo Draft mới trước.');
+    }
+
+    const currentDetail = this.getVersionDetail(versionId)!;
+    const target = currentDetail.booths.find((b) => b.boothId === boothId);
+    if (!target) {
+      throw httpError(404, 'Gian hàng không nằm trong phiên bản Draft này.');
+    }
+    if (currentDetail.booths.length <= 1) {
+      throw httpError(400, 'Không thể xóa gian hàng cuối cùng của triển lãm.');
+    }
+    if (target.assignedSlotCount > 0 && !options?.forceUnassign) {
+      throw httpError(
+        409,
+        `Gian hàng "${target.boothName}" đang có ${target.assignedSlotCount} sản phẩm trưng bày. Hãy xác nhận gỡ sản phẩm khỏi slot (không xóa khỏi Catalog) trước khi xóa gian.`
+      );
+    }
+
+    this.v28Db.runInTransaction(() => {
+      if (target.assignedSlotCount > 0) {
+        this.db.prepare('DELETE FROM booth_product_slots WHERE booth_id = ?').run(boothId);
+      }
+      this.db
+        .prepare('DELETE FROM exhibition_version_booths WHERE version_id = ? AND booth_id = ?')
+        .run(versionId, boothId);
+      const nextCount = Math.max(1, currentDetail.booths.length - 1);
+      this.db
+        .prepare('UPDATE exhibition_versions SET target_booth_count = ? WHERE id = ?')
+        .run(nextCount, versionId);
     });
 
     return this.getVersionDetail(versionId)!;

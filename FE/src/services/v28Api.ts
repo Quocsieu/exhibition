@@ -255,7 +255,14 @@ export const v28Api = {
     }),
   createDraftVersion: (
     exhibitionId: string,
-    payload: { targetBoothCount: number; preferredZoneCapacity?: number; layoutSeed?: number; baseVersionId?: string }
+    payload: {
+      targetBoothCount?: number;
+      zoneCount?: number;
+      boothsPerZone?: number;
+      preferredZoneCapacity?: number;
+      layoutSeed?: number;
+      baseVersionId?: string;
+    }
   ) =>
     v28Request<{ version: V28ExhibitionVersionDetail }>(
       `/exhibitions/${encodeURIComponent(exhibitionId)}/drafts`,
@@ -301,6 +308,18 @@ export const v28Api = {
         body: JSON.stringify(patch),
       }
     ),
+  deleteDraftBooth: (
+    exhibitionId: string,
+    versionId: string,
+    boothId: string,
+    forceUnassign = false
+  ) =>
+    v28Request<{ version: V28ExhibitionVersionDetail }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/booths/${encodeURIComponent(boothId)}?forceUnassign=${forceUnassign ? 'true' : 'false'}`,
+      {
+        method: 'DELETE',
+      }
+    ),
   publishVersion: (exhibitionId: string, versionId: string) =>
     v28Request<{ version: V28ExhibitionVersionDetail }>(
       `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/publish`,
@@ -333,7 +352,27 @@ export const v28Api = {
       body: JSON.stringify(payload),
     }),
 
-  // Phase 5: Pre-generated Cached Audio & URL Import
+  // Phase 5: Pre-generated Cached Audio & URL / Website Discovery Import
+  discoverWebsiteProducts: (payload: { companyId: string; url: string; maxPages?: number }) =>
+    v28Request<{
+      siteUrl: string;
+      pagesScanned: number;
+      discoveredProducts: Array<{
+        name: string;
+        sku: string;
+        price: number;
+        currency: string;
+        description: string;
+        images: string[];
+        sourceUrl: string;
+        inStock: boolean;
+        alreadyInCatalog: boolean;
+      }>;
+      note: string;
+    }>('/imports/website', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   importProductFromUrl: (payload: {
     companyId: string;
     boothId?: string;
