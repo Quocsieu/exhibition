@@ -29,60 +29,62 @@ export interface ArchetypeFootprintSpec {
   height: number;
 }
 
+export const V28_BOOTH_INSTANCE_SCALE = 1.25;
+
 export const V28_ARCHETYPES: readonly ArchetypeFootprintSpec[] = [
   {
     id: 'signature_ring',
     theme: 'living',
     label: 'Signature Ring',
     glbPath: 'models/booths/v27_4/booth_01_signature_ring_v27_4.glb',
-    width: 6.72,
-    depth: 5.19,
-    height: 3.96,
+    width: 8.4,
+    depth: 6.49,
+    height: 4.95,
   },
   {
     id: 'organic_flow',
     theme: 'design',
     label: 'Organic Flow',
     glbPath: 'models/booths/v27_4/booth_02_organic_flow_v27_4.glb',
-    width: 6.72,
-    depth: 5.19,
-    height: 3.82,
+    width: 8.4,
+    depth: 6.49,
+    height: 4.78,
   },
   {
     id: 'grand_portal',
     theme: 'tech',
     label: 'Grand Portal',
     glbPath: 'models/booths/v27_4/booth_03_grand_portal_v27_4.glb',
-    width: 6.72,
-    depth: 5.19,
-    height: 3.8,
+    width: 8.4,
+    depth: 6.49,
+    height: 4.75,
   },
   {
     id: 'wave_pavilion',
     theme: 'energy',
     label: 'Wave Pavilion',
     glbPath: 'models/booths/v27_4/booth_04_wave_pavilion_v27_4.glb',
-    width: 6.72,
-    depth: 5.19,
-    height: 3.93,
+    width: 8.4,
+    depth: 6.49,
+    height: 4.91,
   },
   {
     id: 'gallery_arch',
     theme: 'coffee',
     label: 'Gallery Arch',
     glbPath: 'models/booths/v27_4/booth_05_gallery_arch_v27_4.glb',
-    width: 6.72,
-    depth: 5.19,
-    height: 3.78,
+    width: 8.4,
+    depth: 6.49,
+    height: 4.73,
   },
   {
     id: 'dynamic_frame',
     theme: 'robotics',
     label: 'Dynamic Frame',
     glbPath: 'models/booths/v27_4/booth_06_dynamic_frame_v27_4.glb',
-    width: 6.87,
-    depth: 5.19,
-    height: 4.02,
+    width: 8.59,
+    depth: 6.49,
+    height: 5.03,
   },
 ] as const;
 
@@ -244,23 +246,23 @@ export interface LayoutValidationResult {
 }
 
 // ============================================================================
-// VARIABLE-SIZE U-SHAPED ZONE CONSTANTS (Measured 6-GLB BBox, Balanced Spacing)
-// Real GLB max footprint: W = 6.87m (dynamic_frame), 6.72m (others); D = 5.19m
+// VARIABLE-SIZE U-SHAPED ZONE CONSTANTS (Measured 6-GLB BBox × 1.25x V28 Scale)
+// Scaled GLB max footprint: W = 8.59m (dynamic_frame), 8.40m (others); D = 6.49m
 // ============================================================================
 export const MAX_BOOTHS_PER_CLUSTER = 6; // legacy export kept for compatibility
-export const MAX_ARCHETYPE_WIDTH_M = 6.87;
-export const MAX_ARCHETYPE_DEPTH_M = 5.19;
-export const BOOTH_GAP_M = 2.2; // clear gap between adjacent booths (NPC + signage breathing room)
-export const BOOTH_PITCH_M = 9.07; // MAX_ARCHETYPE_WIDTH_M + BOOTH_GAP_M
-export const BOOTH_EDGE_INSET_M = 3.2; // half-depth (2.60m) + 0.60m clean outer wall margin
-export const CORNER_CLEARANCE_M = 8.4; // back half-depth (2.60m) + wing half-width (3.44m) + 2.36m corner breathing room
-export const MIN_U_INTERIOR_WIDTH_M = 19.0; // >= 2*(2.60 + 4.40 focus) + 5.0m clear promenade
-export const ZONE_GAP_X_M = 10.0; // clean walkway between adjacent U-zones
-export const GRAND_BOULEVARD_WIDTH_M = 14.0; // grand horizontal central avenue between facing U rows
+export const MAX_ARCHETYPE_WIDTH_M = 8.59;
+export const MAX_ARCHETYPE_DEPTH_M = 6.49;
+export const BOOTH_GAP_M = 2.6; // clear gap between adjacent scaled booths
+export const BOOTH_PITCH_M = 11.19; // MAX_ARCHETYPE_WIDTH_M + BOOTH_GAP_M
+export const BOOTH_EDGE_INSET_M = 4.0; // half-depth (3.25m) + 0.75m clean outer wall margin
+export const CORNER_CLEARANCE_M = 10.4; // back half-depth (3.25m) + wing half-width (4.30m) + 2.85m corner breathing room
+export const MIN_U_INTERIOR_WIDTH_M = 23.0; // >= 2*(3.25 + 5.60 focus) + 5.3m clear promenade
+export const ZONE_GAP_X_M = 10.5; // clean walkway between adjacent U-zones
+export const GRAND_BOULEVARD_WIDTH_M = 14.0; // grand central avenue between facing U rows
 export const ENTRY_SPINE_WIDTH_M = 12.0; // clear North-South entrance boulevard from Spawn
-export const WELCOME_AREA_DEPTH = 14.0;
-export const APPROACH_OFFSET_M = 2.4;
-export const FOCUS_CAMERA_OFFSET_M = 4.4;
+export const WELCOME_AREA_DEPTH = 15.0;
+export const APPROACH_OFFSET_M = 2.8;
+export const FOCUS_CAMERA_OFFSET_M = 5.6;
 
 const CENTERPIECE_VARIANTS: readonly ClusterCenterpieceKind[] = [
   'medallion_oasis',
@@ -554,16 +556,27 @@ export function generateDynamicExhibitionLayout(
   const rightColTotalZ =
     rightColZones.reduce((s, z) => s + z.dims.width, 0) + Math.max(0, rightColZones.length - 1) * ZONE_GAP_X_M;
 
-  const maxHalfX = isSingleZone
-    ? pendingZones[0].dims.width / 2
-    : Math.max(mainAvenueWidth / 2 + leftColMaxXDepth, mainAvenueWidth / 2 + rightColMaxXDepth);
-  const halfHallWidth = round2(Math.max(maxHalfX + perimeterWidth, mainAvenueWidth / 2 + 12.0));
+  // Special V27.5 Heritage Parity Mode: 1 zone x 6 booths matches V27.5's balanced centered U-hall (scaled 1.25x for larger booths)
+  const isV27SixBoothParity = isSingleZone && targetBoothCount === 6 && pendingZones.length === 1;
+
+  const maxHalfX = isV27SixBoothParity
+    ? 32.0 - perimeterWidth
+    : isSingleZone
+      ? pendingZones[0].dims.width / 2
+      : Math.max(mainAvenueWidth / 2 + leftColMaxXDepth, mainAvenueWidth / 2 + rightColMaxXDepth);
+  const halfHallWidth = isV27SixBoothParity
+    ? 32.0
+    : round2(Math.max(maxHalfX + perimeterWidth, mainAvenueWidth / 2 + 12.0));
   const hallWidth = round2(halfHallWidth * 2);
 
-  const zonesSpanZ = isSingleZone
-    ? pendingZones[0].dims.depth
-    : Math.max(leftColTotalZ, rightColTotalZ);
-  const totalDepth = round2(perimeterWidth + zonesSpanZ + WELCOME_AREA_DEPTH + perimeterWidth);
+  const zonesSpanZ = isV27SixBoothParity
+    ? 38.75
+    : isSingleZone
+      ? pendingZones[0].dims.depth
+      : Math.max(leftColTotalZ, rightColTotalZ);
+  const totalDepth = isV27SixBoothParity
+    ? 57.5
+    : round2(perimeterWidth + zonesSpanZ + WELCOME_AREA_DEPTH + perimeterWidth);
   const halfHallDepth = round2(totalDepth / 2);
 
   const hallBounds: RectBounds = {
@@ -579,33 +592,44 @@ export function generateDynamicExhibitionLayout(
     maxZ: round2(hallBounds.maxZ - 1.5),
   };
 
-  const zonesStartZ = round2(hallBounds.minZ + perimeterWidth);
-  const zonesEndZ = round2(zonesStartZ + zonesSpanZ);
+  const zonesStartZ = isV27SixBoothParity ? -25.0 : round2(hallBounds.minZ + perimeterWidth);
+  const zonesEndZ = isV27SixBoothParity ? 13.75 : round2(zonesStartZ + zonesSpanZ);
 
   // Central Main Avenue running North-South right down the middle (x = 0) between Left & Right U-columns!
   const centralAvenueBounds: RectBounds = {
-    minX: round2(-mainAvenueWidth / 2),
-    maxX: round2(mainAvenueWidth / 2),
-    minZ: isSingleZone ? zonesEndZ : zonesStartZ,
+    minX: round2(-(isV27SixBoothParity ? 6.4 : mainAvenueWidth / 2)),
+    maxX: round2(isV27SixBoothParity ? 6.4 : mainAvenueWidth / 2),
+    minZ: isV27SixBoothParity ? -13.75 : isSingleZone ? zonesEndZ : zonesStartZ,
     maxZ: hallBounds.maxZ,
   };
 
-  const welcomeAreaBounds: RectBounds = {
-    minX: round2(hallBounds.minX + perimeterWidth),
-    maxX: round2(hallBounds.maxX - perimeterWidth),
-    minZ: zonesEndZ,
-    maxZ: round2(hallBounds.maxZ - perimeterWidth),
-  };
+  const welcomeAreaBounds: RectBounds = isV27SixBoothParity
+    ? {
+        minX: -27.5,
+        maxX: 27.5,
+        minZ: 13.75,
+        maxZ: 26.25,
+      }
+    : {
+        minX: round2(hallBounds.minX + perimeterWidth),
+        maxX: round2(hallBounds.maxX - perimeterWidth),
+        minZ: zonesEndZ,
+        maxZ: round2(hallBounds.maxZ - perimeterWidth),
+      };
 
-  const spawnPoint = {
-    x: 0,
-    z: round2(hallBounds.maxZ - perimeterWidth - 4.0),
-    rotationY: Math.PI,
-  };
-  const directoryPoint = {
-    x: round2(-mainAvenueWidth / 2 - 2.4),
-    z: round2(zonesEndZ + WELCOME_AREA_DEPTH * 0.48),
-  };
+  const spawnPoint = isV27SixBoothParity
+    ? { x: 0, z: 19.0, rotationY: Math.PI }
+    : {
+        x: 0,
+        z: round2(hallBounds.maxZ - perimeterWidth - 4.0),
+        rotationY: Math.PI,
+      };
+  const directoryPoint = isV27SixBoothParity
+    ? { x: 11.5, z: 20.0 }
+    : {
+        x: round2(-mainAvenueWidth / 2 - 2.4),
+        z: round2(zonesEndZ + WELCOME_AREA_DEPTH * 0.48),
+      };
 
   // 3. Place all U-Zones & their booths along the 3 sides facing INWARD!
   const clusters: GeneratedClusterSpec[] = [];
@@ -716,7 +740,15 @@ export function generateDynamicExhibitionLayout(
     const peekArch = (offsetIdx: number) =>
       V28_ARCHETYPES[(placements.length + offsetIdx + layoutSeed) % V28_ARCHETYPES.length];
 
-    if (!isHorizontalU) {
+    if (isV27SixBoothParity && !isHorizontalU && pz.boothCount === 6) {
+      // Exact V27.5 centered 6-booth U-hall symmetry scaled 1.25x for larger V28 booths
+      addBooth(-8.25, -21.0, 0);
+      addBooth(8.25, -21.0, 0);
+      addBooth(-19.5, -8.0, Number((Math.PI / 2).toFixed(4)));
+      addBooth(-19.5, 7.5, Number((Math.PI / 2).toFixed(4)));
+      addBooth(19.5, -8.0, Number((-Math.PI / 2).toFixed(4)));
+      addBooth(19.5, 7.5, Number((-Math.PI / 2).toFixed(4)));
+    } else if (!isHorizontalU) {
       // Single-zone South-opening U (exact V27.5 orientation!)
       const dirSign = openingDirection === 'south' ? 1 : -1;
       const backZ = centerZ - dirSign * (depth / 2 - BOOTH_EDGE_INSET_M);
@@ -778,7 +810,13 @@ export function generateDynamicExhibitionLayout(
 
   // Place zones cleanly: either single centered zone OR 2 facing columns (Left East-opening, Right West-opening)
   let runningIdx = 0;
-  if (isSingleZone) {
+  if (isV27SixBoothParity) {
+    const z0 = {
+      ...pendingZones[0],
+      dims: { ...pendingZones[0].dims, width: 47.5, depth: 38.75 },
+    };
+    placeOneUZone(z0, runningIdx++, 0, -5.62, 'south');
+  } else if (isSingleZone) {
     const z0 = pendingZones[0];
     placeOneUZone(z0, runningIdx++, 0, round2(zonesStartZ + z0.dims.depth / 2), 'south');
   } else {

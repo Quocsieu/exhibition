@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { V28RemoteAvatarView } from '../scene/v28/DynamicExhibitionScene';
+import { SOCKET_BASE_URL } from '../config/apiConfig';
 
-const SOCKET_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+const SOCKET_URL = (SOCKET_BASE_URL || '').replace(/\/+$/, '');
 
 export interface UseV28SpatialRealtimeOptions {
   versionId: string | null;
@@ -32,11 +33,14 @@ export function useV28SpatialRealtime({
     const visitorColor = sessionStorage.getItem('expo_visitor_color') || '#10b981';
 
     const socket = io(`${SOCKET_URL}/v28-dynamic`, {
-      transports: ['websocket'],
-      auth: {
-        name: visitorName,
-        color: visitorColor,
-        deviceTier: isMobilePortrait ? 'mobile' : 'desktop',
+      transports: ['websocket', 'polling'],
+      // V28-AUDIT-009: Dynamic auth callback sends latest visitor name/color on every reconnect
+      auth: (cb) => {
+        cb({
+          name: sessionStorage.getItem('expo_visitor_name') || visitorName,
+          color: sessionStorage.getItem('expo_visitor_color') || visitorColor,
+          deviceTier: isMobilePortrait ? 'mobile' : 'desktop',
+        });
       },
       reconnection: true,
       reconnectionDelay: 800,
@@ -55,6 +59,8 @@ export function useV28SpatialRealtime({
       setOverflowCount(snap.overflowCount || 0);
       const map = new Map<string, V28RemoteAvatarView>();
       for (const av of snap.avatars || []) {
+        // V28-AUDIT-032: Filter out self sessionId to prevent duplicate overlapping avatar
+        if (av.sessionId === snap.sessionId) continue;
         map.set(av.sessionId, av);
       }
       avatarMapRef.current = map;
@@ -74,7 +80,10 @@ export function useV28SpatialRealtime({
       setOverflowCount(delta.overflowCount || 0);
       const map = avatarMapRef.current;
       for (const id of delta.leave || []) map.delete(id);
-      for (const av of delta.upsert || []) map.set(av.sessionId, av);
+      for (const av of delta.upsert || []) {
+        if (av.sessionId === sessionIdRef.current) continue;
+        map.set(av.sessionId, av);
+      }
       setRemoteAvatars(Array.from(map.values()));
     });
 
@@ -83,10 +92,22 @@ export function useV28SpatialRealtime({
       socket.emit('v28:version_ack', { versionId: evt.versionId });
     });
 
+    // V28-AUDIT-009: Clear stale ghost avatars immediately on disconnect
+    socket.on('disconnect', () => {
+      avatarMapRef.current.clear();
+      setRemoteAvatars([]);
+      setOnlineCount(1);
+      setOverflowCount(0);
+    });
+
     return () => {
+      socket.removeAllListeners();
       socket.disconnect();
       socketRef.current = null;
       avatarMapRef.current.clear();
+      setRemoteAvatars([]);
+      setOnlineCount(1);
+      setOverflowCount(0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [Boolean(versionId), isMobilePortrait]);

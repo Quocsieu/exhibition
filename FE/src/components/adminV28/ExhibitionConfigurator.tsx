@@ -9,6 +9,7 @@ import {
   type V28ExhibitionVersionDetail,
   type V28Product,
 } from '../../services/v28Api';
+import { BoothInspectorPanel } from './BoothInspectorPanel';
 
 const V28_SYNC_CHANNEL = 'v28-expo-sync';
 
@@ -24,9 +25,75 @@ function notifyV28WorldSync(reason: string): void {
 
 export interface ExhibitionConfiguratorProps {
   onDataChanged?: () => void;
+  onOpenDynamicWorld?: () => void;
+  onManageCatalog?: (companyId?: string) => void;
+  onManageCompanies?: () => void;
+  externalNavRequest?: { mode: 'dashboard' | 'wizard'; step?: 1 | 2 | 3 | 4; nonce: number };
+  refreshNonce?: number;
+  onActiveVersionChange?: (meta: { status: string; zones: number; booths: number; ownerName?: string } | null) => void;
+  onViewStateChange?: (mode: 'dashboard' | 'wizard', step: 1 | 2 | 3 | 4) => void;
 }
 
-export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ onDataChanged }) => {
+export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
+  onDataChanged,
+  onOpenDynamicWorld,
+  onManageCatalog,
+  onManageCompanies,
+  externalNavRequest,
+  refreshNonce = 0,
+  onActiveVersionChange,
+  onViewStateChange,
+}) => {
+  const [viewMode, setViewMode] = useState<'dashboard' | 'wizard'>('dashboard');
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
+
+  useEffect(() => {
+    if (!externalNavRequest || externalNavRequest.nonce === 0) return;
+    setViewMode(externalNavRequest.mode);
+    if (externalNavRequest.step) {
+      setWizardStep(externalNavRequest.step);
+    }
+  }, [externalNavRequest]);
+
+  useEffect(() => {
+    onViewStateChange?.(viewMode, wizardStep);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, wizardStep]);
+  const [lastImportSummary, setLastImportSummary] = useState<{
+    detectedCompany?: {
+      companyId: string | null;
+      companyName: string;
+      canonicalDomain: string;
+      confidence: 'verified' | 'needs_confirmation';
+      evidence: string;
+      created: boolean;
+      matchedBy: string;
+    };
+    coverageReport?: {
+      pagesScanned: number;
+      productUrlsDiscovered: number;
+      extractedValidCount: number;
+      newCount: number;
+      duplicateCount: number;
+      errorCount: number;
+      totalBytesRead: number;
+      stopReasons: string[];
+      coverageStatus: 'IMPORT_COMPLETED';
+      fullCatalogVerified: boolean;
+    };
+    zoneDecisions?: Array<{
+      zoneId: string;
+      zoneCode: string;
+      displayName: string;
+      categoryName: string;
+      productCount: number;
+      status: 'assigned_category' | 'merged_general' | 'unassigned_empty';
+    }>;
+    assignedSlots: number;
+    boothsFilled: number;
+    overflowCount: number;
+    uncertainProducts: Array<{ productId: string; name: string; reason: string }>;
+  } | null>(null);
   const [exhibitions, setExhibitions] = useState<V28ExhibitionSummary[]>([]);
   const [selectedExhId, setSelectedExhId] = useState<string>('');
   const [selectedVersionId, setSelectedVersionId] = useState<string>('');
@@ -38,12 +105,13 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
   // String-backed numeric inputs (allow clearing completely, typing/pasting freely, zero wheel jumps or focus loss!)
   const [zoneCountInput, setZoneCountInput] = useState<string>('10');
   const [boothsPerZoneInput, setBoothsPerZoneInput] = useState<string>('10');
-  const [sourceMode, setSourceMode] = useState<'catalog' | 'url' | 'excel'>('catalog');
+  const [sourceMode, setSourceMode] = useState<'url' | 'excel'>('url');
   const [sourceCompanyId, setSourceCompanyId] = useState<string>('');
   const [sourceWebsiteUrl, setSourceWebsiteUrl] = useState<string>('');
   const [sourceExcelFile, setSourceExcelFile] = useState<{ name: string; base64: string } | null>(null);
   const [autoAllocateProducts, setAutoAllocateProducts] = useState<boolean>(true);
   const [showCreateConfirm, setShowCreateConfirm] = useState<boolean>(false);
+  const [showPublishConfirm, setShowPublishConfirm] = useState<boolean>(false);
   const [confirmDeleteBooth, setConfirmDeleteBooth] = useState<V28BoothPlacementView | null>(null);
   const [creationProgress, setCreationProgress] = useState<{
     open: boolean;
@@ -62,6 +130,24 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
     Number.isFinite(parsedZoneCount) && Number.isFinite(parsedBoothsPerZone)
       ? parsedZoneCount * parsedBoothsPerZone
       : 0;
+  const isSourceValid = (() => {
+    if (sourceMode === 'url') {
+      const raw = sourceWebsiteUrl.trim();
+      if (!raw) return false;
+      try {
+        const u = new URL(raw);
+        return u.protocol === 'http:' || u.protocol === 'https:';
+      } catch {
+        return false;
+      }
+    }
+    if (sourceMode === 'excel') {
+      const fn = (sourceExcelFile?.name || '').toLowerCase();
+      return Boolean(sourceExcelFile?.base64 && (fn.endsWith('.xlsx') || fn.endsWith('.xls') || fn.endsWith('.csv')));
+    }
+    return false;
+  })();
+
   const configValidationError = (() => {
     if (!zoneCountInput.trim()) return 'Vui lòng nhập số khu triển lãm.';
     if (!Number.isFinite(parsedZoneCount) || parsedZoneCount < 1 || parsedZoneCount > 30) {
@@ -73,6 +159,11 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
     }
     if (computedTotalBooths > 300) {
       return `Tổng số gian (${computedTotalBooths}) vượt quá giới hạn an toàn 300 gian của hệ thống.`;
+    }
+    if (!isSourceValid) {
+      return sourceMode === 'url'
+        ? 'Bắt buộc nhập URL website hợp lệ (http:// hoặc https://) để lấy dữ liệu sản phẩm.'
+        : 'Bắt buộc chọn tệp Excel hợp lệ (.xlsx, .xls hoặc .csv) để nhập dữ liệu sản phẩm.';
     }
     return '';
   })();
@@ -148,6 +239,46 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
     }
   }, [selectedExhId, selectedVersionId, loadVersionDetail]);
 
+  // V28-AUDIT-003: Reload fresh exhibitions, companies & versionDetail whenever returning from Products/Company sub-pages
+  useEffect(() => {
+    if (refreshNonce === 0) return;
+    void loadExhibitions();
+    if (selectedExhId && selectedVersionId) {
+      void loadVersionDetail(selectedExhId, selectedVersionId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshNonce]);
+
+  // V28-AUDIT-015: Sync currently viewed version status & counts up to Topbar
+  useEffect(() => {
+    if (!versionDetail) {
+      onActiveVersionChange?.(null);
+      return;
+    }
+    onActiveVersionChange?.({
+      status: versionDetail.status,
+      zones: versionDetail.zones.length,
+      booths: versionDetail.booths.length,
+      ownerName: versionDetail.ownerCompany?.name,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [versionDetail]);
+
+  // V28-AUDIT-019: Auto-select single zone ONLY when versionId changes
+  useEffect(() => {
+    if (!versionDetail) return;
+    if (versionDetail.zones.length === 1) {
+      setFilterZoneCode(versionDetail.zones[0].code);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [versionDetail?.versionId]);
+
+  useEffect(() => {
+    if (filterZoneCode !== 'ALL' && selectedBooth && selectedBooth.zoneCode !== filterZoneCode) {
+      setSelectedBooth(null);
+    }
+  }, [filterZoneCode, selectedBooth]);
+
   // Load company's own catalog products whenever a booth is selected for 6-slot assignment
   useEffect(() => {
     if (!selectedBooth?.companyId) {
@@ -204,7 +335,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
       return (
         b.boothName.toLowerCase().includes(q) ||
         b.boothId.toLowerCase().includes(q) ||
-        b.companyName.toLowerCase().includes(q) ||
+        (b.companyName || '').toLowerCase().includes(q) ||
         b.zoneName.toLowerCase().includes(q) ||
         b.archetypeLabel.toLowerCase().includes(q)
       );
@@ -226,6 +357,9 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
   const handleCreateDraft = async () => {
     if (!selectedExhId || configValidationError || creationProgress?.running) return;
     setShowCreateConfirm(false);
+    setViewMode('wizard');
+    setWizardStep(2);
+    setLastImportSummary(null);
     setLoading(true);
     setError('');
     setMessage('');
@@ -264,28 +398,56 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
     });
 
     try {
-      // Step 1: Validate configuration
-      if (sourceMode === 'url' && !sourceWebsiteUrl.trim()) {
-        throw new Error('Vui lòng nhập URL website doanh nghiệp hoặc chọn chế độ dùng Catalog hiện có.');
-      }
-      if (sourceMode === 'excel' && !sourceExcelFile) {
-        throw new Error('Vui lòng chọn tệp Excel (.xlsx) hoặc chọn chế độ dùng Catalog hiện có.');
+      // Step 1: Validate configuration & mandatory product source (URL or Excel)
+      if (!isSourceValid) {
+        throw new Error(
+          sourceMode === 'url'
+            ? 'Vui lòng nhập URL website doanh nghiệp hợp lệ (http:// hoặc https://).'
+            : 'Vui lòng chọn tệp Excel (.xlsx, .xls hoặc .csv) hợp lệ.'
+        );
       }
       setStepState('validate', 'done', `Hợp lệ: ${parsedZoneCount} khu × ${parsedBoothsPerZone} gian`);
 
-      // Step 2: Fetch / Import product data from chosen source
+      // Step 2: Fetch / Import product data from chosen mandatory source (auto-detects Seller Company on URL!)
       setStepState('source', 'running');
       let importedCount = 0;
-      const targetCompanyId = sourceCompanyId || companies[0]?.id || '';
-      if (sourceMode === 'url' && targetCompanyId) {
+      const importedProductIds: string[] = [];
+      const categoryHints: Record<string, string> = {};
+      let targetCompanyId = sourceCompanyId || companies[0]?.id || '';
+      let detectedCompanyMeta: NonNullable<typeof lastImportSummary>['detectedCompany'] | undefined;
+      let coverageReportMeta: NonNullable<typeof lastImportSummary>['coverageReport'] | undefined;
+
+      if (sourceMode === 'url') {
         const disc = await v28Api.discoverWebsiteProducts({
-          companyId: targetCompanyId,
+          companyId: undefined,
           url: sourceWebsiteUrl.trim(),
-          maxPages: 6,
+          maxPages: 15,
+          autoDetectCompany: true,
         });
+        detectedCompanyMeta = disc.detectedCompany;
+        coverageReportMeta = disc.coverageReport;
+        if (disc.detectedCompany?.companyId) {
+          targetCompanyId = disc.detectedCompany.companyId;
+          setSourceCompanyId(disc.detectedCompany.companyId);
+        } else {
+          targetCompanyId = '';
+        }
+        if (!targetCompanyId) {
+          throw new Error(
+            disc.detectedCompany?.confidence === 'needs_confirmation'
+              ? `Website ${disc.detectedCompany.canonicalDomain} chưa có đủ metadata tổ chức để tự động xác minh doanh nghiệp sở hữu (trạng thái: needs_confirmation). Vui lòng xác nhận/tạo hồ sơ doanh nghiệp trong mục "Thông tin Doanh nghiệp" trước khi tạo triển lãm.`
+              : 'Không xác định được doanh nghiệp sở hữu từ URL này. Vui lòng kiểm tra lại URL hoặc xác nhận thông tin doanh nghiệp.'
+          );
+        }
+        if (!disc.discoveredProducts || disc.discoveredProducts.length === 0) {
+          throw new Error(
+            disc.note ||
+              'Không tìm thấy sản phẩm công khai có cấu trúc từ URL này. Bạn có thể nhập URL trang danh mục, URL sản phẩm cụ thể hoặc dùng Excel.'
+          );
+        }
         for (const item of disc.discoveredProducts) {
           if (item.alreadyInCatalog || item.name.trim().length < 2) continue;
-          await v28Api.createProduct({
+          const created = await v28Api.createProduct({
             companyId: targetCompanyId,
             boothId: null,
             name: item.name.trim(),
@@ -297,10 +459,29 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
             sourceUrl: item.sourceUrl,
             inStock: item.inStock,
           });
+          importedProductIds.push(created.product.id);
+          if (item.category) {
+            categoryHints[created.product.id] = item.category;
+          }
           importedCount++;
         }
-        setStepState('source', 'done', `Quét ${disc.pagesScanned} trang · Thêm mới ${importedCount} SP (tìm thấy ${disc.discoveredProducts.length})`);
-      } else if (sourceMode === 'excel' && sourceExcelFile && targetCompanyId) {
+        const skippedExisting = disc.discoveredProducts.filter((i) => i.alreadyInCatalog).length;
+        const sizeLabel =
+          typeof disc.totalBytesRead === 'number'
+            ? ` · ${(disc.totalBytesRead / (1024 * 1024)).toFixed(2)} MB`
+            : '';
+        const sellerLabel = disc.detectedCompany?.companyName
+          ? ` · Doanh nghiệp: ${disc.detectedCompany.companyName} (${disc.detectedCompany.confidence === 'verified' ? 'đã xác minh' : 'cần xác nhận'})`
+          : '';
+        setStepState(
+          'source',
+          'done',
+          `Quét ${disc.pagesScanned} trang${sizeLabel} · Tìm thấy ${disc.discoveredProducts.length} SP (thêm mới ${importedCount}, đã có ${skippedExisting})${sellerLabel}`
+        );
+      } else if (sourceMode === 'excel' && sourceExcelFile) {
+        if (!targetCompanyId) {
+          throw new Error('Chưa có doanh nghiệp để gắn sản phẩm Excel.');
+        }
         const prev = await v28Api.previewExcel({
           companyId: targetCompanyId,
           filename: sourceExcelFile.name,
@@ -311,18 +492,28 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
           duplicateStrategy: 'skip',
         });
         importedCount = commit.report.createdCount;
-        setStepState('source', 'done', `Excel: thêm ${commit.report.createdCount} SP, bỏ qua ${commit.report.skippedCount}, lỗi ${commit.report.failedCount}`);
-      } else {
-        const catRes = await v28Api.listProducts({ status: 'active', page: 1, limit: 100 });
-        setStepState('source', 'done', `Đọc ${catRes.total} sản phẩm có sẵn trong Catalog`);
+        const refreshedCompProducts = await v28Api.listProducts({
+          companyId: targetCompanyId,
+          status: 'active',
+          page: 1,
+          limit: 200,
+        });
+        for (const p of refreshedCompProducts.items) {
+          importedProductIds.push(p.id);
+        }
+        setStepState(
+          'source',
+          'done',
+          `Excel: thêm ${commit.report.createdCount} SP, bỏ qua ${commit.report.skippedCount}, lỗi ${commit.report.failedCount}`
+        );
       }
 
       // Step 3: Analyze categories
       setStepState('categorize', 'running');
       const catList = await v28Api.listCategories().catch(() => ({ categories: [] }));
-      setStepState('categorize', 'done', `Áp dụng ${catList.categories.length} danh mục cho ${parsedZoneCount} khu chữ U`);
+      setStepState('categorize', 'done', `Áp dụng ${catList.categories.length} danh mục sản phẩm cho ${parsedZoneCount} khu chữ U`);
 
-      // Step 4: Create Draft & 2D U-shaped layout
+      // Step 4: Create Single-Business Draft & 2D U-shaped layout (ALL booths owned by ONE targetCompanyId!)
       setStepState('layout', 'running');
       const { version } = await v28Api.createDraftVersion(selectedExhId, {
         zoneCount: parsedZoneCount,
@@ -330,38 +521,56 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
         targetBoothCount: computedTotalBooths,
         preferredZoneCapacity: parsedBoothsPerZone,
         baseVersionId: selectedVersionId || undefined,
+        requireProductSource: true,
+        productSource: sourceMode,
+        sourceUrl: sourceMode === 'url' ? sourceWebsiteUrl.trim() : undefined,
+        sourceFilename: sourceMode === 'excel' ? sourceExcelFile?.name : undefined,
+        ownerCompanyId: targetCompanyId,
       });
       setStepState('layout', 'done', `Draft v${version.versionNumber} (${version.zones.length} khu · ${version.booths.length} gian · ${version.hallWidth}×${version.hallDepth}m)`);
 
-      // Step 5: Deterministic auto-allocation (up to 6 slots/booth, strictly matching company ownership, never fabricating products)
+      // Step 5: Atomic backend auto-classification, category-zone mapping & slot allocation
       setStepState('allocate', 'running');
       let allocatedSlots = 0;
+      let allocDetail = 'Giữ nguyên phân bổ hiện tại (gian chưa có SP được đánh dấu đỏ)';
       if (autoAllocateProducts) {
-        const SLOT_KEYS = ['slot_01', 'slot_02', 'slot_03', 'slot_04', 'slot_05', 'slot_06'];
-        const productsByCompany = new Map<string, V28Product[]>();
-        for (const b of version.booths) {
-          if (!b.companyId || b.assignedSlotCount > 0) continue;
-          if (!productsByCompany.has(b.companyId)) {
-            const pRes = await v28Api
-              .listProducts({ companyId: b.companyId, status: 'active', page: 1, limit: 50 })
-              .catch(() => ({ items: [] as V28Product[] }));
-            productsByCompany.set(b.companyId, pRes.items);
-          }
-          const pool = productsByCompany.get(b.companyId) || [];
-          const toAssign = pool.slice(0, 6);
-          for (let i = 0; i < toAssign.length; i++) {
-            await v28Api.assignSlot(b.boothId, SLOT_KEYS[i], toAssign[i].id).catch(() => {});
-            allocatedSlots++;
-          }
+        const allocRes = await v28Api.autoAllocateDraftProducts(selectedExhId, version.versionId, {
+          companyId: targetCompanyId,
+          productIds: importedProductIds.length > 0 ? importedProductIds : undefined,
+          categoryHints,
+          organizeZonesByCategory: true,
+        });
+        allocatedSlots = allocRes.assignedSlots;
+        setLastImportSummary({
+          detectedCompany: detectedCompanyMeta,
+          coverageReport: coverageReportMeta,
+          zoneDecisions: allocRes.zoneDecisions,
+          assignedSlots: allocRes.assignedSlots,
+          boothsFilled: allocRes.boothsFilled,
+          overflowCount: allocRes.overflowProductIds.length,
+          uncertainProducts: allocRes.uncertainProducts,
+        });
+        const notes: string[] = [
+          `Đã tự động gán ${allocRes.assignedSlots} vị trí tại ${allocRes.boothsFilled} gian`,
+        ];
+        if (allocRes.overflowProductIds.length > 0) {
+          notes.push(`${allocRes.overflowProductIds.length} SP dư giữ trong Catalog`);
         }
+        if (allocRes.uncertainProducts.length > 0) {
+          notes.push(`${allocRes.uncertainProducts.length} SP cần kiểm tra phân loại`);
+        }
+        allocDetail = notes.join(' · ');
+      } else {
+        setLastImportSummary({
+          detectedCompany: detectedCompanyMeta,
+          coverageReport: coverageReportMeta,
+          assignedSlots: 0,
+          boothsFilled: 0,
+          overflowCount: importedProductIds.length,
+          uncertainProducts: [],
+        });
       }
-      setStepState(
-        'allocate',
-        'done',
-        allocatedSlots > 0
-          ? `Đã tự động gán ${allocatedSlots} vị trí trưng bày (tối đa 6 slot/gian)`
-          : 'Giữ nguyên phân bổ hiện tại (gian chưa có SP được đánh dấu đỏ)'
-      );
+      setStepState('allocate', 'done', allocDetail);
 
       await loadExhibitions();
       const refreshed = await v28Api.getVersionDetail(selectedExhId, version.versionId);
@@ -484,6 +693,8 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
       onDataChanged?.();
     } catch (e) {
       setError((e as Error).message);
+      // V28-AUDIT-002: Re-throw so BoothInspectorPanel never shows a false green success banner on API failure!
+      throw e;
     }
   };
 
@@ -528,41 +739,377 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* KPI Stats Cards (100% V28 DB) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
-        <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: 12, color: '#64748b' }}>Tổng gian hàng (V28)</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{stats.totalBooths}</div>
-          <div style={{ fontSize: 12, color: '#0284c7' }}>
-            {stats.zoneCount} khu danh mục · {versionDetail?.clusters?.length || Math.ceil(stats.totalBooths / 6)} cụm 6 gian
-          </div>
-        </div>
-        <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: 12, color: '#64748b' }}>Đã gán Doanh nghiệp</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: '#047857' }}>{stats.assignedCompanyCount}</div>
-          <div style={{ fontSize: 12, color: stats.unassignedCompanyCount > 0 ? '#b45309' : '#64748b' }}>
-            Chưa gán: {stats.unassignedCompanyCount} gian
-          </div>
-        </div>
-        <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: 12, color: '#64748b' }}>Vị trí Sản phẩm (6/gian)</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: '#4f46e5' }}>
-            {stats.totalAssignedSlots} / {stats.totalSlotCapacity}
-          </div>
-          <div style={{ fontSize: 12, color: '#64748b' }}>{stats.boothsWithProducts} gian đang có sản phẩm</div>
-        </div>
-        <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: 12, color: '#64748b' }}>Phiên bản đang xem</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: versionDetail?.status === 'published' ? '#047857' : '#6366f1' }}>
-            v{versionDetail?.versionNumber ?? '—'} · {(versionDetail?.status || '').toUpperCase()}
-          </div>
-          <div style={{ fontSize: 12, color: '#64748b' }}>
-            {versionDetail ? `${versionDetail.hallWidth}m × ${versionDetail.hallDepth}m` : '—'}
-          </div>
-        </div>
-      </div>
+      {/* Focused Dashboard Overview: Owner Card + Next-Step Actions + Minimalist 4 KPIs */}
+      {viewMode === 'dashboard' && (
+        <>
+          <div className="v28-card" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 240 }}>
+              {versionDetail?.ownerCompany?.logoUrl ? (
+                <img
+                  src={versionDetail.ownerCompany.logoUrl}
+                  alt={versionDetail.ownerCompany.name}
+                  style={{ width: 48, height: 48, borderRadius: 10, objectFit: 'contain', background: '#f8fafc', border: '1px solid rgba(17,24,39,0.1)', padding: 4 }}
+                />
+              ) : (
+                <div style={{ width: 48, height: 48, borderRadius: 10, background: '#e0f2fe', color: '#0369a1', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 18 }}>
+                  {(versionDetail?.ownerCompany?.name || 'E').slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#526071' }}>Doanh nghiệp sở hữu triển lãm</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#111827', letterSpacing: '-0.02em' }}>
+                  {versionDetail?.ownerCompany?.name ||
+                    (new Set((versionDetail?.booths || []).map((b) => b.companyId).filter(Boolean)).size > 1
+                      ? 'Chưa chuẩn hóa 1 doanh nghiệp (Bản cũ)'
+                      : 'Chưa xác định doanh nghiệp')}
+                </div>
+                <div style={{ fontSize: 12.5, color: '#0284c7', marginTop: 2 }}>
+                  {versionDetail?.ownerCompany?.contactUrl || 'Mô hình 1 Website triển lãm · 1 Doanh nghiệp duy nhất'}
+                </div>
+              </div>
+            </div>
 
-      {/* Step 1: Easy-to-Use Zone x Booth Creator Controls + Draft/Preview/Publish */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              {onManageCompanies && (
+                <button
+                  type="button"
+                  className="v28-btn v28-btn--secondary"
+                  onClick={onManageCompanies}
+                  style={{ minHeight: 36, padding: '0 12px', fontSize: 12.5 }}
+                >
+                  Chỉnh sửa doanh nghiệp
+                </button>
+              )}
+              {onManageCatalog && (
+                <button
+                  type="button"
+                  className="v28-btn v28-btn--secondary"
+                  onClick={() => onManageCatalog(versionDetail?.ownerCompanyId || undefined)}
+                  style={{ minHeight: 36, padding: '0 12px', fontSize: 12.5 }}
+                >
+                  Kho sản phẩm
+                </button>
+              )}
+              {versionDetail && (
+                <button
+                  type="button"
+                  className="v28-btn v28-btn--secondary"
+                  onClick={() => {
+                    setViewMode('wizard');
+                    setWizardStep(3);
+                  }}
+                  style={{ minHeight: 36, padding: '0 12px', fontSize: 12.5 }}
+                >
+                  Sơ đồ 2D
+                </button>
+              )}
+              {onOpenDynamicWorld && (
+                <button
+                  type="button"
+                  className="v28-btn v28-btn--primary"
+                  onClick={onOpenDynamicWorld}
+                  style={{ minHeight: 36, padding: '0 14px', fontSize: 12.5 }}
+                >
+                  Xem triển lãm
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="v28-kpi-grid">
+            <div className="v28-kpi-card">
+              <div className="v28-kpi-label">Tổng số khu</div>
+              <div className="v28-kpi-value">{stats.zoneCount}</div>
+              <div className="v28-kpi-sub">Phân khu theo danh mục</div>
+            </div>
+            <div className="v28-kpi-card">
+              <div className="v28-kpi-label">Tổng số gian</div>
+              <div className="v28-kpi-value">{stats.totalBooths}</div>
+              <div className="v28-kpi-sub">
+                {versionDetail ? (versionDetail.status === 'published' ? 'Đã xuất bản' : 'Bản nháp') : 'Chưa tạo'}
+              </div>
+            </div>
+            <div className="v28-kpi-card">
+              <div className="v28-kpi-label">Sản phẩm đã gắn</div>
+              <div className="v28-kpi-value" style={{ color: '#0284c7' }}>
+                {stats.totalAssignedSlots} / {stats.totalSlotCapacity}
+              </div>
+              <div className="v28-kpi-sub">{stats.boothsWithProducts} gian đang trưng bày</div>
+            </div>
+            <div className="v28-kpi-card">
+              <div className="v28-kpi-label">Gian trống</div>
+              <div className="v28-kpi-value" style={{ color: stats.totalBooths - stats.boothsWithProducts > 0 ? '#dc2626' : '#059669' }}>
+                {Math.max(0, stats.totalBooths - stats.boothsWithProducts)}
+              </div>
+              <div className="v28-kpi-sub">Chưa có sản phẩm</div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* 4-Step Website-Builder Wizard Stepper Navigation */}
+      {viewMode === 'wizard' && (
+        <div
+          className="v28-card"
+          style={{
+            padding: '14px 18px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 10,
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            {[
+              { step: 1 as const, label: '1. Cấu hình' },
+              { step: 2 as const, label: '2. Sản phẩm' },
+              { step: 3 as const, label: '3. Bố trí' },
+              { step: 4 as const, label: '4. Xuất bản' },
+            ].map((item) => {
+              const active = wizardStep === item.step;
+              const done = wizardStep > item.step;
+              const blockedByValidation =
+                Boolean(creationProgress?.running) ||
+                (wizardStep === 1 && item.step > 1 && Boolean(configValidationError));
+              return (
+                <button
+                  key={item.step}
+                  type="button"
+                  disabled={blockedByValidation}
+                  onClick={() => {
+                    if (!blockedByValidation) setWizardStep(item.step);
+                  }}
+                  style={{
+                    padding: '7px 14px',
+                    borderRadius: 8,
+                    border: active ? '1.5px solid #0284c7' : '1px solid rgba(17,24,39,0.12)',
+                    background: active ? '#e0f2fe' : done ? '#ecfdf5' : '#f8fafc',
+                    color: active ? '#0369a1' : done ? '#059669' : '#526071',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: blockedByValidation ? 'not-allowed' : 'pointer',
+                    opacity: blockedByValidation ? 0.55 : 1,
+                  }}
+                >
+                  {done ? '✓ ' : ''}
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {wizardStep > 1 && (
+              <button
+                type="button"
+                className="v28-btn v28-btn--secondary"
+                onClick={() => setWizardStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3 | 4) : s))}
+                style={{ minHeight: 36, padding: '0 12px' }}
+              >
+                ← Quay lại
+              </button>
+            )}
+            {wizardStep < 4 && (
+              <button
+                type="button"
+                className="v28-btn v28-btn--primary"
+                disabled={wizardStep === 1 && Boolean(configValidationError)}
+                onClick={() => setWizardStep((s) => (s < 4 ? ((s + 1) as 1 | 2 | 3 | 4) : s))}
+                style={{
+                  minHeight: 36,
+                  padding: '0 14px',
+                  opacity: wizardStep === 1 && configValidationError ? 0.5 : 1,
+                }}
+              >
+                Tiếp tục →
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Wizard Step 2 Summary Card (Company Detection + Coverage Report + Category Zone Decisions) */}
+      {viewMode === 'wizard' && wizardStep === 2 && (
+        <div style={{ background: '#fff', borderRadius: 14, padding: 18, border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <strong style={{ fontSize: 15, color: '#0f172a' }}>📥 Bước 2: Kết quả Import, Nhận diện Doanh nghiệp &amp; Phân khu Danh mục</strong>
+          {!lastImportSummary && !creationProgress ? (
+            <div style={{ fontSize: 13, color: '#64748b' }}>
+              Chưa chạy import ở phiên này. Quay lại <strong>Bước 1</strong> để nhập URL/Excel và bấm <strong>Tạo không gian triển lãm</strong>.
+            </div>
+          ) : (
+            <>
+              {lastImportSummary?.detectedCompany && (
+                <div style={{ padding: 10, borderRadius: 10, background: '#f0f9ff', border: '1px solid #bae6fd', fontSize: 13 }}>
+                  <strong>🏢 Doanh nghiệp nguồn (Seller):</strong>{' '}
+                  {lastImportSummary.detectedCompany.companyName || '(Chưa xác minh — cần Admin xác nhận)'} ·{' '}
+                  <code>{lastImportSummary.detectedCompany.canonicalDomain}</code> ·{' '}
+                  <span style={{ fontWeight: 700, color: lastImportSummary.detectedCompany.confidence === 'verified' ? '#047857' : '#b45309' }}>
+                    {lastImportSummary.detectedCompany.confidence === 'verified' ? 'Đã xác minh' : 'Cần xác nhận'}
+                  </span>
+                </div>
+              )}
+              {lastImportSummary?.coverageReport && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div className="v28-kpi-grid">
+                    <div className="v28-kpi-card">
+                      <div className="v28-kpi-label">Sản phẩm hợp lệ</div>
+                      <div className="v28-kpi-value" style={{ color: '#0284c7' }}>{lastImportSummary.coverageReport.extractedValidCount}</div>
+                      <div className="v28-kpi-sub">{lastImportSummary.coverageReport.newCount} mới · {lastImportSummary.coverageReport.duplicateCount} đã có</div>
+                    </div>
+                    <div className="v28-kpi-card">
+                      <div className="v28-kpi-label">Đã phân bổ vào gian</div>
+                      <div className="v28-kpi-value" style={{ color: '#059669' }}>{lastImportSummary.assignedSlots}</div>
+                      <div className="v28-kpi-sub">Trên {lastImportSummary.boothsFilled} gian hàng</div>
+                    </div>
+                    <div className="v28-kpi-card">
+                      <div className="v28-kpi-label">Sản phẩm dư (Catalog)</div>
+                      <div className="v28-kpi-value">{lastImportSummary.overflowCount}</div>
+                      <div className="v28-kpi-sub">Có thể gán thủ công ở Bước 3</div>
+                    </div>
+                  </div>
+                  <details className="v28-advanced-details">
+                    <summary>Chi tiết nâng cao (Thông số quét nguồn)</summary>
+                    <div style={{ marginTop: 8 }}>
+                      Trạng thái: <strong>{lastImportSummary.coverageReport.coverageStatus}</strong> · Đã quét{' '}
+                      <strong>{lastImportSummary.coverageReport.pagesScanned}</strong> trang · Phát hiện{' '}
+                      <strong>{lastImportSummary.coverageReport.productUrlsDiscovered}</strong> URL · Lỗi:{' '}
+                      <strong>{lastImportSummary.coverageReport.errorCount}</strong>
+                      {lastImportSummary.coverageReport.stopReasons.length > 0 && (
+                        <div style={{ marginTop: 4 }}>
+                          Giới hạn dừng an toàn: {lastImportSummary.coverageReport.stopReasons.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                </div>
+              )}
+              {lastImportSummary?.zoneDecisions && lastImportSummary.zoneDecisions.length > 0 && (
+                <div style={{ padding: 10, borderRadius: 10, background: '#f8fafc', border: '1px solid #cbd5e1', fontSize: 12.5 }}>
+                  <strong>🧭 Quyết định phân khu theo Danh mục sản phẩm:</strong>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                    {lastImportSummary.zoneDecisions.map((zd) => (
+                      <span
+                        key={zd.zoneId}
+                        style={{
+                          padding: '4px 8px',
+                          borderRadius: 6,
+                          background: zd.status === 'unassigned_empty' ? '#fef2f2' : '#ecfdf5',
+                          border: `1px solid ${zd.status === 'unassigned_empty' ? '#fecaca' : '#a7f3d0'}`,
+                          color: zd.status === 'unassigned_empty' ? '#b91c1c' : '#065f46',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {zd.displayName} ({zd.productCount} SP)
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setWizardStep(3)}
+                  style={{ padding: '9px 16px', borderRadius: 9, border: 'none', background: '#0f172a', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Tiếp tục tới Bước 3: Preview 2D →
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Wizard Step 4: Final Pre-Publish Review & Confirmation */}
+      {viewMode === 'wizard' && wizardStep === 4 && versionDetail && (() => {
+        const distinctOwnerIds = Array.from(
+          new Set(versionDetail.booths.map((b) => b.companyId).filter(Boolean))
+        );
+        const hasOwnerConflict = distinctOwnerIds.length > 1;
+        const canPublish = versionDetail.validation.valid && !hasOwnerConflict;
+        return (
+        <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1.5px solid #10b981', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <strong style={{ fontSize: 16, color: '#065f46' }}>🚀 Bước 4: Xác nhận &amp; Publish lên World V28</strong>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, fontSize: 13 }}>
+            <div style={{ padding: 10, borderRadius: 8, background: hasOwnerConflict ? '#fef2f2' : '#f0f9ff', border: `1px solid ${hasOwnerConflict ? '#fecaca' : '#bae6fd'}` }}>
+              Doanh nghiệp sở hữu:{' '}
+              <strong style={{ color: hasOwnerConflict ? '#b91c1c' : '#0369a1' }}>
+                {hasOwnerConflict
+                  ? `⚠️ Xung đột (${distinctOwnerIds.length} doanh nghiệp)`
+                  : versionDetail.ownerCompany?.name || versionDetail.booths[0]?.companyName || 'Chưa xác định'}
+              </strong>
+            </div>
+            <div style={{ padding: 10, borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+              Tổng khu danh mục: <strong>{versionDetail.zones.length}</strong>
+            </div>
+            <div style={{ padding: 10, borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+              Tổng gian: <strong>{versionDetail.booths.length}</strong>
+            </div>
+            <div style={{ padding: 10, borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+              Slot đã phân bổ: <strong>{stats.totalAssignedSlots}</strong>
+            </div>
+            <div style={{ padding: 10, borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c' }}>
+              Gian trống: <strong>{Math.max(0, stats.totalBooths - stats.boothsWithProducts)}</strong>
+            </div>
+            {lastImportSummary && (
+              <div style={{ padding: 10, borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}>
+                SP dư trong Catalog: <strong>{lastImportSummary.overflowCount}</strong>
+              </div>
+            )}
+          </div>
+          {hasOwnerConflict && (
+            <div style={{ padding: 10, borderRadius: 8, background: '#fef2f2', color: '#b91c1c', fontSize: 13, fontWeight: 600 }}>
+              ⚠️ Vi phạm mô hình triển lãm 1 doanh nghiệp: Bản Draft đang chứa gian hàng của {distinctOwnerIds.length} doanh nghiệp khác nhau. Vui lòng tạo lại bản Draft từ 1 doanh nghiệp duy nhất trước khi Publish.
+            </div>
+          )}
+          {!versionDetail.validation.valid && (
+            <div style={{ padding: 10, borderRadius: 8, background: '#fef2f2', color: '#b91c1c', fontSize: 13 }}>
+              ⚠️ Layout có lỗi cần sửa trước khi Publish: {versionDetail.validation.errors.join(' · ')}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {versionDetail.status === 'draft' ? (
+              <button
+                type="button"
+                disabled={loading || !canPublish}
+                onClick={() => void handlePublish()}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background: canPublish ? '#059669' : '#94a3b8',
+                  color: '#fff',
+                  fontWeight: 700,
+                  cursor: canPublish ? 'pointer' : 'not-allowed',
+                }}
+              >
+                ✅ Xác nhận Publish v{versionDetail.versionNumber} lên World V28
+              </button>
+            ) : (
+              <div style={{ fontSize: 13, color: '#047857', fontWeight: 700 }}>
+                ✅ Phiên bản v{versionDetail.versionNumber} đã được Publish.
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setWizardStep(3)}
+              style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', fontWeight: 600, cursor: 'pointer' }}
+            >
+              ← Quay lại Preview 2D
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('dashboard')}
+              style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', fontWeight: 600, cursor: 'pointer' }}
+            >
+              Về Dashboard
+            </button>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Step 1: Streamlined Single-Row Creator Bar (Visible in Wizard Step 1) */}
+      {viewMode === 'wizard' && wizardStep === 1 && (
       <div
         style={{
           background: '#fff',
@@ -571,166 +1118,264 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
           border: '1px solid #e2e8f0',
           display: 'flex',
           flexDirection: 'column',
-          gap: 14,
+          gap: 12,
         }}
       >
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-              Số khu triển lãm (1–30)
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>
+            Số khu (1–30)
+            <input
+              type="text"
+              inputMode="numeric"
+              aria-label="Số khu triển lãm"
+              value={zoneCountInput}
+              onChange={(e) => {
+                setZoneCountInput(e.target.value.replace(/[^\d]/g, ''));
+                setShowCreateConfirm(false);
+              }}
+              onWheel={(e) => e.currentTarget.blur()}
+              placeholder="VD: 10"
+              style={{
+                width: 96,
+                padding: '9px 10px',
+                borderRadius: 10,
+                border: configValidationError && !Number.isFinite(parsedZoneCount) ? '1.5px solid #ef4444' : '1px solid #cbd5e1',
+                fontSize: 14,
+                fontWeight: 700,
+              }}
+            />
+          </label>
+
+          <span style={{ fontSize: 16, fontWeight: 800, color: '#64748b', paddingBottom: 10 }}>×</span>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>
+            Số gian mỗi khu (1–50)
+            <input
+              type="text"
+              inputMode="numeric"
+              aria-label="Số gian hàng mỗi khu"
+              value={boothsPerZoneInput}
+              onChange={(e) => {
+                setBoothsPerZoneInput(e.target.value.replace(/[^\d]/g, ''));
+                setShowCreateConfirm(false);
+              }}
+              onWheel={(e) => e.currentTarget.blur()}
+              placeholder="VD: 10"
+              style={{
+                width: 112,
+                padding: '9px 10px',
+                borderRadius: 10,
+                border: configValidationError && !Number.isFinite(parsedBoothsPerZone) ? '1.5px solid #ef4444' : '1px solid #cbd5e1',
+                fontSize: 14,
+                fontWeight: 700,
+              }}
+            />
+          </label>
+
+          {/* Mandatory Product Source Selector (URL or Excel ONLY — Catalog bypass removed per F3) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: '1 1 320px', minWidth: 260 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>Nguồn sản phẩm (bắt buộc):</span>
+              {[
+                { id: 'url', label: '🔗 URL Website' },
+                { id: 'excel', label: '📊 Excel (.xlsx)' },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setSourceMode(opt.id as 'url' | 'excel');
+                    setShowCreateConfirm(false);
+                  }}
+                  style={{
+                    padding: '3px 9px',
+                    borderRadius: 7,
+                    border: sourceMode === opt.id ? '1.5px solid #0ea5e9' : '1px solid #cbd5e1',
+                    background: sourceMode === opt.id ? '#e0f2fe' : '#fff',
+                    color: sourceMode === opt.id ? '#0369a1' : '#334155',
+                    fontWeight: 700,
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+              {sourceMode === 'url' ? (
+                <span
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: 7,
+                    background: '#f0f9ff',
+                    border: '1px solid #bae6fd',
+                    color: '#0369a1',
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                  }}
+                >
+                  ✨ Tự động nhận diện 1 doanh nghiệp từ URL
+                </span>
+              ) : (
+                <select
+                  aria-label="Doanh nghiệp sở hữu triển lãm"
+                  value={sourceCompanyId}
+                  onChange={(e) => setSourceCompanyId(e.target.value)}
+                  style={{ padding: '3px 8px', borderRadius: 7, border: '1px solid #cbd5e1', fontSize: 12, background: '#fff' }}
+                >
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {sourceMode === 'url' ? (
               <input
-                type="text"
-                inputMode="numeric"
-                aria-label="Số khu triển lãm"
-                value={zoneCountInput}
+                type="url"
+                aria-label="URL Website doanh nghiệp"
+                value={sourceWebsiteUrl}
                 onChange={(e) => {
-                  setZoneCountInput(e.target.value.replace(/[^\d]/g, ''));
+                  setSourceWebsiteUrl(e.target.value);
                   setShowCreateConfirm(false);
                 }}
-                onWheel={(e) => e.currentTarget.blur()}
-                placeholder="VD: 10"
+                placeholder="https://example-business.com"
                 style={{
-                  width: 140,
-                  padding: '10px 12px',
+                  width: '100%',
+                  padding: '9px 11px',
                   borderRadius: 10,
-                  border: configValidationError && !Number.isFinite(parsedZoneCount) ? '1.5px solid #ef4444' : '1px solid #cbd5e1',
-                  fontSize: 15,
-                  fontWeight: 700,
+                  border: !isSourceValid ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
+                  fontSize: 13.5,
+                  boxSizing: 'border-box',
                 }}
               />
-            </label>
-
-            <span style={{ fontSize: 18, fontWeight: 800, color: '#64748b', paddingBottom: 10 }}>×</span>
-
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-              Số gian hàng mỗi khu (1–50)
+            ) : (
               <input
-                type="text"
-                inputMode="numeric"
-                aria-label="Số gian hàng mỗi khu"
-                value={boothsPerZoneInput}
+                type="file"
+                aria-label="Tệp Excel sản phẩm"
+                accept=".xlsx,.xls,.csv"
                 onChange={(e) => {
-                  setBoothsPerZoneInput(e.target.value.replace(/[^\d]/g, ''));
+                  const file = e.target.files?.[0];
                   setShowCreateConfirm(false);
+                  if (!file) {
+                    setSourceExcelFile(null);
+                    return;
+                  }
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const res = String(reader.result || '');
+                    const base64 = res.includes(',') ? res.split(',')[1] : res;
+                    setSourceExcelFile({ name: file.name, base64 });
+                  };
+                  reader.readAsDataURL(file);
                 }}
-                onWheel={(e) => e.currentTarget.blur()}
-                placeholder="VD: 10"
                 style={{
-                  width: 160,
-                  padding: '10px 12px',
+                  width: '100%',
+                  padding: '6px 8px',
                   borderRadius: 10,
-                  border: configValidationError && !Number.isFinite(parsedBoothsPerZone) ? '1.5px solid #ef4444' : '1px solid #cbd5e1',
-                  fontSize: 15,
-                  fontWeight: 700,
+                  border: !isSourceValid ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
+                  fontSize: 12.5,
+                  background: '#f8fafc',
+                  boxSizing: 'border-box',
                 }}
               />
-            </label>
+            )}
+          </div>
 
+          <button
+            type="button"
+            onClick={() => setShowCreateConfirm(true)}
+            disabled={loading || Boolean(configValidationError)}
+            style={{
+              padding: '10px 18px',
+              borderRadius: 10,
+              border: 'none',
+              background: configValidationError ? '#94a3b8' : '#0f172a',
+              color: '#fff',
+              cursor: configValidationError ? 'not-allowed' : 'pointer',
+              fontWeight: 700,
+              fontSize: 13.5,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            🏛️ Tạo không gian triển lãm
+          </button>
+        </div>
+
+        {/* Secondary Info Row: Expected Total Booths + Auto-Allocate Toggle + Draft Preview / Publish Actions */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
             <div
               style={{
-                padding: '9px 14px',
-                borderRadius: 10,
+                padding: '6px 12px',
+                borderRadius: 8,
                 background: '#f0f9ff',
                 border: '1px solid #bae6fd',
                 color: '#0369a1',
-                fontSize: 13.5,
+                fontSize: 13,
                 fontWeight: 700,
               }}
             >
-              Tổng dự kiến: <strong style={{ fontSize: 16 }}>{computedTotalBooths}</strong> gian hàng
+              Tổng dự kiến: <strong style={{ fontSize: 15 }}>{computedTotalBooths}</strong> gian hàng
             </div>
-
-            <button
-              type="button"
-              onClick={() => setShowCreateConfirm(true)}
-              disabled={loading || Boolean(configValidationError)}
-              style={{
-                padding: '10px 18px',
-                borderRadius: 10,
-                border: 'none',
-                background: configValidationError ? '#94a3b8' : '#0f172a',
-                color: '#fff',
-                cursor: configValidationError ? 'not-allowed' : 'pointer',
-                fontWeight: 700,
-                fontSize: 14,
-              }}
-            >
-              🏛️ Tạo không gian triển lãm
-            </button>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#334155' }}>
+              <input
+                type="checkbox"
+                checked={autoAllocateProducts}
+                onChange={(e) => setAutoAllocateProducts(e.target.checked)}
+              />
+              Tự động phân loại &amp; phân bổ tối đa 6 SP/gian
+            </label>
           </div>
 
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          {selectedExh && (
-            <select
-              value={selectedVersionId}
-              onChange={(e) => {
-                setSelectedVersionId(e.target.value);
-                setPage(1);
-              }}
-              style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
-            >
-              {selectedExh.versions.map((v) => (
-                <option key={v.id} value={v.id}>
-                  v{v.versionNumber} — {v.targetBoothCount} gian [{v.status.toUpperCase()}]
-                </option>
-              ))}
-            </select>
-          )}
-          {versionDetail?.status === 'draft' && (
-            <>
-              <a
-                href={`/?world=dynamic&previewVersionId=${encodeURIComponent(versionDetail.versionId)}`}
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: 8,
-                  background: '#6366f1',
-                  color: '#fff',
-                  textDecoration: 'none',
-                  fontWeight: 600,
-                  fontSize: 13,
-                }}
-              >
-                👁️ Xem trước 3D Draft
-              </a>
-              <button
-                type="button"
-                onClick={handlePublish}
-                disabled={loading || !versionDetail.validation.valid}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: 8,
-                  border: 'none',
-                  background: versionDetail.validation.valid ? '#10b981' : '#94a3b8',
-                  color: '#fff',
-                  cursor: versionDetail.validation.valid ? 'pointer' : 'not-allowed',
-                  fontWeight: 700,
-                }}
-              >
-                🚀 Publish v{versionDetail.versionNumber}
-              </button>
-            </>
-          )}
-          {versionDetail?.status === 'archived' && (
-            <button
-              type="button"
-              onClick={() => handleRollback(versionDetail.versionId)}
-              disabled={loading}
-              style={{
-                padding: '8px 16px',
-                borderRadius: 8,
-                border: 'none',
-                background: '#f59e0b',
-                color: '#fff',
-                cursor: 'pointer',
-                fontWeight: 700,
-              }}
-            >
-              ⏪ Rollback về v{versionDetail.versionNumber}
-            </button>
-          )}
-        </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {versionDetail?.status === 'draft' && (
+              <>
+                <a
+                  href={`/?world=dynamic&previewVersionId=${encodeURIComponent(versionDetail.versionId)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 8,
+                    background: '#0284c7',
+                    color: '#fff',
+                    textDecoration: 'none',
+                    fontWeight: 600,
+                    fontSize: 13,
+                  }}
+                >
+                  👁️ Xem trước 3D Draft
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setShowPublishConfirm(true)}
+                  disabled={
+                    loading ||
+                    !versionDetail.validation.valid ||
+                    new Set(versionDetail.booths.map((b) => b.companyId).filter(Boolean)).size > 1
+                  }
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background:
+                      versionDetail.validation.valid &&
+                      new Set(versionDetail.booths.map((b) => b.companyId).filter(Boolean)).size <= 1
+                        ? '#10b981'
+                        : '#94a3b8',
+                    color: '#fff',
+                    cursor:
+                      versionDetail.validation.valid &&
+                      new Set(versionDetail.booths.map((b) => b.companyId).filter(Boolean)).size <= 1
+                        ? 'pointer'
+                        : 'not-allowed',
+                    fontWeight: 700,
+                  }}
+                >
+                  🚀 Publish v{versionDetail.versionNumber}
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {configValidationError && (
@@ -739,97 +1384,64 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
           </div>
         )}
 
-        {/* Step 3: Optional Product Source Selector (Catalog / Business Website URL / Excel .xlsx) */}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 10,
-            alignItems: 'center',
-            padding: '10px 12px',
-            borderRadius: 10,
-            background: '#f8fafc',
-            border: '1px solid #e2e8f0',
-          }}
-        >
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: '#334155' }}>Nguồn sản phẩm:</span>
-          {[
-            { id: 'catalog', label: '📚 Dùng Catalog hiện có' },
-            { id: 'url', label: '🔗 Nhập URL Website doanh nghiệp' },
-            { id: 'excel', label: '📊 Tải file Excel (.xlsx)' },
-          ].map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => setSourceMode(opt.id as typeof sourceMode)}
-              style={{
-                padding: '6px 11px',
-                borderRadius: 8,
-                border: sourceMode === opt.id ? '1.5px solid #0ea5e9' : '1px solid #cbd5e1',
-                background: sourceMode === opt.id ? '#e0f2fe' : '#fff',
-                color: sourceMode === opt.id ? '#0369a1' : '#334155',
-                fontWeight: 600,
-                fontSize: 12.5,
-                cursor: 'pointer',
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
-
-          {(sourceMode === 'url' || sourceMode === 'excel') && (
-            <select
-              value={sourceCompanyId}
-              onChange={(e) => setSourceCompanyId(e.target.value)}
-              style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12.5, background: '#fff' }}
-            >
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          )}
-
-          {sourceMode === 'url' && (
-            <input
-              type="url"
-              value={sourceWebsiteUrl}
-              onChange={(e) => setSourceWebsiteUrl(e.target.value)}
-              placeholder="https://example-business.com"
-              style={{ flex: '1 1 240px', padding: '6px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
-            />
-          )}
-
-          {sourceMode === 'excel' && (
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (!file) {
-                  setSourceExcelFile(null);
-                  return;
-                }
-                const reader = new FileReader();
-                reader.onload = () => {
-                  const res = String(reader.result || '');
-                  const base64 = res.includes(',') ? res.split(',')[1] : res;
-                  setSourceExcelFile({ name: file.name, base64 });
-                };
-                reader.readAsDataURL(file);
-              }}
-              style={{ fontSize: 12.5 }}
-            />
-          )}
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#334155', marginLeft: 'auto' }}>
-            <input
-              type="checkbox"
-              checked={autoAllocateProducts}
-              onChange={(e) => setAutoAllocateProducts(e.target.checked)}
-            />
-            Tự động phân bổ tối đa 6 SP/gian
-          </label>
-        </div>
+        {showPublishConfirm && versionDetail?.status === 'draft' && (
+          <div
+            style={{
+              padding: 14,
+              borderRadius: 12,
+              background: '#ecfdf5',
+              border: '1.5px solid #10b981',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#065f46' }}>
+              🚀 Xác nhận Publish phiên bản Draft v{versionDetail.versionNumber}?
+            </div>
+            <div style={{ fontSize: 13, color: '#064e3b' }}>
+              • Tổng số gian: <strong>{versionDetail.booths.length}</strong> ({stats.boothsWithProducts} gian có sản phẩm,{' '}
+              <strong style={{ color: '#b91c1c' }}>{versionDetail.booths.length - stats.boothsWithProducts}</strong> gian trống).
+              <br />• World V28 công khai sẽ chuyển sang phiên bản này ngay sau khi xác nhận (nếu lỗi, bản Published cũ vẫn được giữ nguyên).
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  setShowPublishConfirm(false);
+                  void handlePublish();
+                }}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#059669',
+                  color: '#fff',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                ✅ Xác nhận Publish
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPublishConfirm(false)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  color: '#334155',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Hủy
+              </button>
+            </div>
+          </div>
+        )}
 
         {showCreateConfirm && !configValidationError && (
           <div
@@ -894,6 +1506,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
           </div>
         )}
       </div>
+      )}
 
       {error && (
         <div style={{ padding: 12, borderRadius: 8, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }}>
@@ -906,23 +1519,24 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
         </div>
       )}
 
-      {/* Main Split: 2D Floorplan + Selected Booth Editor (with Inline 6-Slot Catalog Assignment) */}
-      {versionDetail && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 1.3fr) minmax(320px, 1fr)', gap: 16 }}>
+      {/* Main Split: Large 2D Floorplan Left + Selected Booth Inspector Right (Wizard Step 3 — Bố trí) */}
+      {versionDetail && viewMode === 'wizard' && wizardStep === 3 && (
+        <div className="v28-preview-split">
           {/* 2D Interactive SVG Floorplan + Zones */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                <strong style={{ fontSize: 14 }}>
+            <div className="v28-card" style={{ padding: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                <strong style={{ fontSize: 14.5 }}>
                   Sơ đồ 2D ({versionDetail.booths.length} gian · {versionDetail.zones.length} khu)
                 </strong>
-                <span style={{ fontSize: 12, color: '#64748b' }}>
-                  {isDraft ? 'Bản Draft (được sửa bố trí)' : 'Published (tạo Draft mới để sửa bố trí; vẫn gán được 6 slot SP)'}
+                <span style={{ fontSize: 12, color: '#526071' }}>
+                  <span style={{ color: '#dc2626', fontWeight: 700 }}>■ Đỏ: gian trống (0 SP)</span> ·{' '}
+                  {isDraft ? 'Bản nháp (chọn gian để chỉnh)' : 'Đã xuất bản'}
                 </span>
               </div>
               <svg
                 viewBox={`${versionDetail.hallBounds.minX - 4} ${versionDetail.hallBounds.minZ - 4} ${versionDetail.hallWidth + 8} ${versionDetail.hallDepth + 8}`}
-                style={{ width: '100%', maxHeight: 380, background: '#f8fafc', borderRadius: 8, border: '1px solid #cbd5e1' }}
+                style={{ width: '100%', maxHeight: 480, background: '#f8fafc', borderRadius: 8, border: '1px solid rgba(17,24,39,0.12)' }}
               >
                 <rect
                   x={versionDetail.hallBounds.minX}
@@ -943,6 +1557,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
                 <circle cx={versionDetail.spawnPoint.x} cy={versionDetail.spawnPoint.z} r={1.8} fill="#0284c7" />
                 {versionDetail.booths.map((b) => {
                   const isSel = selectedBooth?.boothId === b.boothId;
+                  const isEmpty = b.assignedSlotCount === 0;
                   const dimmed = filterZoneCode !== 'ALL' && b.zoneCode !== filterZoneCode;
                   return (
                     <g key={b.boothId} onClick={() => handleSelectBooth(b)} style={{ cursor: 'pointer' }}>
@@ -952,10 +1567,10 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
                         width={b.footprintWidth}
                         height={b.footprintDepth}
                         rx={0.6}
-                        fill={dimmed ? '#cbd5e1' : b.color || '#0ea5e9'}
-                        fillOpacity={isSel ? 1 : 0.78}
-                        stroke={isSel ? '#0f172a' : '#ffffff'}
-                        strokeWidth={isSel ? 1.1 : 0.35}
+                        fill={dimmed ? '#cbd5e1' : isEmpty ? '#dc2626' : b.color || '#0ea5e9'}
+                        fillOpacity={isSel ? 1 : isEmpty ? 0.9 : 0.8}
+                        stroke={isSel ? '#0f172a' : isEmpty ? '#7f1d1d' : '#ffffff'}
+                        strokeWidth={isSel ? 1.1 : isEmpty ? 0.65 : 0.35}
                       />
                       <text
                         x={b.positionX}
@@ -1075,21 +1690,29 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
                   )}
                 </div>
 
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  Doanh nghiệp sở hữu {isDraft ? '' : '(tạo Draft để đổi)'}:
-                  <select
-                    disabled={!isDraft}
-                    value={selectedBooth.companyId || ''}
-                    onChange={(e) => handleUpdateBooth(selectedBooth.boothId, { companyId: e.target.value })}
-                    style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1' }}
-                  >
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {versionDetail.ownerCompanyId ? (
+                  <div style={{ padding: '7px 10px', borderRadius: 7, background: '#f0f9ff', border: '1px solid #bae6fd', fontSize: 12.5, color: '#0369a1' }}>
+                    <strong>Doanh nghiệp sở hữu:</strong>{' '}
+                    {versionDetail.ownerCompany?.name || selectedBooth.companyName}{' '}
+                    <span style={{ color: '#64748b' }}>(cố định theo mô hình 1 doanh nghiệp)</span>
+                  </div>
+                ) : (
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    Doanh nghiệp sở hữu {isDraft ? '' : '(tạo Draft để đổi)'}:
+                    <select
+                      disabled={!isDraft}
+                      value={selectedBooth.companyId || ''}
+                      onChange={(e) => handleUpdateBooth(selectedBooth.boothId, { companyId: e.target.value })}
+                      style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1' }}
+                    >
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
 
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   Mẫu Gian hàng (6 V27.4 Archetypes):
@@ -1111,8 +1734,48 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
 
                 {/* Inline 6 Product Display Slots (Catalog filtered strictly to owning company!) */}
                 <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                    Gán sản phẩm từ Catalog của {selectedBooth.companyName} ({companyCatalogProducts.length} SP):
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                    <div style={{ fontWeight: 700 }}>
+                      Gán sản phẩm từ Catalog của {selectedBooth.companyName} ({companyCatalogProducts.length} SP):
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {onManageCatalog && (
+                        <button
+                          type="button"
+                          onClick={() => onManageCatalog(selectedBooth.companyId || undefined)}
+                          style={{
+                            padding: '4px 8px',
+                            borderRadius: 6,
+                            border: '1px solid #cbd5e1',
+                            background: '#f8fafc',
+                            color: '#0f172a',
+                            fontSize: 11.5,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ✏️ Thêm/Sửa SP
+                        </button>
+                      )}
+                      {onManageCompanies && (
+                        <button
+                          type="button"
+                          onClick={onManageCompanies}
+                          style={{
+                            padding: '4px 8px',
+                            borderRadius: 6,
+                            border: '1px solid #cbd5e1',
+                            background: '#f8fafc',
+                            color: '#0f172a',
+                            fontSize: 11.5,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          🏢 Doanh nghiệp
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {selectedBooth.slots.map((s) => (
@@ -1124,6 +1787,11 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
                           style={{ flex: 1, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
                         >
                           <option value="">— Vị trí trống —</option>
+                          {s.product && !companyCatalogProducts.some((p) => p.id === s.product!.id) && (
+                            <option value={s.product.id}>
+                              {s.product.name} ({s.product.price.toLocaleString('vi-VN')} {s.product.currency})
+                            </option>
+                          )}
                           {companyCatalogProducts.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.name} ({p.price.toLocaleString('vi-VN')} {p.currency})
@@ -1140,14 +1808,14 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
         </div>
       )}
 
-      {/* Interactive Zone Cards Overview (Section 7: click zone -> filter booths, shows empty booth counts) */}
-      {versionDetail && (
-        <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0' }}>
+      {/* Interactive Zone Cards Overview (Dashboard only — keeps Wizard steps laser-focused!) */}
+      {viewMode === 'dashboard' && versionDetail && (
+        <div className="v28-card" style={{ padding: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-            <strong style={{ fontSize: 15, color: '#0f172a' }}>
-              🗂️ Danh sách Phân khu chữ U ({versionDetail.zones.length} khu · {versionDetail.booths.length} gian)
+            <strong style={{ fontSize: 15, color: '#111827' }}>
+              Phân khu triển lãm ({versionDetail.zones.length} khu · {versionDetail.booths.length} gian)
             </strong>
-            {filterZoneCode !== 'ALL' && (
+            {filterZoneCode !== 'ALL' && versionDetail.zones.length > 1 && (
               <button
                 type="button"
                 onClick={() => {
@@ -1188,8 +1856,8 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
                     <strong style={{ fontSize: 13.5, color: '#0f172a' }}>{z.displayName}</strong>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 999, background: versionDetail.status === 'published' ? '#dcfce7' : '#e0e7ff', color: versionDetail.status === 'published' ? '#166534' : '#3730a3' }}>
-                      {versionDetail.status.toUpperCase()}
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 999, background: versionDetail.status === 'published' ? '#dcfce7' : '#e0f2fe', color: versionDetail.status === 'published' ? '#166534' : '#0369a1' }}>
+                      {versionDetail.status === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
                     </span>
                   </div>
                   <div style={{ fontSize: 12, color: '#64748b' }}>{z.categoryTag || `Khu ${z.code}`}</div>
@@ -1207,207 +1875,163 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
         </div>
       )}
 
-      {/* Paginated, Searchable, Filterable Booth Table (with Red Empty-Booth Highlight & Safe Delete) */}
-      {versionDetail && (
-        <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0' }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <strong style={{ fontSize: 15 }}>
-              Danh sách Gian hàng V28 ({filteredBooths.length} / {versionDetail.booths.length} gian)
-            </strong>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <input
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setPage(1);
-                }}
-                placeholder="Tìm tên gian, mã gian, doanh nghiệp..."
-                style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #cbd5e1', minWidth: 220, fontSize: 13 }}
-              />
-              <select
-                value={filterZoneCode}
-                onChange={(e) => {
-                  setFilterZoneCode(e.target.value);
-                  setPage(1);
-                }}
-                style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
-              >
-                <option value="ALL">Tất cả khu ({versionDetail.zones.length})</option>
-                {versionDetail.zones.map((z) => (
-                  <option key={z.id} value={z.code}>
-                    {z.displayName} ({z.boothCount})
-                  </option>
-                ))}
-              </select>
-              <select
-                value={filterAssign}
-                onChange={(e) => {
-                  setFilterAssign(e.target.value as typeof filterAssign);
-                  setPage(1);
-                }}
-                style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
-              >
-                <option value="all">Tất cả trạng thái</option>
-                <option value="assigned">Đã gán Doanh nghiệp</option>
-                <option value="unassigned">Chưa gán Doanh nghiệp</option>
-                <option value="has_products">Đã trưng bày SP</option>
-                <option value="empty_slots">Chưa có SP</option>
-              </select>
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1);
-                }}
-                style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
-              >
-                <option value={12}>12 / trang</option>
-                <option value={25}>25 / trang</option>
-                <option value={50}>50 / trang</option>
-              </select>
+      {/* Inline Overview Workspace: Booth Cards (filtered by selected Zone) + Right-Side 6-Slot Booth Inspector */}
+      {viewMode === 'dashboard' && versionDetail && (
+        <div
+          className={`v28-overview-workspace ${selectedBooth ? 'v28-overview-workspace--with-inspector' : ''}`}
+        >
+          <div className="v28-card" style={{ padding: 16 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div>
+                <strong style={{ fontSize: 15, color: '#111827' }}>
+                  Danh sách gian hàng ({filteredBooths.length})
+                </strong>
+                <div style={{ fontSize: 12, color: '#526071', marginTop: 2 }}>
+                  Chọn gian để quản lý sản phẩm.
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <input
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setPage(1);
+                  }}
+                  placeholder="Tìm gian hàng..."
+                  className="v28-input"
+                  style={{ width: 180 }}
+                />
+                <select
+                  value={filterAssign}
+                  onChange={(e) => {
+                    setFilterAssign(e.target.value as typeof filterAssign);
+                    setPage(1);
+                  }}
+                  className="v28-input"
+                  style={{ width: 'auto' }}
+                >
+                  <option value="all">Tất cả</option>
+                  <option value="has_products">Đang trưng bày</option>
+                  <option value="empty_slots">Gian trống</option>
+                </select>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="v28-input"
+                  style={{ width: 'auto' }}
+                >
+                  <option value={12}>12 / trang</option>
+                  <option value={25}>25 / trang</option>
+                  <option value={50}>50 / trang</option>
+                </select>
+              </div>
             </div>
-          </div>
 
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                  <th style={{ padding: '8px 10px' }}>#</th>
-                  <th style={{ padding: '8px 10px' }}>Gian hàng</th>
-                  <th style={{ padding: '8px 10px' }}>Phân khu</th>
-                  <th style={{ padding: '8px 10px' }}>Doanh nghiệp</th>
-                  <th style={{ padding: '8px 10px' }}>Mẫu kiến trúc</th>
-                  <th style={{ padding: '8px 10px' }}>Trưng bày</th>
-                  <th style={{ padding: '8px 10px' }}>Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
+            {pagedBooths.length === 0 ? (
+              <div style={{ padding: '24px 12px', textAlign: 'center', color: '#526071', fontSize: 13.5 }}>
+                Không có gian hàng nào khớp bộ lọc.
+              </div>
+            ) : (
+              <div className="v28-booth-grid">
                 {pagedBooths.map((b) => {
                   const isEmptyBooth = b.assignedSlotCount === 0;
+                  const isActive = selectedBooth?.boothId === b.boothId;
+                  const shortTitle = `Gian ${String(b.slotIndex + 1).padStart(2, '0')}`;
                   return (
-                    <tr
+                    <button
                       key={b.boothId}
-                      style={{
-                        borderBottom: '1px solid #f1f5f9',
-                        borderLeft: isEmptyBooth ? '4px solid #ef4444' : '4px solid transparent',
-                        background:
-                          selectedBooth?.boothId === b.boothId
-                            ? '#eff6ff'
-                            : isEmptyBooth
-                              ? '#fef2f2'
-                              : 'transparent',
-                      }}
+                      type="button"
+                      title={b.boothName}
+                      onClick={() => handleSelectBooth(b)}
+                      className={`v28-booth-card ${isActive ? 'v28-booth-card--active' : ''} ${isEmptyBooth ? 'v28-booth-card--empty' : ''}`}
                     >
-                      <td style={{ padding: '8px 10px', color: '#64748b' }}>{b.slotIndex + 1}</td>
-                      <td style={{ padding: '8px 10px', fontWeight: 600 }}>
-                        {b.boothName}
-                        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>{b.boothId}</div>
-                      </td>
-                      <td style={{ padding: '8px 10px' }}>{b.zoneName}</td>
-                      <td style={{ padding: '8px 10px' }}>{b.companyName || '— Chưa gán —'}</td>
-                      <td style={{ padding: '8px 10px' }}>{b.archetypeLabel}</td>
-                      <td style={{ padding: '8px 10px' }}>
-                        {isEmptyBooth ? (
-                          <span
-                            style={{
-                              padding: '3px 9px',
-                              borderRadius: 999,
-                              fontSize: 12,
-                              fontWeight: 700,
-                              background: '#fee2e2',
-                              color: '#b91c1c',
-                              border: '1px solid #fca5a5',
-                            }}
-                          >
-                            🔴 Chưa có sản phẩm (0/6)
-                          </span>
-                        ) : (
-                          <span
-                            style={{
-                              padding: '3px 9px',
-                              borderRadius: 999,
-                              fontSize: 12,
-                              fontWeight: 600,
-                              background: '#dcfce7',
-                              color: '#166534',
-                            }}
-                          >
-                            {b.assignedSlotCount} / 6 SP
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: '8px 10px' }}>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          <button
-                            type="button"
-                            onClick={() => handleSelectBooth(b)}
-                            style={{
-                              padding: '5px 10px',
-                              borderRadius: 6,
-                              border: '1px solid #cbd5e1',
-                              background: '#fff',
-                              cursor: 'pointer',
-                              fontSize: 12,
-                              fontWeight: 600,
-                            }}
-                          >
-                            {isEmptyBooth ? '+ Thêm SP' : 'Quản lý / 6 Slot'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDeleteBooth(b)}
-                            disabled={!isDraft}
-                            title={
-                              isDraft
-                                ? 'Xóa gian hàng khỏi bản Draft (không xóa sản phẩm khỏi Catalog)'
-                                : 'Chỉ xóa được gian hàng khi đang ở bản Draft'
-                            }
-                            style={{
-                              padding: '5px 9px',
-                              borderRadius: 6,
-                              border: '1px solid #fecaca',
-                              background: isDraft ? '#fff1f2' : '#f8fafc',
-                              color: isDraft ? '#be123c' : '#94a3b8',
-                              cursor: isDraft ? 'pointer' : 'not-allowed',
-                              fontSize: 12,
-                              fontWeight: 600,
-                            }}
-                          >
-                            🗑️ Xóa
-                          </button>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                        <strong style={{ fontSize: 13.5, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {shortTitle}
+                        </strong>
+                        <span
+                          style={{
+                            padding: '1px 7px',
+                            borderRadius: 999,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            flexShrink: 0,
+                            fontVariantNumeric: 'tabular-nums',
+                            background: isEmptyBooth ? '#fef2f2' : '#ecfdf5',
+                            color: isEmptyBooth ? '#dc2626' : '#059669',
+                            border: `1px solid ${isEmptyBooth ? '#fecaca' : '#a7f3d0'}`,
+                          }}
+                        >
+                          {b.assignedSlotCount}/6 SP
+                        </span>
+                      </div>
+                      {filterZoneCode === 'ALL' && (
+                        <div style={{ fontSize: 11.5, color: '#526071', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {b.zoneName}
                         </div>
-                      </td>
-                    </tr>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11.5, marginTop: 2 }}>
+                        <span style={{ color: isEmptyBooth ? '#dc2626' : '#059669', fontWeight: 600 }}>
+                          {isEmptyBooth ? 'Chưa có sản phẩm' : 'Đang trưng bày'}
+                        </span>
+                        <span style={{ color: '#0284c7', fontWeight: 700 }}>
+                          {isActive ? 'Đang mở' : '→'}
+                        </span>
+                      </div>
+                    </button>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            )}
 
-          {/* Pagination Controls */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, fontSize: 13 }}>
-            <span style={{ color: '#64748b' }}>
-              Trang {safePage} / {totalPages} (Tổng {filteredBooths.length} gian hàng)
-            </span>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                type="button"
-                disabled={safePage <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: safePage <= 1 ? 'not-allowed' : 'pointer' }}
-              >
-                ← Trước
-              </button>
-              <button
-                type="button"
-                disabled={safePage >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: safePage >= totalPages ? 'not-allowed' : 'pointer' }}
-              >
-                Sau →
-              </button>
+            {/* Pagination Controls */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, fontSize: 13 }}>
+              <span style={{ color: '#526071', fontVariantNumeric: 'tabular-nums' }}>
+                Trang {safePage} / {totalPages} (Tổng {filteredBooths.length} gian hàng)
+              </span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button"
+                  className="v28-btn v28-btn--secondary"
+                  disabled={safePage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  style={{ minHeight: 32, padding: '0 12px', fontSize: 12.5 }}
+                >
+                  ← Trước
+                </button>
+                <button
+                  type="button"
+                  className="v28-btn v28-btn--secondary"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  style={{ minHeight: 32, padding: '0 12px', fontSize: 12.5 }}
+                >
+                  Sau →
+                </button>
+              </div>
             </div>
           </div>
+
+          {/* Inline Right-Side Booth Inspector Panel */}
+          {selectedBooth && (
+            <BoothInspectorPanel
+              booth={selectedBooth}
+              isDraft={isDraft}
+              onClose={() => setSelectedBooth(null)}
+              onAssignSlot={handleAssignSlot}
+              onProductMutated={async () => {
+                if (selectedExhId && selectedVersionId) {
+                  await loadVersionDetail(selectedExhId, selectedVersionId);
+                }
+                notifyV28WorldSync('product_updated');
+                onDataChanged?.();
+              }}
+              onRequestDeleteBooth={(b) => setConfirmDeleteBooth(b)}
+            />
+          )}
         </div>
       )}
 
@@ -1508,7 +2132,12 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
                 )}
                 <button
                   type="button"
-                  onClick={() => setCreationProgress(null)}
+                  onClick={() => {
+                    if (!creationProgress.error) {
+                      setWizardStep(3);
+                    }
+                    setCreationProgress(null);
+                  }}
                   style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#0f172a', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
                 >
                   {creationProgress.error ? 'Đóng' : '👁️ Xem sơ đồ 2D & Chỉnh sửa'}

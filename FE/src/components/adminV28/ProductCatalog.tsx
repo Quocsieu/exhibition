@@ -119,13 +119,17 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ initialCompanyId
     }
     try {
       if (editingId) {
+        // V28-AUDIT-018: Preserve secondary images[1..N] when updating primary imageUrl
+        const existingProd = products.find((p) => p.id === editingId);
+        const secondaryImgs = (existingProd?.images || []).slice(1);
+        const nextImgs = form.imageUrl.trim() ? [form.imageUrl.trim(), ...secondaryImgs] : secondaryImgs;
         await v28Api.updateProduct(editingId, {
           name: form.name,
           sku: form.sku,
           price: priceNum,
           currency: form.currency,
           description: form.description,
-          images: form.imageUrl ? [form.imageUrl] : [],
+          images: nextImgs,
           sourceUrl: form.sourceUrl,
         });
         setNotice('Đã cập nhật sản phẩm trong kho (không làm gián đoạn slot đang trưng bày).');
@@ -247,11 +251,11 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ initialCompanyId
           </button>
         </div>
 
-        {error && <div style={{ color: '#f87171', marginTop: 10 }}>{error}</div>}
-        {notice && <div style={{ color: '#34d399', marginTop: 10 }}>{notice}</div>}
+        {error && <div style={{ color: '#b91c1c', fontWeight: 600, marginTop: 10 }}>{error}</div>}
+        {notice && <div style={{ color: '#047857', fontWeight: 600, marginTop: 10 }}>{notice}</div>}
       </section>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))', gap: 16 }}>
         <section className="dashboard-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ margin: 0 }}>
@@ -274,17 +278,18 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ initialCompanyId
                 style={{
                   padding: 10,
                   borderRadius: 10,
-                  border: editingId === p.id ? '1.5px solid #0ea5e9' : '1px solid rgba(148,163,184,0.25)',
-                  background: 'rgba(15, 23, 42, 0.35)',
+                  border: editingId === p.id ? '1.5px solid #0284c7' : '1px solid rgba(17,24,39,0.12)',
+                  background: editingId === p.id ? '#f0f9ff' : '#f8fafc',
+                  color: '#111827',
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                   <strong>{p.name}</strong>
-                  <span style={{ color: '#fbbf24', fontWeight: 700 }}>
+                  <span style={{ color: '#b45309', fontWeight: 700 }}>
                     {formatCurrency(p.price, p.currency)}
                   </span>
                 </div>
-                <div style={{ fontSize: 12, opacity: 0.8, marginTop: 3 }}>
+                <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>
                   SKU: <code>{p.sku || '(chưa có)'}</code> · Trạng thái: {p.status === 'active' ? 'Hoạt động' : 'Vô hiệu'}
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
@@ -299,7 +304,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ initialCompanyId
                         price: String(p.price),
                         currency: p.currency,
                         description: p.description,
-                        imageUrl: p.images[0] || '',
+                        imageUrl: p.images?.[0] || '',
                         sourceUrl: p.sourceUrl,
                       });
                     }}
@@ -321,10 +326,15 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ initialCompanyId
                     type="button"
                     className="btn btn-secondary"
                     onClick={async () => {
-                      await v28Api.updateProduct(p.id, {
-                        status: p.status === 'active' ? 'inactive' : 'active',
-                      });
-                      await loadCatalog();
+                      try {
+                        setError('');
+                        await v28Api.updateProduct(p.id, {
+                          status: p.status === 'active' ? 'inactive' : 'active',
+                        });
+                        await loadCatalog();
+                      } catch (err) {
+                        setError((err as Error).message || 'Không thể cập nhật trạng thái sản phẩm.');
+                      }
                     }}
                   >
                     {p.status === 'active' ? 'Vô hiệu hóa' : 'Kích hoạt'}

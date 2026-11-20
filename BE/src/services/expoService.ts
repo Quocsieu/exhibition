@@ -978,7 +978,13 @@ export function isServerKorvaWorkerDisabled(): boolean {
   ) {
     return true;
   }
-  if ((process.env.KORVATTS_ENABLED || '').trim().toLowerCase() === 'false') {
+  const explicitKorva = (process.env.KORVATTS_ENABLED || '').trim().toLowerCase();
+  if (explicitKorva === 'false') {
+    return true;
+  }
+  // Phase 1 Hardening: In production, KorvaTTS Python worker is strictly opt-in (KORVATTS_ENABLED=true)
+  // so fresh production deployments NEVER spawn Python or trigger OOM by default!
+  if (process.env.NODE_ENV === 'production' && explicitKorva !== 'true') {
     return true;
   }
   if ((process.env.RENDER || '').trim().toLowerCase() === 'true') {

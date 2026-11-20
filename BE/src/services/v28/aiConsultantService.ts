@@ -14,7 +14,7 @@ import type { V28ExhibitionService, ExhibitionBoothPlacementView } from './exhib
 export const VERIFIED_GEMINI_MODELS = {
   chat: 'gemini-3.8-flash',
   chatLite: 'gemini-3.5-flash-lite',
-  tts: 'gemini-3.8-flash-lite-tts',
+  tts: 'gemini-3.8-flash-tts',
   liveVoice: 'gemini-3.1-flash-live-preview',
 } as const;
 
@@ -68,6 +68,7 @@ export interface VoiceSessionInfo {
   sessionId: string;
   boothId: string;
   userId: string;
+  companyId?: string;
   pipelineMode: 'FALLBACK_STT_CHAT_TTS' | 'GEMINI_LIVE_API';
   liveGeminiVerified: boolean;
   maxDurationSec: number;
@@ -106,14 +107,16 @@ export class V28AiConsultantService {
   public getProviderStatus() {
     const hasKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 10);
     const liveEnabled = hasKey && process.env.V28_ENABLE_LIVE_AI === 'true';
+    // V28-AUDIT-035: Honestly report chat as grounded_mock until live chat transport is wired
     return {
-      provider: liveEnabled ? 'gemini_live' : 'grounded_mock',
-      liveGeminiVerified: liveEnabled,
+      provider: 'grounded_mock',
+      liveGeminiVerified: false,
+      liveTtsConfigured: liveEnabled,
       liveStatusNote: liveEnabled
-        ? 'Live Gemini API enabled via backend GEMINI_API_KEY'
+        ? 'Gemini TTS live configured; AI Chat currently runs in zero-cost Grounded Mock mode'
         : 'LIVE GEMINI NOT VERIFIED (Zero-cost Grounded Mock Provider active; set GEMINI_API_KEY & V28_ENABLE_LIVE_AI=true in BE/.env to enable)',
       verifiedModelIds: VERIFIED_GEMINI_MODELS,
-      voicePipelineMode: liveEnabled ? 'GEMINI_LIVE_API' : 'FALLBACK_STT_CHAT_TTS',
+      voicePipelineMode: 'FALLBACK_STT_CHAT_TTS',
       trialQuotas: AI_TRIAL_QUOTAS,
       activeConcurrentVoiceSessions: this.pruneAndCountActiveVoiceSessions(),
     };
@@ -255,9 +258,10 @@ export class V28AiConsultantService {
       return `Tôi chỉ là trợ lý AI tư vấn của gian hàng ${ctx.boothName} và không có quyền thực hiện thao tác quản trị hoặc thay đổi giá/dữ liệu sản phẩm.`;
     }
 
-    // Check approved FAQs first
+    // Check approved FAQs first (V28-AUDIT-044: guard against empty/short FAQ strings)
     for (const faq of ctx.approvedFaqs) {
-      if (q.includes(faq.question.toLowerCase().slice(0, 12))) {
+      const needle = faq.question.trim().toLowerCase().slice(0, 12);
+      if (needle.length >= 4 && q.includes(needle)) {
         return faq.answer;
       }
     }
@@ -319,6 +323,11 @@ export class V28AiConsultantService {
     }
 
     const now = Date.now();
+    if (this.userVoiceHistory.size > 500) {
+      for (const [k, arr] of this.userVoiceHistory.entries()) {
+        if (arr.every((t) => now - t >= 3_600_000)) this.userVoiceHistory.delete(k);
+      }
+    }
     const hourWindow = (this.userVoiceHistory.get(params.userId) || []).filter((t) => now - t < 3_600_000);
     if (hourWindow.length >= AI_TRIAL_QUOTAS.maxVoiceSessionsPerUserPerHour) {
       throw Object.assign(
@@ -329,10 +338,12 @@ export class V28AiConsultantService {
     hourWindow.push(now);
     this.userVoiceHistory.set(params.userId, hourWindow);
 
+    const boothCtx = this.buildGroundedBoothContext(params.boothId);
     const status = this.getProviderStatus();
     const session: VoiceSessionInfo = {
       sessionId: `vsess-${crypto.randomBytes(6).toString('hex')}`,
       boothId: params.boothId,
+      companyId: boothCtx.companyId || '',
       userId: params.userId,
       pipelineMode: status.voicePipelineMode as VoiceSessionInfo['pipelineMode'],
       liveGeminiVerified: status.liveGeminiVerified,
@@ -378,7 +389,7 @@ export class V28AiConsultantService {
     this.activeVoiceSessions.delete(sessionId);
     this.logUsage({
       boothId: sess.boothId,
-      companyId: 'voice-session',
+      companyId: sess.companyId || 'unknown',
       sessionId,
       mode: 'voice',
       provider: sess.liveGeminiVerified ? 'gemini_live' : 'grounded_mock',

@@ -32,7 +32,22 @@ export interface DynamicWorldHudProps {
   onCloseNpcPanel: () => void;
   onNpcAnimStateChange: (state: V28NpcAnimState) => void;
   onJoystickChange: (vec: { x: number; y: number }) => void;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
   onOpenAdmin: () => void;
+}
+
+function getSafeWebsiteUrl(raw?: string | null): string | null {
+  if (!raw || !raw.trim()) return null;
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol === 'http:' || u.protocol === 'https:') {
+      return u.toString();
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
@@ -59,6 +74,8 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   onCloseNpcPanel,
   onNpcAnimStateChange,
   onJoystickChange,
+  onZoomIn,
+  onZoomOut,
   onOpenAdmin,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -116,6 +133,36 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
     onJoystickChange({ x: 0, y: 0 });
   };
 
+  const isBoothFocusActive = cameraMode === 'focus' && Boolean(focusedBooth);
+  const focusedWebsiteUrl = getSafeWebsiteUrl(focusedBooth?.contactUrl);
+  const focusedCategoryLabel =
+    (focusedBooth?.zoneCategoryTag && focusedBooth.zoneCategoryTag !== 'Chưa phân bổ'
+      ? focusedBooth.zoneCategoryTag
+      : focusedBooth?.category) || 'Triển lãm V28';
+
+  // Dynamically select up to 8 booths (4 on mobile portrait) from Published V28 World,
+  // prioritizing booths that currently have assigned products (NEVER hardcoding 6 V27.5 booths!)
+  const quickBoothChips = useMemo(() => {
+    const limit = isMobilePortrait ? 4 : 8;
+    const sorted = [...world.booths].sort((a, b) => {
+      if (b.assignedSlotCount !== a.assignedSlotCount) {
+        return b.assignedSlotCount - a.assignedSlotCount;
+      }
+      return a.slotIndex - b.slotIndex;
+    });
+    return sorted.slice(0, limit);
+  }, [world.booths, isMobilePortrait]);
+
+  // V28-AUDIT-029: Release mobile virtual joystick ONLY when transitioning to hidden/disabled while held
+  const showJoystick = isMobilePortrait && joystickEnabled && !isBoothFocusActive && !selectedProduct;
+  useEffect(() => {
+    if (!showJoystick) {
+      setJoyKnob((prev) => (prev.x === 0 && prev.y === 0 ? prev : { x: 0, y: 0 }));
+      onJoystickChange({ x: 0, y: 0 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showJoystick]);
+
   return (
     <div
       style={{
@@ -130,126 +177,176 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
     >
-      {/* TOP BAR */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'auto' }}>
+      {/* =====================================================================
+       * MODE A: BOOTH FOCUS TOOLBAR (Synchronized with V27.5 Hình 1)
+       * [← Quay lại khu triển lãm Esc] [Danh mục] [Doanh nghiệp] [Website ↗] [Nghe tư vấn viên giới thiệu]
+       * ===================================================================== */}
+      {isBoothFocusActive && focusedBooth ? (
         <div
+          className="shop-showcase-corner-hud"
+          role="toolbar"
+          aria-label="Thanh điều khiển gian hàng đang xem"
           style={{
-            display: 'flex',
-            gap: 8,
-            alignItems: 'center',
+            position: 'static',
+            pointerEvents: 'auto',
+            alignSelf: 'flex-start',
+            maxWidth: '100%',
             flexWrap: 'wrap',
-            background: 'rgba(15, 23, 42, 0.86)',
-            backdropFilter: 'blur(10px)',
-            color: '#fff',
-            padding: isMobilePortrait ? '8px 10px' : '10px 14px',
-            borderRadius: 14,
-            boxShadow: '0 8px 24px rgba(15,23,42,0.22)',
+            gap: 8,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: isMobilePortrait ? '1 1 100%' : '0 0 auto' }}>
+          <button
+            type="button"
+            className="shop-showcase-back-btn"
+            onClick={onCloseFocus}
+            title="Thoát gian hàng và quay lại khu triển lãm (Phím Esc)"
+            aria-label="Quay lại khu triển lãm"
+          >
+            ← Quay lại khu triển lãm {!isMobilePortrait && <kbd>Esc</kbd>}
+          </button>
+
+          <div
+            className="shop-showcase-booth-banner"
+            title={`${focusedBooth.companyName || focusedBooth.boothName}${
+              focusedBooth.companyName && focusedBooth.companyName !== focusedBooth.boothName
+                ? ` (${focusedBooth.boothName})`
+                : ''
+            } · ${focusedBooth.zoneName} · ${focusedBooth.assignedSlotCount}/6 sản phẩm`}
+            style={{ maxWidth: isMobilePortrait ? '100%' : 460 }}
+          >
+            {focusedBooth.logoUrl && (
+              <img
+                src={focusedBooth.logoUrl}
+                alt={focusedBooth.companyName || focusedBooth.boothName}
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: 6,
+                  objectFit: 'cover',
+                  border: `1.5px solid ${focusedBooth.color || '#0ea5e9'}`,
+                  flexShrink: 0,
+                }}
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            )}
             <span
-              style={{
-                background: '#0ea5e9',
-                padding: '3px 8px',
-                borderRadius: 8,
-                fontWeight: 800,
-                fontSize: 12,
-              }}
+              className="expo-dialog__badge"
+              style={{ backgroundColor: focusedBooth.color || '#0ea5e9', flexShrink: 0 }}
             >
-              V28
+              {focusedCategoryLabel}
             </span>
-            <strong style={{ fontSize: isMobilePortrait ? 14 : 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {world.exhibitionName} ({world.booths.length} gian)
+            <strong
+              className="shop-showcase-booth-banner__title"
+              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              {focusedBooth.companyName || focusedBooth.boothName}
             </strong>
-            {isPreviewMode && (
-              <span style={{ background: '#6366f1', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
-                DRAFT PREVIEW
+            {focusedBooth.companyName && focusedBooth.companyName !== focusedBooth.boothName && !isMobilePortrait && (
+              <span
+                className="shop-showcase-booth-banner__sub"
+                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}
+              >
+                ({focusedBooth.boothName})
               </span>
             )}
-            <span style={{ fontSize: 12, color: '#94a3b8', marginLeft: 'auto' }}>
-              👥 {onlineCount}
-              {overflowVisitorCount > 0 ? ` (+${overflowVisitorCount} khu vực)` : ''}
+            <span className="shop-showcase-booth-banner__sub" style={{ flexShrink: 0 }}>
+              · {focusedBooth.assignedSlotCount}/6 sản phẩm
             </span>
           </div>
 
-          {/* Search input */}
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              if (e.target.value.trim()) setDirectoryOpen(true);
-            }}
-            placeholder="Tìm gian hàng, doanh nghiệp, sản phẩm..."
-            style={{
-              flex: '1 1 180px',
-              minHeight: 40,
-              padding: '6px 12px',
-              borderRadius: 10,
-              border: '1px solid rgba(255,255,255,0.18)',
-              background: 'rgba(255,255,255,0.12)',
-              color: '#fff',
-              fontSize: 13,
-              outline: 'none',
-            }}
-          />
+          {focusedWebsiteUrl && (
+            <a
+              href={focusedWebsiteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn--outline btn--sm"
+              style={{ minHeight: 38, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+            >
+              🌐 Website ↗
+            </a>
+          )}
 
-          {/* Primary Camera & Directory Action Buttons (min 44px touch targets) */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              onClick={() => onChangeCameraMode(cameraMode === 'overview' ? 'explore' : 'overview')}
-              style={{
-                minHeight: 44,
-                padding: '0 12px',
-                borderRadius: 10,
-                border: 'none',
-                background: cameraMode === 'overview' ? '#0ea5e9' : 'rgba(255,255,255,0.14)',
-                color: '#fff',
-                fontWeight: 600,
-                fontSize: 13,
-                cursor: 'pointer',
-              }}
-            >
-              {cameraMode === 'overview' ? '🚶 Khám phá' : '🗺️ Toàn cảnh'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setDirectoryOpen((v) => !v)}
-              style={{
-                minHeight: 44,
-                padding: '0 12px',
-                borderRadius: 10,
-                border: 'none',
-                background: directoryOpen ? '#10b981' : 'rgba(255,255,255,0.14)',
-                color: '#fff',
-                fontWeight: 600,
-                fontSize: 13,
-                cursor: 'pointer',
-              }}
-            >
-              📍 Danh bạ / Bản đồ
-            </button>
-            {isMobilePortrait && (
-              <button
-                type="button"
-                onClick={() => setJoystickEnabled((v) => !v)}
-                style={{
-                  minHeight: 44,
-                  padding: '0 12px',
-                  borderRadius: 10,
-                  border: 'none',
-                  background: joystickEnabled ? '#f59e0b' : 'rgba(255,255,255,0.14)',
-                  color: '#fff',
-                  fontWeight: 600,
-                  fontSize: 13,
-                  cursor: 'pointer',
+          <button
+            type="button"
+            className="btn btn--primary btn--sm"
+            onClick={onOpenNpcPanel}
+            title="Nghe tư vấn viên 3D giới thiệu gian hàng và sản phẩm bằng giọng nữ tiếng Việt"
+            style={{ minHeight: 38 }}
+          >
+            👩‍💼 Nghe tư vấn viên giới thiệu
+          </button>
+        </div>
+      ) : (
+        /* ===================================================================
+         * MODE B: OVERVIEW / EXPLORE HEADER (Synchronized with V27.5 Hình 2)
+         * [3D] Virtual Expo Plaza + Online count | [Đi nhanh tới gian hàng...] [Khách #...]
+         * =================================================================== */
+        <header
+          className="expo-hud-top"
+          style={{
+            position: 'static',
+            pointerEvents: 'auto',
+            width: '100%',
+            boxSizing: 'border-box',
+          }}
+        >
+          <div className="expo-hud-top__brand">
+            <div className="expo-hud-top__logo">3D</div>
+            <div>
+              <h1 className="expo-hud-top__title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>{world.exhibitionName || 'Virtual Expo Plaza'}</span>
+                {isPreviewMode && (
+                  <span style={{ background: '#0284c7', color: '#fff', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
+                    DRAFT PREVIEW
+                  </span>
+                )}
+              </h1>
+              <div className="expo-hud-top__status">
+                <span className="status-dot status-dot--online" />
+                <span>
+                  {onlineCount} khách đang trực tuyến
+                  {overflowVisitorCount > 0 ? ` (+${overflowVisitorCount} khu vực)` : ''}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="expo-hud-top__nav" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <div className="hud-booth-picker">
+              <select
+                aria-label="Đi nhanh tới gian hàng"
+                className="hud-select"
+                defaultValue=""
+                onChange={(e) => {
+                  const target = world.booths.find((b) => b.boothId === e.target.value);
+                  if (target) {
+                    onTeleportToBooth(target);
+                    e.target.value = '';
+                  }
                 }}
               >
-                🕹️ Joystick
-              </button>
-            )}
-            {/* V27.5 Visitor Rename & Color Customization Pill */}
+                <option value="" disabled>
+                  📍 Đi nhanh tới gian hàng ({world.booths.length})...
+                </option>
+                {world.booths.map((b) => (
+                  <option key={b.boothId} value={b.boothId}>
+                    {b.companyName !== b.boothName ? `${b.companyName} — ${b.boothName}` : b.boothName} ({b.zoneName})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={() => setDirectoryOpen((v) => !v)}
+              title="Mở bản đồ 2D và tìm kiếm toàn bộ gian hàng"
+            >
+              🗺️ Bản đồ 2D
+            </button>
+
             {editingProfile ? (
               <form
                 onSubmit={(e) => {
@@ -261,134 +358,65 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               >
                 <input
                   name="visitorName"
+                  aria-label="Tên hiển thị của bạn"
                   value={draftName}
                   onChange={(e) => setDraftName(e.target.value)}
                   maxLength={32}
                   autoFocus
                   style={{
                     width: 120,
-                    minHeight: 36,
+                    minHeight: 34,
                     padding: '4px 8px',
                     borderRadius: 8,
                     border: '1px solid #38bdf8',
                     background: '#0f172a',
                     color: '#fff',
-                    fontSize: 12,
+                    fontSize: 12.5,
                   }}
                 />
                 <input
                   type="color"
+                  aria-label="Màu nhân vật"
                   value={draftColor}
                   onChange={(e) => setDraftColor(e.target.value)}
                   style={{ width: 28, height: 32, border: 'none', background: 'transparent', cursor: 'pointer' }}
                 />
-                <button
-                  type="submit"
-                  style={{ minHeight: 36, padding: '0 10px', borderRadius: 8, border: 'none', background: '#10b981', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}
-                >
+                <button type="submit" className="btn btn--primary btn--sm">
                   Lưu
                 </button>
               </form>
             ) : (
               <button
                 type="button"
+                className="btn btn--secondary btn--sm"
                 title="Đổi tên & màu nhân vật"
                 onClick={() => {
                   setDraftName(playerName);
                   setDraftColor(playerColor);
                   setEditingProfile(true);
                 }}
-                style={{
-                  minHeight: 44,
-                  padding: '0 12px',
-                  borderRadius: 10,
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  background: 'rgba(255,255,255,0.1)',
-                  color: '#fff',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
               >
-                <span style={{ width: 10, height: 10, borderRadius: '50%', background: playerColor, display: 'inline-block' }} />
-                <span>{playerName}</span>
-                <span>✏️</span>
+                <span className="avatar-dot" style={{ backgroundColor: playerColor }} />
+                {playerName} ✎
               </button>
             )}
 
             {!isMobilePortrait && (
               <button
                 type="button"
+                className="btn btn--secondary btn--sm"
                 onClick={onOpenAdmin}
-                style={{
-                  minHeight: 44,
-                  padding: '0 12px',
-                  borderRadius: 10,
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  background: 'transparent',
-                  color: '#e2e8f0',
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
+                title="Mở trang quản trị triển lãm V28"
               >
                 ⚙️ Admin
               </button>
             )}
           </div>
-        </div>
+        </header>
+      )}
 
-        {/* Zone Filter Chips */}
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
-          <button
-            type="button"
-            onClick={() => setSelectedZoneCode('ALL')}
-            style={{
-              minHeight: 36,
-              padding: '0 12px',
-              borderRadius: 999,
-              border: 'none',
-              background: selectedZoneCode === 'ALL' ? '#0f172a' : 'rgba(255,255,255,0.88)',
-              color: selectedZoneCode === 'ALL' ? '#fff' : '#0f172a',
-              fontWeight: 600,
-              fontSize: 12,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Tất cả ({world.booths.length})
-          </button>
-          {world.zones.map((z) => (
-            <button
-              key={z.id}
-              type="button"
-              onClick={() => {
-                setSelectedZoneCode(z.code);
-                setDirectoryOpen(true);
-              }}
-              style={{
-                minHeight: 36,
-                padding: '0 12px',
-                borderRadius: 999,
-                border: 'none',
-                background: selectedZoneCode === z.code ? '#0ea5e9' : 'rgba(255,255,255,0.88)',
-                color: selectedZoneCode === z.code ? '#fff' : '#0f172a',
-                fontWeight: 600,
-                fontSize: 12,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {z.displayName} ({z.boothCount})
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* DIRECTORY & MINI-MAP DRAWER */}
-      {directoryOpen && (
+      {/* DIRECTORY & MINI-MAP DRAWER (Hidden while focused on a booth) */}
+      {directoryOpen && !isBoothFocusActive && (
         <div
           style={{
             pointerEvents: 'auto',
@@ -408,7 +436,7 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <strong style={{ fontSize: 14, color: '#0f172a' }}>
-              Bản đồ & Danh bạ ({filteredBooths.length} gian)
+              Bản đồ &amp; Danh bạ ({filteredBooths.length}/{world.booths.length} gian)
             </strong>
             <button
               type="button"
@@ -425,6 +453,21 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               ✕
             </button>
           </div>
+          <input
+            type="search"
+            aria-label="Tìm gian hàng, doanh nghiệp, sản phẩm"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Tìm gian hàng, doanh nghiệp, sản phẩm..."
+            style={{
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: 8,
+              border: '1px solid #cbd5e1',
+              fontSize: 12.5,
+              boxSizing: 'border-box',
+            }}
+          />
 
           {/* Interactive 2D Exhibition Map (live layout: U-zones, walkways, booths, player position) */}
           <svg
@@ -543,10 +586,10 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
         </div>
       )}
 
-      {/* BOTTOM AREA: Optional Mobile Joystick + Focused Booth / Product Bottom Sheet */}
+      {/* BOTTOM AREA: Mode B Camera/Booth Dock (V27.5 Hình 2) + Mobile Joystick + Focus Panels */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10 }}>
-        {/* Virtual Joystick (Mobile Portrait Optional) */}
-        {isMobilePortrait && joystickEnabled && !focusedBooth && !selectedProduct && (
+        {/* Virtual Joystick (Mobile Portrait Optional — hidden in focus mode) */}
+        {isMobilePortrait && joystickEnabled && !isBoothFocusActive && !selectedProduct && (
           <div
             onPointerDown={handleJoyStart}
             onPointerMove={handleJoyMove}
@@ -561,6 +604,7 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               border: '2px solid rgba(255,255,255,0.4)',
               position: 'relative',
               touchAction: 'none',
+              flexShrink: 0,
             }}
           >
             <div
@@ -576,6 +620,107 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               }}
             />
           </div>
+        )}
+
+        {/* Mode B: Camera Mode Bar + Zoom + / - + Dynamic Booth Quick Chips (Synchronized with V27.5 Hình 2) */}
+        {!isBoothFocusActive && (
+          <aside
+            className="expo-hud-dock"
+            aria-label="Điều khiển góc nhìn camera và danh sách gian hàng"
+            style={{
+              position: 'static',
+              pointerEvents: 'auto',
+              maxWidth: isMobilePortrait ? 'calc(100% - 116px)' : '100%',
+            }}
+          >
+            <div className="camera-mode-bar" role="group" aria-label="Chế độ góc nhìn Camera">
+              <button
+                type="button"
+                className={`camera-mode-btn ${cameraMode === 'overview' ? 'camera-mode-btn--active' : ''}`}
+                onClick={() => onChangeCameraMode('overview')}
+                aria-pressed={cameraMode === 'overview'}
+                title="Nhìn tổng thể toàn bộ khu triển lãm V28"
+              >
+                🌐 Toàn cảnh
+              </button>
+
+              <button
+                type="button"
+                className={`camera-mode-btn ${cameraMode === 'explore' ? 'camera-mode-btn--active' : ''}`}
+                onClick={() => onChangeCameraMode('explore')}
+                aria-pressed={cameraMode === 'explore'}
+                title="Camera góc nhìn thứ 3 đi theo sau nhân vật"
+              >
+                🚶 Tham quan
+              </button>
+
+              <div className="zoom-controls">
+                <button
+                  type="button"
+                  className="zoom-btn"
+                  onClick={() => onZoomIn?.()}
+                  title="Phóng to góc nhìn"
+                  aria-label="Phóng to góc nhìn"
+                >
+                  ＋
+                </button>
+                <button
+                  type="button"
+                  className="zoom-btn"
+                  onClick={() => onZoomOut?.()}
+                  title="Thu nhỏ góc nhìn"
+                  aria-label="Thu nhỏ góc nhìn"
+                >
+                  －
+                </button>
+              </div>
+
+              {isMobilePortrait && (
+                <button
+                  type="button"
+                  className={`camera-mode-btn ${joystickEnabled ? 'camera-mode-btn--active' : ''}`}
+                  onClick={() => setJoystickEnabled((v) => !v)}
+                  aria-pressed={joystickEnabled}
+                >
+                  🕹️
+                </button>
+              )}
+            </div>
+
+            {quickBoothChips.length > 0 && (
+              <div className="booth-mini-list">
+                <span className="booth-mini-list__title">
+                  {world.booths.length <= 6
+                    ? 'Gian hàng nổi bật (Bấm để xem cận cảnh)'
+                    : `Gian hàng tiêu biểu (${world.booths.length} gian · Bấm để xem cận cảnh)`}
+                </span>
+                <div className="booth-mini-list__chips">
+                  {quickBoothChips.map((b) => (
+                    <button
+                      key={b.boothId}
+                      type="button"
+                      className="booth-chip"
+                      onClick={() => onTeleportToBooth(b)}
+                      title={`${b.companyName} — ${b.boothName} (${b.zoneName} · ${b.assignedSlotCount}/6 SP)`}
+                    >
+                      <span className="booth-chip__dot" style={{ backgroundColor: b.color || '#0ea5e9' }} />
+                      <span className="booth-chip__name">{b.boothName}</span>
+                    </button>
+                  ))}
+                  {world.booths.length > quickBoothChips.length && (
+                    <button
+                      type="button"
+                      className="booth-chip"
+                      onClick={() => setDirectoryOpen(true)}
+                      title="Mở danh bạ và bản đồ 2D để xem tất cả gian hàng"
+                    >
+                      <span className="booth-chip__name">+ Xem tất cả ({world.booths.length})</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </aside>
         )}
 
         {/* Product Detail Card or NPC Consultant Panel (Duplicate white booth card removed per Task A) */}
@@ -626,15 +771,20 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
                   ✕
                 </button>
               </div>
-              {selectedProduct.product.images[0] && (
+              {selectedProduct.product.images?.[0] && (
                 <img
                   src={selectedProduct.product.images[0]}
                   alt={selectedProduct.product.name}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  }}
                   style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 10 }}
                 />
               )}
               <div style={{ fontSize: 16, fontWeight: 800, color: '#047857' }}>
-                {selectedProduct.product.price.toLocaleString('vi-VN')} {selectedProduct.product.currency}
+                {selectedProduct.product.price > 0
+                  ? `${selectedProduct.product.price.toLocaleString('vi-VN')} ${selectedProduct.product.currency || 'VND'}`
+                  : 'Liên hệ báo giá'}
                 {selectedProduct.product.sku && (
                   <span style={{ fontSize: 12, fontWeight: 500, color: '#64748b', marginLeft: 8 }}>
                     SKU: {selectedProduct.product.sku}

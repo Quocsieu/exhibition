@@ -13,48 +13,57 @@ interface ParsedRoute {
 function parseCurrentLocation(): ParsedRoute {
   const hash = window.location.hash || '';
   const pathname = window.location.pathname || '/';
+  const worldParam = new URLSearchParams(window.location.search).get('world');
 
-  // 0. Dedicated V28 Admin Portal (/admin/v28 or #/admin/v28)
-  if (/^#\/?admin\/v28\/?$/i.test(hash) || /^\/admin\/v28\/?$/i.test(pathname)) {
-    return { view: 'admin_v28', adminBoothId: null };
-  }
-
-  // 1. Check hash routes: #admin, #dashboard, #/admin/booths, #/admin/booths/:boothId/slots
-  const hashSlotMatch = hash.match(/^#\/?admin\/booths\/([^/]+)(?:\/slots)?$/i);
+  // 1. Legacy V27.5 Admin Portal (/v27/admin, #/v27/admin, /admin/v27, /admin/booths, /admin/booths/:id/slots)
+  const hashSlotMatch = hash.match(/^#\/?(?:v27\/)?admin\/booths\/([^/]+)(?:\/slots)?$/i);
   if (hashSlotMatch) {
     return {
       view: 'admin',
       adminBoothId: decodeURIComponent(hashSlotMatch[1]),
     };
   }
-  if (
-    hash === '#admin' ||
-    hash === '#dashboard' ||
-    hash === '#/admin' ||
-    hash === '#/admin/booths'
-  ) {
-    return { view: 'admin', adminBoothId: null };
-  }
-
-  // 2. Check pathname routes: /admin, /admin/booths, /admin/booths/:boothId, /admin/booths/:boothId/slots
-  const pathSlotMatch = pathname.match(/^\/admin\/booths\/([^/]+)(?:\/slots)?\/?$/i);
+  const pathSlotMatch = pathname.match(/^\/(?:v27\/)?admin\/booths\/([^/]+)(?:\/slots)?\/?$/i);
   if (pathSlotMatch) {
     return {
       view: 'admin',
       adminBoothId: decodeURIComponent(pathSlotMatch[1]),
     };
   }
-  if (/^\/admin(?:\/booths)?\/?$/i.test(pathname)) {
+  if (
+    /^#\/?v27\/admin\/?$/i.test(hash) ||
+    /^\/v27\/admin\/?$/i.test(pathname) ||
+    /^#\/?admin\/v27\/?$/i.test(hash) ||
+    /^\/admin\/v27\/?$/i.test(pathname) ||
+    hash === '#/admin/booths' ||
+    /^\/(?:v27\/)?admin\/booths\/?$/i.test(pathname)
+  ) {
     return { view: 'admin', adminBoothId: null };
   }
 
-  // 3. Isolated V28 Dynamic Exhibition World (?world=dynamic)
-  const worldParam = new URLSearchParams(window.location.search).get('world');
-  if (worldParam === 'dynamic') {
-    return { view: 'dynamic', adminBoothId: null };
+  // 2. Primary V28 Admin Portal (/admin, /admin/v28, #admin, #dashboard, #/admin, #/admin/v28)
+  if (
+    /^#\/?admin(?:\/v28)?\/?$/i.test(hash) ||
+    hash === '#admin' ||
+    hash === '#dashboard' ||
+    /^\/admin(?:\/v28)?\/?$/i.test(pathname)
+  ) {
+    return { view: 'admin_v28', adminBoothId: null };
   }
 
-  return { view: 'expo', adminBoothId: null };
+  // 3. Secondary Legacy V27.5 World (/v27, #/v27, ?world=v27 | v27_0 | v26)
+  if (
+    /^\/v27\/?$/i.test(pathname) ||
+    /^#\/?v27\/?$/i.test(hash) ||
+    worldParam === 'v27' ||
+    worldParam === 'v27_0' ||
+    worldParam === 'v26'
+  ) {
+    return { view: 'expo', adminBoothId: null };
+  }
+
+  // 4. Primary V28 Dynamic Exhibition World (default `/` and `?world=dynamic`)
+  return { view: 'dynamic', adminBoothId: null };
 }
 
 export const App: React.FC = () => {
@@ -74,30 +83,29 @@ export const App: React.FC = () => {
 
   const openAdmin = useCallback((boothId: string | null = null) => {
     if (boothId) {
-      window.location.hash = `/admin/booths/${encodeURIComponent(boothId)}/slots`;
+      window.location.hash = `/v27/admin/booths/${encodeURIComponent(boothId)}/slots`;
       setRoute({ view: 'admin', adminBoothId: boothId });
     } else {
-      window.location.hash = '/admin/booths';
+      window.history.pushState({}, '', '/v27/admin');
+      window.location.hash = '';
       setRoute({ view: 'admin', adminBoothId: null });
     }
   }, []);
 
   const openExpo = useCallback((previewBoothId: string | null = null) => {
-    if (window.location.pathname.startsWith('/admin')) {
-      window.history.pushState({}, '', '/');
-    }
+    window.history.pushState({}, '', '/v27');
     window.location.hash = '';
     setRoute({ view: 'expo', adminBoothId: null, previewBoothId });
   }, []);
 
   const openAdminV28 = useCallback(() => {
-    window.history.pushState({}, '', '/admin/v28');
+    window.history.pushState({}, '', '/admin');
     window.location.hash = '';
     setRoute({ view: 'admin_v28', adminBoothId: null });
   }, []);
 
   const openDynamicWorld = useCallback(() => {
-    window.history.pushState({}, '', '/?world=dynamic');
+    window.history.pushState({}, '', '/');
     window.location.hash = '';
     setRoute({ view: 'dynamic', adminBoothId: null });
   }, []);
@@ -106,7 +114,8 @@ export const App: React.FC = () => {
     <AdminV28Page
       onOpenDynamicWorld={openDynamicWorld}
       onOpenLegacyAdmin={() => {
-        window.history.pushState({}, '', '/admin');
+        window.history.pushState({}, '', '/v27/admin');
+        window.location.hash = '';
         setRoute({ view: 'admin', adminBoothId: null });
       }}
     />

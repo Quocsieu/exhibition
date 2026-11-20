@@ -65,12 +65,18 @@ export function buildCollisionIndex(version: ExhibitionVersionDetail): InMemoryC
     versionNumber: version.versionNumber,
     walkableBounds: { ...version.walkableBounds },
     spawnPoint: { ...version.spawnPoint },
-    boothAabbs: version.booths.map((b) => ({
-      minX: b.positionX - b.footprintWidth / 2 - 0.25,
-      maxX: b.positionX + b.footprintWidth / 2 + 0.25,
-      minZ: b.positionZ - b.footprintDepth / 2 - 0.25,
-      maxZ: b.positionZ + b.footprintDepth / 2 + 0.25,
-    })),
+    boothAabbs: version.booths.map((b) => {
+      const cos = Math.abs(Math.cos(b.rotationY || 0));
+      const sin = Math.abs(Math.sin(b.rotationY || 0));
+      const halfW = (b.footprintWidth * cos + b.footprintDepth * sin) / 2 + 0.25;
+      const halfD = (b.footprintWidth * sin + b.footprintDepth * cos) / 2 + 0.25;
+      return {
+        minX: b.positionX - halfW,
+        maxX: b.positionX + halfW,
+        minZ: b.positionZ - halfD,
+        maxZ: b.positionZ + halfD,
+      };
+    }),
   };
 }
 
@@ -324,10 +330,11 @@ export class V28SpatialAoiEngine {
           return;
         }
 
-        // Speed-hack guard (allow burst slack >= 0.25s)
-        const dtSec = Math.max(0.25, (ts - v.lastMoveTs) / 1000);
+        // V28-AUDIT-033: Real speed-hack guard (actual dt clamped to [0.05s..1.0s] + bounded 5.5m burst cap; blocks 101.5 m/s exploit)
+        const actualDtSec = Math.min(1.0, Math.max(0.05, (ts - v.lastMoveTs) / 1000));
+        const maxAllowedDist = Math.min(5.5, MAX_WALK_SPEED_MPS * actualDtSec * 1.45 + 1.5);
         const dist = Math.hypot(nx - v.x, nz - v.z);
-        if (dist > MAX_WALK_SPEED_MPS * dtSec * 1.45) {
+        if (dist > maxAllowedDist) {
           this.metrics.rejectedMoves++;
           socket.emit('v28:correction', {
             reason: 'speed_limit',
@@ -415,8 +422,14 @@ export class V28SpatialAoiEngine {
         this.sendSnapshotToSocket(socket, v);
       });
 
-      // Visitor rename / color profile customization (exact parity with V27.5)
+      let lastProfileTs = 0;
+      let lastVersionAckTs = 0;
+
+      // Visitor rename / color profile customization (exact parity with V27.5, rate-limited V28-AUDIT-033)
       socket.on('v28:profile', (payload: unknown) => {
+        const now = Date.now();
+        if (now - lastProfileTs < 500) return;
+        lastProfileTs = now;
         const v = this.visitorsBySocket.get(socket.id);
         if (!v || !payload || typeof payload !== 'object') return;
         const data = payload as Record<string, unknown>;
@@ -432,8 +445,11 @@ export class V28SpatialAoiEngine {
         }
       });
 
-      // Client confirms new layout version
+      // Client confirms new layout version (rate-limited V28-AUDIT-033)
       socket.on('v28:version_ack', (payload: unknown) => {
+        const now = Date.now();
+        if (now - lastVersionAckTs < 500) return;
+        lastVersionAckTs = now;
         const v = this.visitorsBySocket.get(socket.id);
         if (!v || !payload || typeof payload !== 'object') return;
         const verId = (payload as Record<string, unknown>).versionId;
@@ -467,9 +483,16 @@ export class V28SpatialAoiEngine {
       const serverTs = Date.now();
       const onlineCount = this.visitorsBySocket.size;
 
-      for (const [socketId, recipient] of this.visitorsBySocket.entries()) {
+      for (const [socketId, recipient] of Array.from(this.visitorsBySocket.entries())) {
         const socket = this.nsp.sockets.get(socketId);
-        if (!socket) continue;
+        if (!socket) {
+          // V28-AUDIT-033B: Clean up ghost visitor if socket disappeared without firing disconnect
+          this.removeVisitorFromCell(socketId, recipient.cellX, recipient.cellZ);
+          this.visitorsBySocket.delete(socketId);
+          this.lastSentVisibleBySocket.delete(socketId);
+          this.metrics.activeVisitors = this.visitorsBySocket.size;
+          continue;
+        }
 
         const { nearest, nearbyTotal, overflowCount } = this.collectNearbyCandidates(recipient);
         const prevVisible = this.lastSentVisibleBySocket.get(socketId) || new Map<string, number>();

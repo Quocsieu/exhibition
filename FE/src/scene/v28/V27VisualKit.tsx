@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createGrandExpoMedallionTexture } from '../sceneTextures';
 import type { V28ClusterSpec, V28ExhibitionVersionDetail } from '../../services/v28Api';
+import { computeDynamicEnvPlacements } from './v28EnvPlacement';
 
 const plazaLoader = new GLTFLoader();
 const plazaProtoPromises = new Map<string, Promise<THREE.Group>>();
@@ -44,7 +45,8 @@ const V27PlazaGlb: React.FC<{
   url: string;
   position?: [number, number, number];
   rotation?: [number, number, number];
-}> = React.memo(({ url, position = [0, 0, 0], rotation = [0, 0, 0] }) => {
+  targetHeight?: number;
+}> = React.memo(({ url, position = [0, 0, 0], rotation = [0, 0, 0], targetHeight }) => {
   const [group, setGroup] = useState<THREE.Group | null>(() => {
     const cached = plazaProtoResolved.get(url);
     return cached ? cached.clone(true) : null;
@@ -61,16 +63,34 @@ const V27PlazaGlb: React.FC<{
       .then((proto) => {
         if (!cancelled) setGroup(proto.clone(true));
       })
-      .catch(() => {
-        // Silent graceful fallback
+      .catch((err) => {
+        console.warn(`[V28 Env] Failed to load GLB ${url}:`, err);
       });
     return () => {
       cancelled = true;
     };
   }, [url]);
 
-  if (!group) return null;
-  return <primitive object={group} position={position} rotation={rotation} dispose={null} />;
+  const normalizedGroup = useMemo(() => {
+    if (!group || !targetHeight) return group;
+    const wrapper = new THREE.Group();
+    const cloned = group.clone(true);
+    cloned.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(cloned);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+    const h = Math.max(0.05, size.y);
+    const scale = THREE.MathUtils.clamp(targetHeight / h, 0.05, 10.0);
+    cloned.scale.setScalar(scale);
+    cloned.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+    wrapper.add(cloned);
+    return wrapper;
+  }, [group, targetHeight]);
+
+  if (!normalizedGroup) return null;
+  return <primitive object={normalizedGroup} position={position} rotation={rotation} dispose={null} />;
 });
 
 /**
@@ -162,24 +182,14 @@ export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
     const avenueW = world.centralAvenueBounds.maxX - world.centralAvenueBounds.minX;
     const entryLen = world.centralAvenueBounds.maxZ - world.centralAvenueBounds.minZ;
     const entryCenterZ = (world.centralAvenueBounds.minZ + world.centralAvenueBounds.maxZ) / 2;
+    const wingPropX = Math.min(18.5, Math.max(12.5, world.hallWidth / 2 - 5.2));
+    const isSixBoothParity = clusters.length === 1 && world.booths.length === 6;
 
-    // Horizontal Grand Boulevard between North & South facing U-Zone rows
-    const blvdZ = world.centralAvenueBounds.minZ + 9.0;
+    const envPlacements = useMemo(() => computeDynamicEnvPlacements(world), [world]);
 
     return (
       <group name="V27VisualKitHeritageLayer">
-        {/* Horizontal Grand Boulevard connecting all U-Shaped Category Zones */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.014, blvdZ]} receiveShadow material={AVENUE_STRIP_MAT}>
-          <planeGeometry args={[world.hallWidth - 10, 16.5]} />
-        </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, blvdZ - 8.1]} material={CHAMPAGNE_MAT}>
-          <planeGeometry args={[world.hallWidth - 12, 0.28]} />
-        </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, blvdZ + 8.1]} material={CHAMPAGNE_MAT}>
-          <planeGeometry args={[world.hallWidth - 12, 0.28]} />
-        </mesh>
-
-        {/* South Entry Spine from Spawn to Grand Boulevard */}
+        {/* North-South Central Main Avenue Spine matching world.centralAvenueBounds */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, entryCenterZ]} receiveShadow material={AVENUE_STRIP_MAT}>
           <planeGeometry args={[avenueW - 0.6, entryLen]} />
         </mesh>
@@ -192,10 +202,10 @@ export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
 
         {/* Main Entrance Plaza Heritage GLBs (South Welcome Area) */}
         <group position={[0, 0, welcomeZ]}>
-          <V27PlazaGlb url="/models/plaza/v27_4/welcome_desk_v27_4.glb" position={[-9.6, 0, 1.0]} />
+          <V27PlazaGlb url="/models/plaza/v27_4/welcome_desk_v27_4.glb" position={[-9.6, 0, 0.3]} />
           {/* Clickable V27.5 Directory Monument -> opens Interactive 2D Exhibition Map */}
           <group
-            position={[9.6, 0, 1.0]}
+            position={[9.6, 0, 0.3]}
             onClick={(e) => {
               e.stopPropagation();
               onOpenDirectoryMap?.();
@@ -211,14 +221,18 @@ export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
           >
             <V27PlazaGlb url="/models/plaza/v27_4/directory_monument_v27_4.glb" />
           </group>
-          <V27PlazaGlb url="/models/plaza/v27_4/mini_cafe_corner_v27_4.glb" position={[-18.5, 0, 0.4]} />
-          <V27PlazaGlb url="/models/plaza/v27_4/rest_lounge_v27_4.glb" position={[18.5, 0, 0.4]} />
-          <V27PlazaGlb url="/models/plaza/v27_5/avenue_planter_island_v27_5.glb" position={[-8.8, 0, -4.6]} />
-          <V27PlazaGlb
-            url="/models/plaza/v27_5/avenue_planter_island_v27_5.glb"
-            position={[8.8, 0, -4.6]}
-            rotation={[0, Math.PI, 0]}
-          />
+          <V27PlazaGlb url="/models/plaza/v27_4/mini_cafe_corner_v27_4.glb" position={[-wingPropX, 0, -0.4]} />
+          <V27PlazaGlb url="/models/plaza/v27_4/rest_lounge_v27_4.glb" position={[wingPropX, 0, -0.4]} />
+          {!isSixBoothParity && (
+            <>
+              <V27PlazaGlb url="/models/plaza/v27_5/avenue_planter_island_v27_5.glb" position={[-8.8, 0, -4.6]} />
+              <V27PlazaGlb
+                url="/models/plaza/v27_5/avenue_planter_island_v27_5.glb"
+                position={[8.8, 0, -4.6]}
+                rotation={[0, Math.PI, 0]}
+              />
+            </>
+          )}
         </group>
 
         {/* North Focal Check-In Photo Stage */}
@@ -277,6 +291,19 @@ export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
             </group>
           );
         })}
+
+        {/* Phase 4: Dynamic Lightweight Landscaping & Street Furniture from /models/env/ */}
+        <group name="V28DynamicEnvPropsLayer">
+          {envPlacements.map((item) => (
+            <V27PlazaGlb
+              key={item.id}
+              url={item.url}
+              position={item.position}
+              rotation={[0, item.rotationY, 0]}
+              targetHeight={item.targetHeight}
+            />
+          ))}
+        </group>
       </group>
     );
   }

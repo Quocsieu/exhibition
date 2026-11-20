@@ -11,9 +11,32 @@ function getSigningSecret(): string {
   return process.env.ADMIN_TOKEN_SECRET || FALLBACK_SECRET;
 }
 
-function getExpectedCredentials(): { username: string; password: string } {
+function getExpectedCredentials(): { username: string; password: string } | null {
+  const isProd = process.env.NODE_ENV === 'production';
+  if (isProd && (!process.env.ADMIN_USERNAME || !process.env.ADMIN_PASSWORD)) {
+    return null; // V28-AUDIT-046: Fail closed in production when admin credentials are not configured
+  }
   const username = process.env.ADMIN_USERNAME || 'admin';
   const password = process.env.ADMIN_PASSWORD || 'expo-admin-2026';
+  return { username, password };
+}
+
+/**
+ * Phase 7 — Safe Local-Only Demo Mode:
+ * - Strictly disabled when NODE_ENV === 'production' or ADMIN_DEMO_MODE === 'false'.
+ * - Uses a dedicated demo identity separate from the real Admin account.
+ * - Never exposes or reuses real ADMIN_PASSWORD.
+ */
+export function isDemoLoginEnabled(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  if (String(process.env.ADMIN_DEMO_MODE || '').toLowerCase() === 'false') return false;
+  return true;
+}
+
+export function getDemoAccountCredentials(): { username: string; password: string } | null {
+  if (!isDemoLoginEnabled()) return null;
+  const username = process.env.ADMIN_DEMO_USERNAME || 'demo-admin';
+  const password = process.env.ADMIN_DEMO_PASSWORD || 'demo-expo-2026';
   return { username, password };
 }
 
@@ -108,6 +131,13 @@ export function verifyAdminToken(token: string): { valid: boolean; username?: st
   }
 }
 
+export function isRequestAuthenticatedAdmin(req: Request): boolean {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
+  const token = authHeader.slice('Bearer '.length).trim();
+  return verifyAdminToken(token).valid;
+}
+
 export function requireAdminAuth(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -131,10 +161,20 @@ export function authenticateAdminCredentials(username?: unknown, password?: unkn
     return null;
   }
   const expected = getExpectedCredentials();
-  const userMatch = constantTimeStringEquals(username, expected.username);
-  const passMatch = constantTimeStringEquals(password, expected.password);
-  if (userMatch && passMatch) {
-    return issueAdminToken(expected.username);
+  if (expected) {
+    const userMatch = constantTimeStringEquals(username, expected.username);
+    const passMatch = constantTimeStringEquals(password, expected.password);
+    if (userMatch && passMatch) {
+      return issueAdminToken(expected.username);
+    }
+  }
+  const demo = getDemoAccountCredentials();
+  if (demo) {
+    const demoUserMatch = constantTimeStringEquals(username, demo.username);
+    const demoPassMatch = constantTimeStringEquals(password, demo.password);
+    if (demoUserMatch && demoPassMatch) {
+      return issueAdminToken(demo.username);
+    }
   }
   return null;
 }

@@ -135,7 +135,7 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))', gap: 16 }}>
       <section className="dashboard-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0 }}>Danh sách Doanh nghiệp ({companies.length})</h3>
@@ -172,8 +172,9 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
               style={{
                 padding: 12,
                 borderRadius: 10,
-                border: editingId === c.id ? '1.5px solid #0ea5e9' : '1px solid rgba(148,163,184,0.28)',
-                background: 'rgba(15, 23, 42, 0.35)',
+                border: editingId === c.id ? '1.5px solid #0284c7' : '1px solid rgba(17,24,39,0.12)',
+                background: editingId === c.id ? '#f0f9ff' : '#f8fafc',
+                color: '#111827',
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
@@ -183,8 +184,9 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
                     fontSize: 12,
                     padding: '2px 8px',
                     borderRadius: 999,
-                    background: c.status === 'active' ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)',
-                    color: c.status === 'active' ? '#34d399' : '#f87171',
+                    fontWeight: 700,
+                    background: c.status === 'active' ? '#ecfdf5' : '#fef2f2',
+                    color: c.status === 'active' ? '#047857' : '#b91c1c',
                   }}
                 >
                   {c.status === 'active' ? 'Hoạt động' : 'Vô hiệu hóa'}
@@ -217,8 +219,8 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
 
       <section className="dashboard-card">
         <h3 style={{ marginTop: 0 }}>{editingId ? 'Chỉnh sửa Doanh nghiệp' : 'Thêm Doanh nghiệp mới'}</h3>
-        {error && <div style={{ color: '#f87171', marginBottom: 10 }}>{error}</div>}
-        {notice && <div style={{ color: '#34d399', marginBottom: 10 }}>{notice}</div>}
+        {error && <div style={{ color: '#b91c1c', fontWeight: 600, marginBottom: 10 }}>{error}</div>}
+        {notice && <div style={{ color: '#047857', fontWeight: 600, marginBottom: 10 }}>{notice}</div>}
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <label>

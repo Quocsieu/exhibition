@@ -110,7 +110,7 @@ function evictZeroRefTexturesIfOverBudget(): void {
   }
 }
 
-export function acquireSharedTexture(url: string): THREE.Texture | null {
+export function acquireSharedTexture(url: string, onError?: () => void): THREE.Texture | null {
   if (!url) return null;
   const existing = textureCache.get(url);
   if (existing) {
@@ -119,14 +119,26 @@ export function acquireSharedTexture(url: string): THREE.Texture | null {
     return existing.texture;
   }
 
-  const tex = textureLoader.load(url, (loaded) => {
-    loaded.colorSpace = THREE.SRGBColorSpace;
-    const entry = textureCache.get(url);
-    if (entry) {
-      entry.estimatedBytes = estimateTextureBytes(loaded);
-      evictZeroRefTexturesIfOverBudget();
+  const tex = textureLoader.load(
+    url,
+    (loaded) => {
+      loaded.colorSpace = THREE.SRGBColorSpace;
+      const entry = textureCache.get(url);
+      if (entry) {
+        entry.estimatedBytes = estimateTextureBytes(loaded);
+        evictZeroRefTexturesIfOverBudget();
+      }
+    },
+    undefined,
+    () => {
+      const entry = textureCache.get(url);
+      if (entry) {
+        entry.texture.dispose();
+        textureCache.delete(url);
+      }
+      onError?.();
     }
-  });
+  );
   tex.colorSpace = THREE.SRGBColorSpace;
 
   textureCache.set(url, {

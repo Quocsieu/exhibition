@@ -179,4 +179,155 @@ export class V28CategoryService {
     }
     return null;
   }
+
+  /**
+   * Resolves an existing category by normalized name or creates one cleanly when
+   * structured e-commerce categories (e.g. Điện thoại, Laptop, Âm thanh, Phụ kiện) are detected.
+   */
+  public resolveOrCreateCategoryByName(rawName: string, color = '#0ea5e9'): V28Category {
+    const cleaned = rawName.trim().slice(0, 64);
+    const normalize = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+    const targetNorm = normalize(cleaned);
+    const existing = this.listCategories().find((c) => normalize(c.name) === targetNorm);
+    if (existing) return existing;
+    return this.createCategory({ name: cleaned, description: `Danh mục sản phẩm: ${cleaned}`, color });
+  }
+
+  /**
+   * Classifies a product into a granular exhibition category using structured hints
+   * and high-confidence Vietnamese/English product taxonomy rules. Marks ambiguous items
+   * as `uncertain` for Admin review — never guessing from a single vague word.
+   */
+  public classifyProductCategory(input: {
+    name: string;
+    description?: string;
+    categoryHint?: string;
+  }): {
+    categoryId: string | null;
+    categoryName: string;
+    confidence: 'high' | 'uncertain';
+    matchedBy: string;
+  } {
+    const categories = this.listCategories();
+
+    const normalize = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .trim();
+
+    const hintNorm = normalize(input.categoryHint || '');
+    const textNorm = normalize(`${input.categoryHint || ''} ${input.name || ''} ${input.description || ''}`);
+
+    // 1. Granular product taxonomy (Phone / Laptop / Tablet / Audio / Accessories / Smart Watch)
+    //    Ensures zones organize by PRODUCT TYPE (Khu Điện thoại, Khu Laptop, Khu Âm thanh...) per I6!
+    const granularRules: Array<{ canonicalName: string; color: string; keywords: string[] }> = [
+      {
+        canonicalName: 'Điện thoại',
+        color: '#0ea5e9',
+        keywords: ['iphone', 'samsung galaxy', 'galaxy a', 'galaxy s', 'galaxy z', 'xiaomi', 'redmi', 'oppo find', 'oppo reno', 'vivo', 'realme', 'dien thoai', 'smartphone'],
+      },
+      {
+        canonicalName: 'Laptop & Máy tính',
+        color: '#6366f1',
+        keywords: ['laptop', 'macbook', 'thinkpad', 'zenbook', 'vivobook', 'ideapad', 'may tinh xach tay', 'pc gaming', 'man hinh may tinh'],
+      },
+      {
+        canonicalName: 'Máy tính bảng',
+        color: '#8b5cf6',
+        keywords: ['ipad', 'tablet', 'may tinh bang', 'galaxy tab', 'honor pad', 'xiaomi pad'],
+      },
+      {
+        canonicalName: 'Âm thanh',
+        color: '#ec4899',
+        keywords: ['tai nghe', 'headphone', 'earbuds', 'airpods', 'sony wh', 'loa bluetooth', 'soundbar', 'am thanh', 'microphone'],
+      },
+      {
+        canonicalName: 'Phụ kiện công nghệ',
+        color: '#f59e0b',
+        keywords: ['sac du phong', 'cap sac', 'op lung', 'ban phim', 'chuot khong day', 'dong ho thong minh', 'smartwatch', 'apple watch', 'phu kien'],
+      },
+    ];
+
+    for (const rule of granularRules) {
+      const hitKw = rule.keywords.find((kw) => textNorm.includes(kw));
+      if (hitKw) {
+        const cat = this.resolveOrCreateCategoryByName(rule.canonicalName, rule.color);
+        return { categoryId: cat.id, categoryName: cat.name, confidence: 'high', matchedBy: `taxonomy:${hitKw}` };
+      }
+    }
+
+    // 2. Direct match against existing category name or slug from structured breadcrumb hint
+    if (hintNorm.length >= 2) {
+      for (const cat of categories) {
+        const catNorm = normalize(cat.name);
+        const slugNorm = normalize(cat.slug.replace(/-/g, ' '));
+        if (hintNorm.includes(catNorm) || catNorm.includes(hintNorm) || hintNorm.includes(slugNorm)) {
+          return { categoryId: cat.id, categoryName: cat.name, confidence: 'high', matchedBy: 'hint' };
+        }
+      }
+      // If structured breadcrumb hint is clean and specific (2..40 chars), create a dedicated category for it
+      const cleanHint = (input.categoryHint || '').trim();
+      if (cleanHint.length >= 3 && cleanHint.length <= 40 && !/^trang chu|home|san pham|products$/i.test(hintNorm)) {
+        const cat = this.resolveOrCreateCategoryByName(cleanHint);
+        return { categoryId: cat.id, categoryName: cat.name, confidence: 'high', matchedBy: 'structured-hint' };
+      }
+    }
+
+    // 3. Existing industry categories (Furniture, Food, Robotics, Lighting, Energy, IoT)
+    const keywordRules: Array<{ catKeywords: string[]; productKeywords: string[] }> = [
+      {
+        catKeywords: ['cong nghe', 'dien tu', 'tech', 'iot'],
+        productKeywords: ['iot', 'sensor', 'cam bien', 'kinh ar', 'hub', 'wifi', 'bluetooth', 'camera'],
+      },
+      {
+        catKeywords: ['noi that', 'kien truc', 'living', 'furniture'],
+        productKeywords: ['ghe', 'ban lam viec', 'sofa', 'tu', 'giuong', 'noi that', 'go', 'cong thai hoc', 'ergo'],
+      },
+      {
+        catKeywords: ['thuc pham', 'nong san', 'coffee', 'ca phe', 'food'],
+        productKeywords: ['ca phe', 'coffee', 'arabica', 'robusta', 'tra', 'thuc pham', 'nong san', 'drip', 'huu co', 'organic'],
+      },
+      {
+        catKeywords: ['tu dong hoa', 'san xuat', 'robot', 'kinetix'],
+        productKeywords: ['robot', 'cobot', 'amr', 'tu dong', 'cam bien cong nghiep', 'plc', 'cnc', 'kho van'],
+      },
+      {
+        catKeywords: ['thiet ke', 'doi song', 'den', 'lighting', 'lumina'],
+        productKeywords: ['den', 'lamp', 'lighting', 'tieu am', 'acoustic', 'trang tri', 'decor', 'cri'],
+      },
+      {
+        catKeywords: ['nang luong', 'xanh', 'energy', 'solar'],
+        productKeywords: ['pin luu tru', 'dien mat troi', 'solar', 'inverter', 'bien tan', 'tram sac xe dien', 'ev charger', 'kwh', 'lithium'],
+      },
+    ];
+
+    for (const rule of keywordRules) {
+      const hitKw = rule.productKeywords.find((kw) => textNorm.includes(kw));
+      if (!hitKw) continue;
+      const matchedCat = categories.find((c) => {
+        const cn = normalize(`${c.name} ${c.slug} ${c.description}`);
+        return rule.catKeywords.some((ck) => cn.includes(ck));
+      });
+      if (matchedCat) {
+        return { categoryId: matchedCat.id, categoryName: matchedCat.name, confidence: 'high', matchedBy: `keyword:${hitKw}` };
+      }
+    }
+
+    return {
+      categoryId: null,
+      categoryName: 'Cần Admin kiểm tra',
+      confidence: 'uncertain',
+      matchedBy: 'none',
+    };
+  }
 }

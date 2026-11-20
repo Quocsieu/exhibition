@@ -122,26 +122,119 @@ export class LocalAudioStorageAdapter implements AudioStorageAdapter {
   public async put(storageKey: string, buffer: Buffer): Promise<void> {
     const filePath = this.resolveSafePath(storageKey);
     const tmpPath = `${filePath}.${crypto.randomBytes(3).toString('hex')}.tmp`;
-    fs.writeFileSync(tmpPath, buffer);
-    fs.renameSync(tmpPath, filePath);
+    await fs.promises.writeFile(tmpPath, buffer);
+    await fs.promises.rename(tmpPath, filePath);
   }
 
   public async get(storageKey: string): Promise<Buffer | null> {
     const filePath = this.resolveSafePath(storageKey);
-    if (!fs.existsSync(filePath)) return null;
-    return fs.readFileSync(filePath);
+    try {
+      return await fs.promises.readFile(filePath);
+    } catch {
+      return null;
+    }
   }
 
   public async exists(storageKey: string): Promise<boolean> {
-    return fs.existsSync(this.resolveSafePath(storageKey));
+    try {
+      await fs.promises.access(this.resolveSafePath(storageKey));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   public async delete(storageKey: string): Promise<void> {
     const filePath = this.resolveSafePath(storageKey);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
+    try {
+      await fs.promises.unlink(filePath);
+    } catch {
+      // ignore ENOENT
     }
   }
+
+  /**
+   * Phase 6.1 Hardening: Returns file path & byte size after validating ONLY the 44-byte WAV header
+   * so HTTP streaming uses fs.createReadStream without reading the full WAV file into RAM.
+   */
+  public async getFileStreamInfo(storageKey: string): Promise<{ filePath: string; size: number; validWav: boolean } | null> {
+    const filePath = this.resolveSafePath(storageKey);
+    let fh: fs.promises.FileHandle | null = null;
+    try {
+      const stat = await fs.promises.stat(filePath);
+      if (!stat.isFile() || stat.size < 45) {
+        return { filePath, size: stat.size, validWav: false };
+      }
+      fh = await fs.promises.open(filePath, 'r');
+      const header = Buffer.alloc(44);
+      const { bytesRead } = await fh.read(header, 0, 44, 0);
+      const validWav =
+        bytesRead === 44 &&
+        header.toString('ascii', 0, 4) === 'RIFF' &&
+        header.toString('ascii', 8, 12) === 'WAVE' &&
+        header.readUInt32LE(40) > 0;
+      return { filePath, size: stat.size, validWav };
+    } catch {
+      return null;
+    } finally {
+      await fh?.close().catch(() => {});
+    }
+  }
+}
+
+/**
+ * Extracts base64 audio payload from a raw Gemini Interactions REST API JSON response.
+ * Per official Google Gemini API docs (`speech-generation.md`):
+ * - Raw REST JSON stores audio in `steps[].content[].data` (where `step.type === 'model_output'` and `part.type === 'audio'`).
+ * - Also checks `outputs[].data` and SDK convenience `output_audio.data` for forward/backward compatibility.
+ */
+export function extractGeminiInteractionAudioBase64(payload: unknown): {
+  data: string;
+  mimeType?: string;
+} | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const obj = payload as Record<string, unknown>;
+
+  // 1. Official raw REST JSON shape: steps[] -> model_output -> content[] -> audio
+  if (Array.isArray(obj.steps)) {
+    for (let i = obj.steps.length - 1; i >= 0; i--) {
+      const step = obj.steps[i] as Record<string, unknown> | undefined;
+      if (!step || step.type !== 'model_output' || !Array.isArray(step.content)) continue;
+      for (let j = step.content.length - 1; j >= 0; j--) {
+        const part = step.content[j] as Record<string, unknown> | undefined;
+        if (part && part.type === 'audio' && typeof part.data === 'string' && part.data.length > 0) {
+          return {
+            data: part.data,
+            mimeType: typeof part.mime_type === 'string' ? part.mime_type : undefined,
+          };
+        }
+      }
+    }
+  }
+
+  // 2. Alternative REST shape: outputs[] -> audio
+  if (Array.isArray(obj.outputs)) {
+    for (let i = obj.outputs.length - 1; i >= 0; i--) {
+      const part = obj.outputs[i] as Record<string, unknown> | undefined;
+      if (part && part.type === 'audio' && typeof part.data === 'string' && part.data.length > 0) {
+        return {
+          data: part.data,
+          mimeType: typeof part.mime_type === 'string' ? part.mime_type : undefined,
+        };
+      }
+    }
+  }
+
+  // 3. SDK convenience shape: output_audio.data
+  const outAudio = obj.output_audio as Record<string, unknown> | undefined;
+  if (outAudio && typeof outAudio.data === 'string' && outAudio.data.length > 0) {
+    return {
+      data: outAudio.data,
+      mimeType: typeof outAudio.mime_type === 'string' ? outAudio.mime_type : undefined,
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -166,7 +259,7 @@ async function synthesizeGeminiTtsWav(params: {
       'Content-Type': 'application/json',
       'x-goog-api-key': apiKey,
     },
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(25_000),
     body: JSON.stringify({
       model: params.modelId,
       input: [
@@ -189,15 +282,17 @@ async function synthesizeGeminiTtsWav(params: {
   });
 
   if (!res.ok) {
-    throw new Error(`Gemini TTS API trả về HTTP ${res.status}`);
+    const errText = await res.text().catch(() => '');
+    const safeSnippet = errText.replace(/AIza[0-9A-Za-z_-]{20,}/g, '[REDACTED]').slice(0, 240);
+    throw new Error(`Gemini TTS API trả về HTTP ${res.status}${safeSnippet ? `: ${safeSnippet}` : ''}`);
   }
 
-  const payload = (await res.json()) as { output_audio?: { data?: string } };
-  const base64Audio = payload?.output_audio?.data;
-  if (!base64Audio) {
-    throw new Error('Gemini TTS API không trả về dữ liệu output_audio.');
+  const payload = (await res.json()) as unknown;
+  const extracted = extractGeminiInteractionAudioBase64(payload);
+  if (!extracted?.data) {
+    throw new Error('Gemini TTS API không trả về dữ liệu audio hợp lệ trong steps/outputs.');
   }
-  const rawBuffer = Buffer.from(base64Audio, 'base64');
+  const rawBuffer = Buffer.from(extracted.data, 'base64');
   const buffer = ensureValidWavBuffer(rawBuffer, 24000, 1, 16);
   // Estimate duration from WAV 24kHz mono 16-bit PCM byte length (48,000 bytes/sec)
   const durationSec = Math.max(0.5, Math.round((Math.max(0, buffer.length - 44) / 48000) * 10) / 10);
@@ -313,13 +408,15 @@ export class V28AudioCacheService {
     language?: string;
     voiceId?: string;
     modelId?: string;
+    allowLiveSynthesis?: boolean;
   }): Promise<{ asset: AudioAssetRecord; cacheHit: boolean }> {
     const language = params.language || 'vi-VN';
     const voiceId = params.voiceId || getConfiguredGeminiTtsVoice();
     const style = getConfiguredGeminiTtsStyle();
-    const liveGeminiEnabled =
+    const envLiveEnabled =
       Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 10) &&
       process.env.V28_ENABLE_LIVE_AI === 'true';
+    const liveGeminiEnabled = envLiveEnabled && params.allowLiveSynthesis !== false;
     const configuredModel = getConfiguredGeminiTtsModel();
     const modelId =
       params.modelId ||
@@ -437,7 +534,10 @@ export class V28AudioCacheService {
    * - slot_01..slot_06 (for slots that have assigned products)
    * Incrementally reuses cached items whose content_hash has not changed!
    */
-  public async getOrPrepareBoothAudioPack(booth: ExhibitionBoothPlacementView): Promise<{
+  public async getOrPrepareBoothAudioPack(
+    booth: ExhibitionBoothPlacementView,
+    options?: { allowLiveSynthesis?: boolean }
+  ): Promise<{
     boothId: string;
     storageDriver: string;
     liveGeminiTtsEnabled: boolean;
@@ -485,6 +585,7 @@ export class V28AudioCacheService {
         entityId: item.entityId,
         slotKey: item.slotKey,
         transcript: item.text,
+        allowLiveSynthesis: options?.allowLiveSynthesis,
       });
       clips.push(res.asset);
       if (res.cacheHit) cacheHits++;
@@ -504,7 +605,7 @@ export class V28AudioCacheService {
 
   /**
    * Incremental publish sync: warms welcome + company_intro + assigned slot audio for up to N booths
-   * without regenerating unchanged hashes.
+   * without regenerating unchanged hashes, then prunes stale audio cache files.
    */
   public async syncVersionAudioIncremental(version: ExhibitionVersionDetail, limitBooths = 20): Promise<{
     boothsProcessed: number;
@@ -515,11 +616,47 @@ export class V28AudioCacheService {
     let generatedCount = 0;
     const targets = version.booths.slice(0, limitBooths);
     for (const b of targets) {
-      const res = await this.getOrPrepareBoothAudioPack(b);
-      cacheHits += res.cacheHits;
-      generatedCount += res.generatedCount;
+      try {
+        const res = await this.getOrPrepareBoothAudioPack(b, { allowLiveSynthesis: true });
+        cacheHits += res.cacheHits;
+        generatedCount += res.generatedCount;
+      } catch {
+        // Continue warming remaining booths on partial failure
+      }
     }
+    // V28-AUDIT-034: Invoke stale audio cache cleanup after publish sync
+    await this.pruneStaleAudioCache().catch(() => {});
     return { boothsProcessed: targets.length, cacheHits, generatedCount };
+  }
+
+  public async getAudioStreamSource(
+    audioId: string
+  ): Promise<
+    | { kind: 'file'; filePath: string; size: number; mimeType: string }
+    | { kind: 'buffer'; buffer: Buffer; mimeType: string }
+    | null
+  > {
+    const row = this.db
+      .prepare('SELECT storage_key, mime_type FROM audio_assets WHERE audio_id = ?')
+      .get(audioId) as { storage_key: string; mime_type: string } | undefined;
+    if (!row) return null;
+    const mimeType = row.mime_type || 'audio/wav';
+
+    if (this.storage instanceof LocalAudioStorageAdapter) {
+      const info = await this.storage.getFileStreamInfo(row.storage_key);
+      if (!info || !info.validWav) {
+        this.db.prepare(`UPDATE audio_assets SET status = 'failed' WHERE audio_id = ?`).run(audioId);
+        return null;
+      }
+      return { kind: 'file', filePath: info.filePath, size: info.size, mimeType };
+    }
+
+    const buffer = await this.storage.get(row.storage_key);
+    if (!buffer || !isValidWavBuffer(buffer)) {
+      this.db.prepare(`UPDATE audio_assets SET status = 'failed' WHERE audio_id = ?`).run(audioId);
+      return null;
+    }
+    return { kind: 'buffer', buffer, mimeType };
   }
 
   public async getAudioStreamBuffer(audioId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {

@@ -270,6 +270,11 @@ export const CreateDraftLayoutInputSchema = z.object({
   perimeterWidth: z.number().min(5).max(15).optional().default(7),
   layoutSeed: z.number().int().min(0).max(9999).optional().default(28),
   baseVersionId: z.string().trim().optional(),
+  requireProductSource: z.boolean().optional().default(false),
+  productSource: z.enum(['url', 'excel']).optional(),
+  sourceUrl: z.string().trim().max(1000).optional(),
+  sourceFilename: z.string().trim().max(240).optional(),
+  ownerCompanyId: z.string().trim().min(1).optional(),
 });
 
 export const UpdateZoneInputSchema = z.object({

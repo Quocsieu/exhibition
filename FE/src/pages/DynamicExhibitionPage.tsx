@@ -17,7 +17,6 @@ import {
   DEFAULT_MOBILE_STREAMING,
   type BoothLodTier,
 } from '../scene/v28/spatialStreaming';
-import { FarBoothInstancedProxy } from '../scene/v28/FarBoothInstancedProxy';
 import { ParametricExpoRoof } from '../scene/v28/ParametricExpoRoof';
 import { useV28SpatialRealtime } from '../hooks/useV28SpatialRealtime';
 import type { V28NpcAnimState } from '../scene/v28/DynamicBoothNpc3D';
@@ -30,7 +29,8 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   const [world, setWorld] = useState<V28ExhibitionVersionDetail | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
-  const [cameraMode, setCameraMode] = useState<V28CameraMode>('overview');
+  const [cameraMode, setCameraMode] = useState<V28CameraMode>('explore');
+  const previousExteriorModeRef = useRef<'overview' | 'explore'>('explore');
   const [focusedBooth, setFocusedBooth] = useState<V28BoothPlacementView | null>(null);
   const [npcPanelOpen, setNpcPanelOpen] = useState<boolean>(false);
   const [npcAnimState, setNpcAnimState] = useState<V28NpcAnimState>('idle');
@@ -63,6 +63,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   }>({ nonce: 0, pos: null });
   const [playerPos, setPlayerPos] = useState<V28PlayerState>({ x: 0, z: 20, rotationY: Math.PI });
   const [joystickVec, setJoystickVec] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [zoomRequest, setZoomRequest] = useState<{ delta: number; nonce: number }>({ delta: 0, nonce: 0 });
   const [isMobilePortrait, setIsMobilePortrait] = useState<boolean>(
     () => window.innerWidth <= 640 && window.innerHeight >= window.innerWidth
   );
@@ -103,34 +104,45 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     const onResize = () => {
       setIsMobilePortrait(window.innerWidth <= 640 && window.innerHeight >= window.innerWidth);
     };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setSelectedProduct(null);
-        setNpcPanelOpen(false);
-        setNpcAnimState('idle');
-        setFocusedBooth(null);
-        setCameraMode('explore');
-      }
-    };
     window.addEventListener('resize', onResize);
-    window.addEventListener('keydown', onKeyDown);
     return () => {
       window.removeEventListener('resize', onResize);
-      window.removeEventListener('keydown', onKeyDown);
     };
   }, []);
 
+  const hasLoadedWorldRef = useRef<boolean>(false);
+
   const loadActiveWorld = useCallback(async () => {
-    setLoading(true);
+    // V28-AUDIT-024: Only show full-page loader on initial load so live reload NEVER unmounts WebGL <Canvas>!
+    if (!hasLoadedWorldRef.current) {
+      setLoading(true);
+    }
     setError('');
     try {
       const { world: loaded } = await v28Api.getActiveWorld(previewVersionId);
+      const isInitial = !hasLoadedWorldRef.current;
+      hasLoadedWorldRef.current = true;
       setWorld(loaded);
-      setPlayerPos({
-        x: loaded.spawnPoint.x,
-        z: loaded.spawnPoint.z,
-        rotationY: loaded.spawnPoint.rotationY,
-      });
+      if (isInitial) {
+        setPlayerPos({
+          x: loaded.spawnPoint.x,
+          z: loaded.spawnPoint.z,
+          rotationY: loaded.spawnPoint.rotationY,
+        });
+      } else {
+        // Reconcile focused booth & product against refreshed layout
+        setFocusedBooth((prev) =>
+          prev ? loaded.booths.find((b) => b.boothId === prev.boothId) || null : null
+        );
+        setSelectedProduct((prev) => {
+          if (!prev) return null;
+          const nextBooth = loaded.booths.find((b) => b.boothId === prev.booth.boothId);
+          const nextSlot = nextBooth?.slots.find((s) => s.slotId === prev.slotId);
+          return nextBooth && nextSlot?.product
+            ? { booth: nextBooth, product: nextSlot.product, slotId: prev.slotId }
+            : null;
+        });
+      }
     } catch (e) {
       setError((e as Error).message || 'Không thể tải dữ liệu triển lãm V28.');
     } finally {
@@ -183,6 +195,9 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   );
 
   const handleTeleportToBooth = useCallback((booth: V28BoothPlacementView) => {
+    if (cameraMode === 'overview' || cameraMode === 'explore') {
+      previousExteriorModeRef.current = cameraMode;
+    }
     const lookRot = Math.atan2(
       booth.positionX - booth.approachPoint.x,
       booth.positionZ - booth.approachPoint.z
@@ -195,31 +210,91 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     setFocusedBooth(booth);
     setSelectedProduct(null);
     setCameraMode('focus');
-  }, [sendTeleport]);
+  }, [cameraMode, sendTeleport]);
 
   const handleFocusBooth = useCallback((booth: V28BoothPlacementView) => {
+    if (cameraMode === 'overview' || cameraMode === 'explore') {
+      previousExteriorModeRef.current = cameraMode;
+    }
     setFocusedBooth(booth);
     setSelectedProduct(null);
     setCameraMode('focus');
-  }, []);
+  }, [cameraMode]);
 
   const handleSelectProduct = useCallback(
     (booth: V28BoothPlacementView, product: V28Product, slotId: string) => {
+      if (cameraMode === 'overview' || cameraMode === 'explore') {
+        previousExteriorModeRef.current = cameraMode;
+      }
       setFocusedBooth(booth);
       setSelectedProduct({ booth, product, slotId });
       setCameraMode('focus');
     },
-    []
+    [cameraMode]
   );
 
+  const handleExitBoothFocus = useCallback((forceExplore = false) => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore
+      }
+    }
+    setFocusedBooth(null);
+    setSelectedProduct(null);
+    setNpcPanelOpen(false);
+    setNpcAnimState('idle');
+    setCameraMode(forceExplore ? 'explore' : previousExteriorModeRef.current);
+  }, []);
+
+  // Single unified Escape & WASD keyboard handler (Modal-first priority matching V27.5 BoothPanel)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const activeTag = document.activeElement?.tagName;
+      const isTyping = activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT';
+      if (e.key === 'Escape') {
+        if (selectedProduct) {
+          e.preventDefault();
+          setSelectedProduct(null);
+          return;
+        }
+        if (cameraMode === 'focus' || focusedBooth || npcPanelOpen) {
+          e.preventDefault();
+          handleExitBoothFocus(false);
+          return;
+        }
+      }
+      if (
+        !isTyping &&
+        cameraMode === 'focus' &&
+        (e.code === 'KeyW' ||
+          e.code === 'KeyA' ||
+          e.code === 'KeyS' ||
+          e.code === 'KeyD' ||
+          e.code === 'ArrowUp' ||
+          e.code === 'ArrowDown' ||
+          e.code === 'ArrowLeft' ||
+          e.code === 'ArrowRight')
+      ) {
+        handleExitBoothFocus(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [cameraMode, focusedBooth, selectedProduct, npcPanelOpen, handleExitBoothFocus]);
+
   const handleFloorClick = useCallback((x: number, z: number) => {
+    if (cameraMode === 'focus') {
+      handleExitBoothFocus(true);
+      return;
+    }
     setPlayerTarget({ x, z });
     setFocusedBooth(null);
     setSelectedProduct(null);
     setNpcPanelOpen(false);
     setNpcAnimState('idle');
-    setCameraMode('explore');
-  }, []);
+  }, [cameraMode, handleExitBoothFocus]);
 
   if (loading) {
     return (
@@ -279,6 +354,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         teleportNonce={teleportState.nonce}
         teleportPos={teleportState.pos}
         joystickVector={joystickVec}
+        zoomRequest={zoomRequest}
         isMobilePortrait={isMobilePortrait}
         boothLodMap={boothLodMap}
         remoteAvatars={remoteAvatars}
@@ -293,13 +369,15 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         onFocusBooth={handleFocusBooth}
         onSelectProduct={handleSelectProduct}
         onClickNpc={(booth) => {
+          if (cameraMode === 'overview' || cameraMode === 'explore') {
+            previousExteriorModeRef.current = cameraMode;
+          }
           setFocusedBooth(booth);
           setSelectedProduct(null);
           setNpcPanelOpen(true);
           setCameraMode('focus');
         }}
         onOpenDirectoryMap={() => setDirectoryOpenNonce((n) => n + 1)}
-        renderFarProxies={() => <FarBoothInstancedProxy booths={world.booths} lodMap={boothLodMap} />}
         renderRoof={({ cameraMode: cm, isMobilePortrait: mp }) => (
           <ParametricExpoRoof roofBounds={world.roofBounds} cameraMode={cm} isMobilePortrait={mp} />
         )}
@@ -321,6 +399,9 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         onlineCount={onlineCount}
         overflowVisitorCount={overflowCount}
         onChangeCameraMode={(mode) => {
+          if (mode === 'overview' || mode === 'explore') {
+            previousExteriorModeRef.current = mode;
+          }
           setCameraMode(mode);
           if (mode !== 'focus') {
             setFocusedBooth(null);
@@ -332,20 +413,21 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         onTeleportToBooth={handleTeleportToBooth}
         onSelectProduct={handleSelectProduct}
         onCloseProduct={() => setSelectedProduct(null)}
-        onCloseFocus={() => {
-          setFocusedBooth(null);
-          setSelectedProduct(null);
-          setNpcPanelOpen(false);
-          setNpcAnimState('idle');
-          setCameraMode('explore');
-        }}
+        onCloseFocus={() => handleExitBoothFocus(false)}
         onOpenNpcPanel={() => setNpcPanelOpen(true)}
         onCloseNpcPanel={() => {
           setNpcPanelOpen(false);
           setNpcAnimState('idle');
         }}
         onNpcAnimStateChange={setNpcAnimState}
-        onJoystickChange={setJoystickVec}
+        onJoystickChange={(vec) => {
+          if ((Math.abs(vec.x) > 0.08 || Math.abs(vec.y) > 0.08) && cameraMode === 'focus') {
+            handleExitBoothFocus(true);
+          }
+          setJoystickVec(vec);
+        }}
+        onZoomIn={() => setZoomRequest((z) => ({ delta: -0.15, nonce: z.nonce + 1 }))}
+        onZoomOut={() => setZoomRequest((z) => ({ delta: 0.15, nonce: z.nonce + 1 }))}
         onOpenAdmin={onOpenAdmin}
       />
     </div>

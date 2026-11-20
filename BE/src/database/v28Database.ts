@@ -594,6 +594,36 @@ export class V28CatalogDatabase {
       }
     }
 
+    // Additive, idempotent per-version snapshot tables (V28-AUDIT-001: strict Draft/Published isolation)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS exhibition_version_booth_meta (
+        version_id TEXT NOT NULL,
+        booth_id TEXT NOT NULL,
+        booth_name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'General',
+        company_id TEXT NULL,
+        company_name TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (version_id, booth_id),
+        FOREIGN KEY (version_id) REFERENCES exhibition_versions(id) ON DELETE CASCADE,
+        FOREIGN KEY (booth_id) REFERENCES booths(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS exhibition_version_booth_slots (
+        version_id TEXT NOT NULL,
+        booth_id TEXT NOT NULL,
+        slot_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (version_id, booth_id, slot_id),
+        FOREIGN KEY (version_id) REFERENCES exhibition_versions(id) ON DELETE CASCADE,
+        FOREIGN KEY (booth_id) REFERENCES booths(id) ON DELETE CASCADE,
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_evbm_version ON exhibition_version_booth_meta(version_id);
+      CREATE INDEX IF NOT EXISTS idx_evbs_version ON exhibition_version_booth_slots(version_id, booth_id);
+    `);
+
     const fkRows = this.db.prepare('PRAGMA foreign_key_check').all();
     const integrityRow = this.db.prepare('PRAGMA integrity_check').get() as { integrity_check: string };
     const jmRow = this.db.prepare('PRAGMA journal_mode').get() as { journal_mode: string };
@@ -725,6 +755,76 @@ export class V28CatalogDatabase {
     return this.mapCompany(created);
   }
 
+  /**
+   * Matches an existing active Company by canonical domain or normalized name to prevent
+   * duplicate companies on repeated URL imports. Creates a new Company only when `verified`
+   * seller evidence is present and no match exists.
+   */
+  findOrCreateCompanyByWebsite(input: {
+    name: string;
+    canonicalDomain: string;
+    websiteUrl: string;
+    logoUrl?: string;
+    contactEmail?: string;
+    description?: string;
+    allowCreate: boolean;
+  }): { company: Company | null; created: boolean; matchedBy: 'domain' | 'name' | 'created' | 'none' } {
+    const cleanDomain = input.canonicalDomain.trim().toLowerCase().replace(/^www\./, '');
+    const normName = input.name
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+
+    const activeCompanies = this.listCompanies({ status: 'active' });
+    if (cleanDomain) {
+      for (const c of activeCompanies) {
+        try {
+          const host = c.contactUrl ? new URL(c.contactUrl).hostname.toLowerCase().replace(/^www\./, '') : '';
+          if (host && host === cleanDomain) {
+            return { company: c, created: false, matchedBy: 'domain' };
+          }
+        } catch {
+          // ignore malformed stored URL
+        }
+      }
+    }
+
+    if (normName.length >= 2) {
+      for (const c of activeCompanies) {
+        const cn = c.name
+          .trim()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/đ/g, 'd')
+          .replace(/[^a-z0-9]+/g, ' ')
+          .trim();
+        if (cn && cn === normName) {
+          return { company: c, created: false, matchedBy: 'name' };
+        }
+      }
+    }
+
+    if (!input.allowCreate || input.name.trim().length < 2) {
+      return { company: null, created: false, matchedBy: 'none' };
+    }
+
+    const created = this.createCompany({
+      name: input.name.trim().slice(0, 120),
+      description: input.description || `Đơn vị bán hàng được nhận diện từ ${cleanDomain || input.websiteUrl}`,
+      category: 'Thương mại điện tử',
+      logoUrl: input.logoUrl || '',
+      bannerUrl: '',
+      contactEmail: input.contactEmail || '',
+      contactUrl: input.websiteUrl || (cleanDomain ? `https://${cleanDomain}` : ''),
+    });
+    return { company: created, created: true, matchedBy: 'created' };
+  }
+
   updateCompany(id: string, patch: UpdateCompanyInput): Company | null {
     const current = this.db.prepare('SELECT * FROM companies WHERE id = ?').get(id) as
       | Record<string, unknown>
@@ -819,10 +919,27 @@ export class V28CatalogDatabase {
     return row ? this.mapBooth(row) : null;
   }
 
-  assignBoothCompany(boothId: string, companyId: string): V28BoothRecord | null {
+  assignBoothCompany(boothId: string, companyId: string, options?: { enforceSlotCheck?: boolean }): V28BoothRecord | null {
     const booth = this.getBoothById(boothId);
     const company = this.getCompanyById(companyId);
     if (!booth || !company) return null;
+    if (options?.enforceSlotCheck && booth.companyId && booth.companyId !== companyId) {
+      const foreignSlot = this.db
+        .prepare(
+          `SELECT 1 FROM booth_slot_assignments bsa
+           JOIN products p ON p.id = bsa.product_id
+           WHERE bsa.booth_id = ? AND p.company_id != ?
+           LIMIT 1`
+        )
+        .get(boothId, companyId);
+      if (foreignSlot) {
+        const err = new Error(
+          `Không thể đổi doanh nghiệp sở hữu gian '${boothId}' khi gian đang có sản phẩm thuộc doanh nghiệp cũ. Hãy gỡ slot trước.`
+        ) as Error & { statusCode?: number };
+        err.statusCode = 409;
+        throw err;
+      }
+    }
     this.db
       .prepare('UPDATE booths SET company_id = ?, company_name = ? WHERE id = ?')
       .run(companyId, company.name, boothId);
@@ -877,11 +994,29 @@ export class V28CatalogDatabase {
       throw new Error(`Không tìm thấy gian hàng '${boothId}'.`);
     }
     if (booth.status === 'archived') {
-      throw new Error(`Gian hàng '${boothId}' đang ở trạng thái lưu trữ.`);
+      const inActiveDraft = this.db
+        .prepare(
+          `SELECT 1
+           FROM exhibition_version_booths vb
+           JOIN exhibition_versions v ON v.id = vb.version_id
+           WHERE vb.booth_id = ? AND v.status = 'draft'
+           LIMIT 1`
+        )
+        .get(boothId);
+      if (!inActiveDraft) {
+        throw new Error(`Gian hàng '${boothId}' đang ở trạng thái lưu trữ.`);
+      }
     }
     const product = this.getProductById(productId);
     if (!product) {
       throw new Error(`Không tìm thấy sản phẩm '${productId}'.`);
+    }
+    if (product.status !== 'active') {
+      const err = new Error(`Sản phẩm '${product.name}' đang ở trạng thái tạm ẩn (inactive), không thể gán trưng bày.`) as Error & {
+        statusCode?: number;
+      };
+      err.statusCode = 400;
+      throw err;
     }
     if (!booth.companyId || booth.companyId !== product.companyId) {
       const err = new Error(
@@ -899,6 +1034,22 @@ export class V28CatalogDatabase {
       )
       .run(boothId, slotId, productId);
 
+    // Keep version-scoped snapshot in sync for active published version or initial unpublished draft
+    this.db
+      .prepare(
+        `INSERT INTO exhibition_version_booth_slots (version_id, booth_id, slot_id, product_id, updated_at)
+         SELECT evb.version_id, ?, ?, ?, CURRENT_TIMESTAMP
+         FROM exhibition_version_booths evb
+         JOIN exhibition_versions v ON v.id = evb.version_id
+         JOIN exhibitions e ON e.id = v.exhibition_id
+         WHERE evb.booth_id = ?
+           AND (v.status = 'published' OR (v.status = 'draft' AND e.active_version_id IS NULL))
+         ON CONFLICT(version_id, booth_id, slot_id) DO UPDATE SET
+           product_id = excluded.product_id,
+           updated_at = CURRENT_TIMESTAMP`
+      )
+      .run(boothId, slotId, productId, boothId);
+
     const row = this.db
       .prepare('SELECT booth_id, slot_id, product_id, updated_at FROM booth_slot_assignments WHERE booth_id = ? AND slot_id = ?')
       .get(boothId, slotId) as Record<string, unknown>;
@@ -913,6 +1064,17 @@ export class V28CatalogDatabase {
   clearBoothSlot(boothId: string, slotId: string): boolean {
     const res = this.db
       .prepare('DELETE FROM booth_slot_assignments WHERE booth_id = ? AND slot_id = ?')
+      .run(boothId, slotId);
+    this.db
+      .prepare(
+        `DELETE FROM exhibition_version_booth_slots
+         WHERE booth_id = ? AND slot_id = ?
+           AND version_id IN (
+             SELECT v.id FROM exhibition_versions v
+             JOIN exhibitions e ON e.id = v.exhibition_id
+             WHERE v.status = 'published' OR (v.status = 'draft' AND e.active_version_id IS NULL)
+           )`
+      )
       .run(boothId, slotId);
     return Number(res.changes) > 0;
   }

@@ -83,8 +83,10 @@ describe('V28 PHASE 2 — Dynamic Layout Generator, Exhibition Versioning, Resiz
       };
       const v1Id = exhibition.latestDraftVersionId;
 
-      // 3. Inspect v1 Draft (20 booths, 2 zones A/B)
-      const v1Res = await fetch(`${baseUrl}/api/v28/exhibitions/${exhibition.id}/versions/${v1Id}`);
+      // 3. Inspect v1 Draft (20 booths, 2 zones A/B) — requires Admin auth (V28-AUDIT-012)
+      const v1Res = await fetch(`${baseUrl}/api/v28/exhibitions/${exhibition.id}/versions/${v1Id}`, {
+        headers: authHeaders,
+      });
       expect(v1Res.status).toBe(200);
       const { version: v1 } = (await v1Res.json()) as {
         version: {

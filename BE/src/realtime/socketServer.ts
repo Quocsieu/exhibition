@@ -43,12 +43,47 @@ export function attachSocketServer(
   db: ExpoDatabase,
   corsOrigin: CorsOriginConfig = '*'
 ): Server<ClientToServerEvents, ServerToClientEvents> {
+  // Phase 4.1 Hardening: Bounded message buffer, ping timeouts, and configurable total + NAT-safe per-IP connection caps
+  const maxHttpBufferSize = Math.max(4096, Number(process.env.SOCKET_MAX_BUFFER_BYTES || 16 * 1024));
+  const pingTimeout = Math.max(5000, Number(process.env.SOCKET_PING_TIMEOUT_MS || 20000));
+  const pingInterval = Math.max(5000, Number(process.env.SOCKET_PING_INTERVAL_MS || 25000));
+  const maxTotalSockets = Math.max(20, Number(process.env.SOCKET_MAX_CONNECTIONS || 300));
+  const maxSocketsPerIp = Math.max(5, Number(process.env.SOCKET_MAX_PER_IP || 60));
+
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: {
       origin: corsOrigin,
       methods: ['GET', 'POST'],
     },
+    maxHttpBufferSize,
+    pingTimeout,
+    pingInterval,
   });
+
+  const socketsByIp = new Map<string, number>();
+  const enforceConnectionCap = (socket: { handshake: { address?: string }; on: (ev: 'disconnect', fn: () => void) => unknown }, next: (err?: Error) => void) => {
+    const totalNow = io.engine.clientsCount;
+    if (totalNow >= maxTotalSockets) {
+      next(new Error('Máy chủ đang đạt giới hạn kết nối realtime đồng thời. Vui lòng thử lại sau.'));
+      return;
+    }
+    const ip = socket.handshake.address || 'unknown';
+    const ipCount = socketsByIp.get(ip) || 0;
+    if (ipCount >= maxSocketsPerIp) {
+      next(new Error('Quá nhiều kết nối đồng thời từ cùng một địa chỉ mạng.'));
+      return;
+    }
+    socketsByIp.set(ip, ipCount + 1);
+    socket.on('disconnect', () => {
+      const cur = socketsByIp.get(ip) || 1;
+      if (cur <= 1) socketsByIp.delete(ip);
+      else socketsByIp.set(ip, cur - 1);
+    });
+    next();
+  };
+
+  io.use(enforceConnectionCap);
+  io.of('/v28-dynamic').use(enforceConnectionCap);
 
   const visitors = new Map<string, InternalVisitorRecord>();
 

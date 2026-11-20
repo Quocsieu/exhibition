@@ -10,6 +10,7 @@ import {
 import { getNpcAssistantProfile } from '../../services/npcPresentationService';
 import { formatCurrency } from '../ProductPanel';
 import type { V28NpcAnimState } from '../../scene/v28/DynamicBoothNpc3D';
+import { API_BASE_URL } from '../../config/apiConfig';
 
 export interface V28NpcConsultantPanelProps {
   booth: V28BoothPlacementView;
@@ -38,7 +39,7 @@ interface ChatMessage {
   meta?: string;
 }
 
-const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+const API_BASE = API_BASE_URL;
 
 export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
   booth,
@@ -223,62 +224,79 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
           onAnimStateChange('idle');
         };
 
-        audio.play().catch(() => {
+        audio.play().catch((err: unknown) => {
+          // V28-AUDIT-008: Ignore AbortError / stale catch from a previously stopped clip
+          if (audioElRef.current !== audio) return;
           setIsAudioPlaying(false);
+          if ((err as { name?: string })?.name === 'NotAllowedError') {
+            setStatus('PAUSED');
+            setAudioError('Trình duyệt tạm chặn tự động phát âm thanh. Bấm ▶ Tiếp tục để nghe giọng nữ tiếng Việt.');
+          }
         });
         return;
       }
 
-      // Mode 2: Zero-cost Vietnamese fallback when LIVE GEMINI TTS is not yet configured -> Web Speech vi-VN
+      // Mode 2: Strict Vietnamese female Web Speech fallback ONLY if a real `vi` voice is installed on the OS.
+      // NEVER fall back to system default English/Male voices (e.g. Microsoft David) or 440Hz chime!
       const speechText = clip?.transcript || step.fallbackText;
       if (typeof window !== 'undefined' && 'speechSynthesis' in window && speechText) {
         try {
-          const utter = new SpeechSynthesisUtterance(speechText);
-          utter.lang = 'vi-VN';
-          utter.rate = 1.0;
           const voices = window.speechSynthesis.getVoices();
-          const viVoice = voices.find((v) => v.lang.toLowerCase().startsWith('vi'));
-          if (viVoice) utter.voice = viVoice;
-          utter.onstart = () => setIsAudioPlaying(true);
-          utter.onend = advanceToNext;
-          utter.onerror = () => {
-            setIsAudioPlaying(false);
-          };
-          activeClipKeyRef.current = `${booth.boothId}:${step.slotKey}:speech-fallback`;
-          window.speechSynthesis.speak(utter);
-          return;
+          const viVoices = voices.filter((v) => v.lang.toLowerCase().startsWith('vi'));
+          const preferredViFemale =
+            viVoices.find((v) => /hoaimy|linh|an|female|nu|nữ/i.test(v.name) && !/namminh|male|nam/i.test(v.name)) ||
+            viVoices.find((v) => !/namminh|male/i.test(v.name));
+
+          if (preferredViFemale) {
+            const utter = new SpeechSynthesisUtterance(speechText);
+            utter.lang = 'vi-VN';
+            utter.voice = preferredViFemale;
+            utter.rate = 1.0;
+            utter.onstart = () => setIsAudioPlaying(true);
+            utter.onend = advanceToNext;
+            utter.onerror = () => {
+              setIsAudioPlaying(false);
+            };
+            activeClipKeyRef.current = `${booth.boothId}:${step.slotKey}:speech-vi-female`;
+            window.speechSynthesis.speak(utter);
+            return;
+          }
         } catch {
-          // fall through to cached WAV fallback
+          // fall through to honest subtitle-only notice
         }
       }
 
-      // Mode 3: Direct cached WAV playback fallback if speechSynthesis is unavailable
-      if (clip && clip.status === 'ready') {
-        const audio = new Audio(`${API_BASE}${clip.audioUrl}`);
-        audio.crossOrigin = 'anonymous';
-        audio.preload = 'auto';
-        audio.muted = isMutedRef.current;
-        audioElRef.current = audio;
-        audio.onplay = () => setIsAudioPlaying(true);
-        audio.onpause = () => setIsAudioPlaying(false);
-        audio.onended = advanceToNext;
-        audio.onerror = () => {
-          const code = audio.error?.code;
-          setIsAudioPlaying(false);
-          setAudioError(
-            `Không thể tải tệp âm thanh đã lưu (mã lỗi media: ${code ?? 'unknown'}). Hệ thống đang hiển thị phụ đề tiếng Việt.`
-          );
-          onAnimStateChange('idle');
-        };
-        audio.play().catch(() => setIsAudioPlaying(false));
-      }
+      // Honest notice when neither live Gemini TTS nor a real Vietnamese female voice is available
+      setIsAudioPlaying(false);
+      setAudioError(
+        'Giọng nữ tiếng Việt (Gemini TTS) chưa được kích hoạt trên máy chủ (thiếu GEMINI_API_KEY / V28_ENABLE_LIVE_AI=true) và trình duyệt không có giọng nữ tiếng Việt. Hệ thống hiển thị phụ đề tiếng Việt và không phát nhầm giọng nam/tiếng Anh.'
+      );
+      onAnimStateChange('idle');
     },
     [audioPack, booth.boothId, onAnimStateChange, steps, stopAudioElement]
   );
 
+  const activeBoothIdRef = useRef<string>(booth.boothId);
+  const isMountedRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    // V28-AUDIT-043: Pre-warm Chromium/Edge SpeechSynthesis voices on mount
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.getVoices();
+    }
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Initialize booth consultation when booth changes
   useEffect(() => {
+    activeBoothIdRef.current = booth.boothId;
     stopAudioElement();
+    // V28-AUDIT-031 & 008: Immediately clear stale audioPack and chatLoading on booth switch
+    setAudioPack(null);
+    setChatLoading(false);
     setActiveTab('intro');
     setCurrentStepIndex(0);
     setStatus('GREETING');
@@ -386,6 +404,14 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
     isMutedRef.current = nextMuted;
+    if (nextMuted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore
+      }
+      setIsAudioPlaying(false);
+    }
     if (audioElRef.current) {
       audioElRef.current.muted = nextMuted;
       if (nextMuted) {
@@ -422,11 +448,12 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
     onClose();
   };
 
-  // Grounded AI Chat Handler
+  // Grounded AI Chat Handler (V28-AUDIT-008: guarded against booth switch & unmount races)
   const handleSendChat = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const msg = chatInput.trim();
     if (!msg || chatLoading) return;
+    const requestBoothId = booth.boothId;
     setChatMessages((prev) => [...prev, { role: 'user', text: msg }]);
     setChatInput('');
     setChatError('');
@@ -434,10 +461,11 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
     onAnimStateChange('listen');
     try {
       const res = await v28Api.chatWithBoothNpc({
-        boothId: booth.boothId,
+        boothId: requestBoothId,
         userId: visitorIdRef.current,
         message: msg,
       });
+      if (!isMountedRef.current || activeBoothIdRef.current !== requestBoothId) return;
       setChatMessages((prev) => [
         ...prev,
         {
@@ -450,11 +478,14 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
       ]);
       onAnimStateChange('talk');
     } catch (err) {
+      if (!isMountedRef.current || activeBoothIdRef.current !== requestBoothId) return;
       const errMsg = (err as Error).message || 'Không thể kết nối trợ lý tư vấn.';
       setChatError(errMsg);
       onAnimStateChange('idle');
     } finally {
-      setChatLoading(false);
+      if (isMountedRef.current && activeBoothIdRef.current === requestBoothId) {
+        setChatLoading(false);
+      }
     }
   };
 

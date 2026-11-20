@@ -243,6 +243,8 @@ export const v28Api = {
 
   // Phase 2: Dynamic Exhibitions, Versions, Zones, Placements & Publish
   listArchetypes: () => v28Request<{ archetypes: V28ArchetypeSpec[] }>('/archetypes'),
+  getDemoConfig: () =>
+    v28Request<{ demoEnabled: boolean; label?: string; username?: string; password?: string }>('/auth/demo-config'),
   getActiveWorld: (previewVersionId?: string | null) => {
     const qs = previewVersionId ? `?previewVersionId=${encodeURIComponent(previewVersionId)}` : '';
     return v28Request<{ world: V28ExhibitionVersionDetail }>(`/exhibitions/active${qs}`);
@@ -262,6 +264,11 @@ export const v28Api = {
       preferredZoneCapacity?: number;
       layoutSeed?: number;
       baseVersionId?: string;
+      requireProductSource?: boolean;
+      productSource?: 'url' | 'excel';
+      sourceUrl?: string;
+      sourceFilename?: string;
+      ownerCompanyId?: string;
     }
   ) =>
     v28Request<{ version: V28ExhibitionVersionDetail }>(
@@ -269,6 +276,39 @@ export const v28Api = {
       {
         method: 'POST',
         body: JSON.stringify(payload),
+      }
+    ),
+  autoAllocateDraftProducts: (
+    exhibitionId: string,
+    versionId: string,
+    payload?: {
+      companyId?: string;
+      productIds?: string[];
+      categoryHints?: Record<string, string>;
+      organizeZonesByCategory?: boolean;
+    }
+  ) =>
+    v28Request<{
+      version: V28ExhibitionVersionDetail;
+      assignedSlots: number;
+      boothsFilled: number;
+      assignedProductIds: string[];
+      overflowProductIds: string[];
+      uncertainProducts: Array<{ productId: string; name: string; reason: string }>;
+      classifiedCount: number;
+      zoneDecisions?: Array<{
+        zoneId: string;
+        zoneCode: string;
+        displayName: string;
+        categoryName: string;
+        productCount: number;
+        status: 'assigned_category' | 'merged_general' | 'unassigned_empty';
+      }>;
+    }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/auto-allocate`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload || {}),
       }
     ),
   getVersionDetail: (exhibitionId: string, versionId: string) =>
@@ -352,18 +392,47 @@ export const v28Api = {
       body: JSON.stringify(payload),
     }),
 
-  // Phase 5: Pre-generated Cached Audio & URL / Website Discovery Import
-  discoverWebsiteProducts: (payload: { companyId: string; url: string; maxPages?: number }) =>
+  // Phase 5 + Phase 9: Pre-generated Cached Audio & Smart URL / Website Discovery Import
+  discoverWebsiteProducts: (payload: {
+    companyId?: string;
+    url: string;
+    maxPages?: number;
+    autoDetectCompany?: boolean;
+  }) =>
     v28Request<{
       siteUrl: string;
       pagesScanned: number;
+      totalBytesRead?: number;
+      detectedCompany?: {
+        companyId: string | null;
+        companyName: string;
+        canonicalDomain: string;
+        confidence: 'verified' | 'needs_confirmation';
+        evidence: string;
+        created: boolean;
+        matchedBy: string;
+      };
+      coverageReport?: {
+        pagesScanned: number;
+        productUrlsDiscovered: number;
+        extractedValidCount: number;
+        newCount: number;
+        duplicateCount: number;
+        errorCount: number;
+        totalBytesRead: number;
+        stopReasons: string[];
+        coverageStatus: 'IMPORT_COMPLETED';
+        fullCatalogVerified: boolean;
+      };
       discoveredProducts: Array<{
         name: string;
+        brand?: string;
         sku: string;
         price: number;
         currency: string;
         description: string;
         images: string[];
+        category?: string;
         sourceUrl: string;
         inStock: boolean;
         alreadyInCatalog: boolean;
@@ -607,11 +676,15 @@ export interface V28BoothPlacementView {
   description: string;
   category: string;
   color: string;
+  logoUrl?: string;
+  contactUrl?: string;
+  contactEmail?: string;
   companyId: string | null;
   companyName: string;
   zoneId: string;
   zoneCode: string;
   zoneName: string;
+  zoneCategoryTag?: string;
   slotIndex: number;
   positionX: number;
   positionZ: number;
@@ -636,6 +709,14 @@ export interface V28ExhibitionVersionDetail {
   versionNumber: number;
   status: 'draft' | 'published' | 'archived';
   targetBoothCount: number;
+  ownerCompanyId?: string | null;
+  ownerCompany?: {
+    id: string;
+    name: string;
+    logoUrl: string;
+    contactUrl: string;
+    contactEmail: string;
+  } | null;
   createdAt: string;
   publishedAt: string | null;
   hallWidth: number;

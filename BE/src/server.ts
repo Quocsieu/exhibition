@@ -43,14 +43,29 @@ export function buildCorsOriginChecker(rawCors: string = '*'): CorsOriginConfig 
       return;
     }
     const normalized = origin.replace(/\/+$/, '');
+    const isProd = process.env.NODE_ENV === 'production';
+    const hasExplicitAllowlist = allowedList.length > 0 && !allowedList.includes('*');
+    // V28-AUDIT-035B: Enforce strict CORS allowlist in production; no wildcard *.vercel.app bypass
     const isAllowed =
       allowedList.includes('*') ||
       allowedList.includes(normalized) ||
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized) ||
-      /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(normalized);
+      (!isProd && !hasExplicitAllowlist && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized)) ||
+      /^https?:\/\/([a-z0-9-]+\.)*mbws\.vn$/i.test(normalized);
 
     callback(null, isAllowed);
   };
+}
+
+export function resolveTrustProxyConfig(raw?: string): boolean | number | string {
+  const val = (raw ?? process.env.TRUST_PROXY ?? '').trim().toLowerCase();
+  if (!val || val === 'false' || val === '0' || val === 'off') return false;
+  if (val === 'loopback' || val === 'linklocal' || val === 'uniquelocal') return val;
+  if (/^\d+$/.test(val)) {
+    const hops = Number(val);
+    if (Number.isInteger(hops) && hops >= 1 && hops <= 5) return hops;
+  }
+  // Fail closed: never allow unvalidated 'true' or arbitrary strings
+  return false;
 }
 
 export function createApp(
@@ -60,8 +75,31 @@ export function createApp(
   v28Db?: V28CatalogDatabase
 ): Express {
   const app = express();
-  app.use(cors({ origin: corsOrigin }));
-  app.use(express.json({ limit: '1mb' }));
+  // Phase 3 Hardening: Explicit env-validated trust proxy (defaults safely to false; never hardcoded true)
+  app.set('trust proxy', resolveTrustProxyConfig());
+  app.use(
+    cors({
+      origin: corsOrigin,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      exposedHeaders: [
+        'X-TTS-Cache',
+        'X-TTS-Provider',
+        'X-TTS-Voice',
+        'X-TTS-Chunk-Index',
+        'X-TTS-Total-Chunks',
+      ],
+    })
+  );
+  // Phase 5 Hardening: Skip global 1mb JSON parser ONLY for the Excel base64 upload endpoint so valid <=5MB Excel (~7MB base64) is not rejected before v28Routes
+  const globalJsonParser = express.json({ limit: '1mb' });
+  app.use((req, res, next) => {
+    if (req.path === '/api/v28/imports/excel/preview') {
+      next();
+      return;
+    }
+    globalJsonParser(req, res, next);
+  });
 
   const service = new ExpoService(db);
   app.locals.expoService = service;
@@ -116,6 +154,13 @@ if (isMain) {
   const v28Db = new V28CatalogDatabase(v28DbPath);
   const app = createApp(db, CORS_ORIGIN, undefined, v28Db);
   const httpServer = http.createServer(app);
+  // Phase 4.2 Hardening: Configurable HTTP timeouts compatible with Nginx/Plesk reverse proxy & long imports
+  httpServer.keepAliveTimeout = Math.max(5000, Number(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 65000));
+  httpServer.headersTimeout = Math.max(
+    httpServer.keepAliveTimeout + 1000,
+    Number(process.env.HTTP_HEADERS_TIMEOUT_MS || 66000)
+  );
+  httpServer.requestTimeout = Math.max(10000, Number(process.env.HTTP_REQUEST_TIMEOUT_MS || 60000));
 
   const io = attachSocketServer(httpServer, db, CORS_ORIGIN);
   app.set('io', io);
@@ -138,15 +183,24 @@ if (isMain) {
 
   const gracefulShutdown = () => {
     const svc = app.locals.expoService as ExpoService | undefined;
+    // V28-AUDIT-033B: Close Socket.IO & force-exit fallback so active WebSockets never hang shutdown
+    const forceTimer = setTimeout(() => process.exit(0), 3000);
+    forceTimer.unref?.();
     void (svc ? svc.shutdown() : Promise.resolve()).finally(() => {
+      try {
+        v28SpatialAoi?.dispose();
+        io.close();
+      } catch {
+        // ignore
+      }
       httpServer.close(() => {
         try {
-          v28SpatialAoi?.dispose();
           db.close();
           v28Db.close();
         } catch {
           // ignore
         }
+        clearTimeout(forceTimer);
         process.exit(0);
       });
     });
