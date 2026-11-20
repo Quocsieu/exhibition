@@ -2087,8 +2087,12 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     }
     expect(seenPaths.size).toBe(6);
 
-    // 2. Verify all 6 V27.4 & 5 V27.3 Plaza Amenity GLBs exist on disk
+    // 2. Verify all 4 V27.5, 6 V27.4 & 5 V27.3 Plaza Amenity GLBs exist on disk
     for (const plazaGlb of [
+      'models/plaza/v27_5/landscape_lounge_v27_5.glb',
+      'models/plaza/v27_5/interactive_expo_corner_v27_5.glb',
+      'models/plaza/v27_5/plaza_oasis_v27_5.glb',
+      'models/plaza/v27_5/avenue_planter_island_v27_5.glb',
       'models/plaza/v27_4/welcome_desk_v27_4.glb',
       'models/plaza/v27_4/mini_cafe_corner_v27_4.glb',
       'models/plaza/v27_4/rest_lounge_v27_4.glb',
@@ -2103,5 +2107,42 @@ describe('DAY 1 — FE 2.5D Movement, Collision & A* Pathfinding Engine', () => 
     ]) {
       expect(fs.existsSync(path.join(publicModelsRoot, plazaGlb))).toBe(true);
     }
+
+    // 3. Verify V27.5 synced collision & A* navigation around Landscape Lounge & Interactive Expo Corner
+    const {
+      V27_STATIC_OBSTACLES: v27Statics,
+      V27_WORLD_BOUNDS: v27Bounds,
+      V27_SPAWN_POINT: v27Spawn,
+      applyWorldLayoutToBooths,
+    } = await import('../scene/worldLayout');
+    const v27Booths = applyWorldLayoutToBooths(DEFAULT_BOOTHS, 'v27');
+    const v27NavOpts = { staticObstacles: v27Statics, worldBounds: v27Bounds };
+    expect(v27Statics.some((o) => o.id === 'v27-landscape-lounge')).toBe(true);
+    expect(v27Statics.some((o) => o.id === 'v27-interactive-corner')).toBe(true);
+    expect(isPointWalkable(-16.8, -14.8, v27Booths, 0.42, v27NavOpts)).toBe(false);
+    expect(isPointWalkable(16.8, -14.8, v27Booths, 0.42, v27NavOpts)).toBe(false);
+    // Walkable corridor right in front of Landscape Lounge & Interactive Expo Corner
+    expect(isPointWalkable(-12.5, -13.5, v27Booths, 0.42, v27NavOpts)).toBe(true);
+    expect(isPointWalkable(12.5, -13.5, v27Booths, 0.42, v27NavOpts)).toBe(true);
+    const pathToLounge = findPathAStar(
+      v27Spawn.x,
+      v27Spawn.z,
+      -12.5,
+      -13.5,
+      v27Booths,
+      0.6,
+      v27NavOpts
+    );
+    expect(pathToLounge.length).toBeGreaterThan(0);
+    const pathToCorner = findPathAStar(
+      v27Spawn.x,
+      v27Spawn.z,
+      12.5,
+      -13.5,
+      v27Booths,
+      0.6,
+      v27NavOpts
+    );
+    expect(pathToCorner.length).toBeGreaterThan(0);
   });
 });

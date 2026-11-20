@@ -108,6 +108,12 @@ export const V27_STATIC_OBSTACLES: ObstacleBox[] = [
   { id: 'v27-checkin-stage', minX: -3.2, maxX: 3.2, minZ: -21.4, maxZ: -19.2, label: 'Khu Check-in Grand Expo' },
   { id: 'v27-digital-totem-left', minX: -7.9, maxX: -6.5, minZ: -0.8, maxZ: 0.2, label: 'Màn hình Digital Signage Trái' },
   { id: 'v27-digital-totem-right', minX: 6.5, maxX: 7.9, minZ: -0.8, maxZ: 0.2, label: 'Màn hình Digital Signage Phải' },
+  { id: 'v27-landscape-lounge', minX: -19.6, maxX: -14.0, minZ: -17.0, maxZ: -12.6, label: 'Khu Landscape Lounge Tây Bắc' },
+  { id: 'v27-interactive-corner', minX: 14.0, maxX: 19.6, minZ: -17.0, maxZ: -12.6, label: 'Khu Interactive Expo Corner Đông Bắc' },
+  { id: 'v27-west-mid-oasis', minX: -15.2, maxX: -11.6, minZ: -1.5, maxZ: 1.1, label: 'Cụm Cảnh Quan Giữa Cánh Tây' },
+  { id: 'v27-east-mid-oasis', minX: 11.6, maxX: 15.2, minZ: -1.5, maxZ: 1.1, label: 'Cụm Cảnh Quan Giữa Cánh Đông' },
+  { id: 'v27-south-west-island', minX: -10.9, maxX: -7.9, minZ: 10.8, maxZ: 12.4, label: 'Đảo Cây Cảnh Quan Tây Nam' },
+  { id: 'v27-south-east-island', minX: 7.9, maxX: 10.9, minZ: 10.8, maxZ: 12.4, label: 'Đảo Cây Cảnh Quan Đông Nam' },
   { id: 'v27-entrance-pylon-left', minX: -11.6, maxX: -10.0, minZ: 20.9, maxZ: 22.7, label: 'Cột cổng Trái' },
   { id: 'v27-entrance-pylon-right', minX: 10.0, maxX: 11.6, minZ: 20.9, maxZ: 22.7, label: 'Cột cổng Phải' },
 ];

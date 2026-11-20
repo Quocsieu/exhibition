@@ -652,6 +652,19 @@ export const GrandExpoHall: React.FC<GrandExpoHallProps> = React.memo(
                 <meshBasicMaterial color="#e8cfa0" />
               </mesh>
             ))}
+            {/* V27.5 Phase 5 — Architectural Floor Material Zoning & Subtle Concourse Stone Bands (flush, zero obstacles) */}
+            {([-9.4, 9.4] as const).map((cx) => (
+              <mesh key={`concourse-zone-${cx}`} position={[cx, 0.009, 0.2]} rotation={[-Math.PI / 2, 0, 0]}>
+                <planeGeometry args={[4.4, 24.6]} />
+                <meshStandardMaterial color="#e9e6df" roughness={0.78} metalness={0.04} />
+              </mesh>
+            ))}
+            {([-16.8, 16.8] as const).map((nx) => (
+              <mesh key={`north-pocket-pad-${nx}`} position={[nx, 0.009, -14.8]} rotation={[-Math.PI / 2, 0, 0]}>
+                <planeGeometry args={[7.2, 6.0]} />
+                <meshStandardMaterial color="#e4e0d7" roughness={0.76} metalness={0.05} />
+              </mesh>
+            ))}
             {/* V27.4 Phase 5 — Warm Architectural Cove Accent Strips along Perimeter Walls */}
             <mesh position={[0, 3.42, northWallZ + 0.34]}>
               <boxGeometry args={[northWallSpan - 1.2, 0.06, 0.04]} />
