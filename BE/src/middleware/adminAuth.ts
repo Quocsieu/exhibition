@@ -22,12 +22,15 @@ function getExpectedCredentials(): { username: string; password: string } | null
 }
 
 /**
- * Phase 7 — Safe Local-Only Demo Mode:
- * - Strictly disabled when NODE_ENV === 'production' or ADMIN_DEMO_MODE === 'false'.
+ * Phase 7 — Safe Demo Mode:
+ * - Disabled by default when NODE_ENV === 'production' (unless explicitly opted in via ALLOW_PUBLIC_DEMO_LOGIN=true for client demos) or ADMIN_DEMO_MODE === 'false'.
  * - Uses a dedicated demo identity separate from the real Admin account.
  * - Never exposes or reuses real ADMIN_PASSWORD.
  */
 export function isDemoLoginEnabled(): boolean {
+  if (String(process.env.ALLOW_PUBLIC_DEMO_LOGIN || '').toLowerCase() === 'true') {
+    return true;
+  }
   if (process.env.NODE_ENV === 'production') return false;
   if (String(process.env.ADMIN_DEMO_MODE || '').toLowerCase() === 'false') return false;
   return true;

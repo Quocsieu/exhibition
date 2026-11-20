@@ -143,22 +143,35 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
           {demoConfig.demoEnabled && demoConfig.username && demoConfig.password && (
             <div
               style={{
-                padding: '10px 12px',
+                padding: '12px 14px',
                 borderRadius: 10,
                 background: '#f0f9ff',
                 border: '1px solid #bae6fd',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                gap: 8,
+                gap: 10,
               }}
             >
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#0369a1' }}>
                   {demoConfig.label || 'Tài khoản dùng thử'}
                 </div>
-                <div style={{ fontSize: 11.5, color: '#475569' }}>
-                  Môi trường demo cục bộ · Xác thực qua backend
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: '#0f172a',
+                    marginTop: 4,
+                    lineHeight: 1.5,
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  }}
+                >
+                  <div>
+                    TK: <strong>{demoConfig.username}</strong>
+                  </div>
+                  <div>
+                    MK: <strong>{demoConfig.password}</strong>
+                  </div>
                 </div>
               </div>
               <button
@@ -169,7 +182,7 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
                   setAuthError('');
                 }}
                 style={{
-                  padding: '6px 10px',
+                  padding: '7px 11px',
                   borderRadius: 8,
                   border: '1px solid #0284c7',
                   background: '#fff',
@@ -180,7 +193,7 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
                   whiteSpace: 'nowrap',
                 }}
               >
-                Điền tài khoản demo
+                Điền nhanh
               </button>
             </div>
           )}
