@@ -1,10 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '../services/api';
-import { v28Api, type V28ExhibitionVersionDetail } from '../services/v28Api';
+import {
+  v28Api,
+  type V28AdminAudioOverview,
+  type V28AiStatusResponse,
+  type V28ExhibitionVersionDetail,
+} from '../services/v28Api';
 import { ExhibitionConfigurator } from '../components/adminV28/ExhibitionConfigurator';
 import { CompanyManagement } from '../components/adminV28/CompanyManagement';
 import { ProductCatalog } from '../components/adminV28/ProductCatalog';
 import { ExcelImportWizard } from '../components/adminV28/ExcelImportWizard';
+import { UrlProductImport } from '../components/adminV28/UrlProductImport';
+import { NpcAudioManager } from '../components/adminV28/NpcAudioManager';
 
 export interface AdminV28PageProps {
   onOpenDynamicWorld: () => void;
@@ -21,14 +28,22 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
   const [authError, setAuthError] = useState<string>('');
   const [loggingIn, setLoggingIn] = useState<boolean>(false);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'companies' | 'catalog' | 'excel'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'url_import' | 'catalog' | 'companies' | 'excel' | 'npc_audio'>('dashboard');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [activeWorld, setActiveWorld] = useState<V28ExhibitionVersionDetail | null>(null);
+  const [audioOverview, setAudioOverview] = useState<V28AdminAudioOverview | null>(null);
+  const [aiStatus, setAiStatus] = useState<V28AiStatusResponse | null>(null);
 
   const refreshActiveSummary = useCallback(async () => {
     try {
-      const { world } = await v28Api.getActiveWorld();
-      setActiveWorld(world);
+      const [worldRes, audioRes, aiRes] = await Promise.all([
+        v28Api.getActiveWorld(),
+        v28Api.getAudioOverview(10).catch(() => null),
+        v28Api.getAiStatus().catch(() => null),
+      ]);
+      setActiveWorld(worldRes.world);
+      if (audioRes) setAudioOverview(audioRes.overview);
+      if (aiRes) setAiStatus(aiRes);
     } catch {
       // ignore
     }
@@ -162,41 +177,44 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
     <div
       style={{
         minHeight: '100vh',
-        background: '#f1f5f9',
+        background: 'linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%)',
         fontFamily: 'system-ui, -apple-system, sans-serif',
-        padding: '18px 22px 40px',
+        padding: '14px 16px 40px',
+        boxSizing: 'border-box',
+        overflowX: 'hidden',
       }}
     >
-      <div style={{ maxWidth: 1380, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {/* Dedicated V28 Admin Header (100% V28 DB data — NEVER shows legacy 6-booth count!) */}
+      <div style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* Modern V28 Admin Header */}
         <header
           style={{
-            background: '#0f172a',
+            background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
             color: '#fff',
-            borderRadius: 16,
+            borderRadius: 18,
             padding: '16px 20px',
             display: 'flex',
             flexWrap: 'wrap',
             gap: 14,
             alignItems: 'center',
             justifyContent: 'space-between',
-            boxShadow: '0 10px 28px rgba(15,23,42,0.18)',
+            boxShadow: '0 12px 32px rgba(15,23,42,0.16)',
+            border: '1px solid rgba(148,163,184,0.18)',
           }}
         >
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ background: '#0ea5e9', padding: '3px 9px', borderRadius: 8, fontWeight: 800, fontSize: 12 }}>
+          <div style={{ minWidth: 240 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ background: '#0ea5e9', padding: '3px 10px', borderRadius: 999, fontWeight: 800, fontSize: 11, letterSpacing: '0.04em' }}>
                 ADMIN V28
               </span>
-              <h1 style={{ margin: 0, fontSize: 20 }}>Trung tâm Quản trị Triển lãm Động V28</h1>
+              <h1 style={{ margin: 0, fontSize: 19, fontWeight: 800 }}>Trung tâm Quản trị Triển lãm Động 3D</h1>
             </div>
-            <div style={{ fontSize: 13, color: '#cbd5e1', marginTop: 6 }}>
+            <div style={{ fontSize: 12.5, color: '#cbd5e1', marginTop: 6 }}>
               {activeWorld ? (
                 <>
                   Đang Publish: <strong style={{ color: '#38bdf8' }}>v{activeWorld.versionNumber}</strong> ·{' '}
                   <strong style={{ color: '#fff' }}>{activeWorld.booths.length} gian hàng</strong> ·{' '}
-                  <strong style={{ color: '#fff' }}>{activeWorld.zones.length} phân khu</strong> · Database độc lập{' '}
-                  <code>expo_v28_dev.db</code>
+                  <strong style={{ color: '#fff' }}>{activeWorld.zones.length} Khu chữ U</strong> · Kích thước{' '}
+                  <strong style={{ color: '#fff' }}>{activeWorld.hallWidth}×{activeWorld.hallDepth}m</strong>
                 </>
               ) : (
                 'Đang tải dữ liệu triển lãm V28...'
@@ -219,7 +237,7 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
                 fontSize: 13,
               }}
             >
-              🌐 Mở World 3D V28 (?world=dynamic)
+              🌐 Mở World 3D V28
             </button>
             <button
               type="button"
@@ -227,14 +245,14 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
               style={{
                 padding: '9px 14px',
                 borderRadius: 10,
-                border: '1px solid rgba(255,255,255,0.25)',
-                background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.22)',
+                background: 'rgba(255,255,255,0.06)',
                 color: '#e2e8f0',
                 cursor: 'pointer',
                 fontSize: 13,
               }}
             >
-              🏛️ Admin V27.5 (6 gian)
+              🏛️ Admin V27.5
             </button>
             <button
               type="button"
@@ -242,11 +260,12 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
               style={{
                 padding: '9px 14px',
                 borderRadius: 10,
-                border: '1px solid rgba(255,255,255,0.2)',
-                background: 'rgba(255,255,255,0.08)',
-                color: '#f8fafc',
+                border: '1px solid rgba(248,113,113,0.35)',
+                background: 'rgba(239,68,68,0.12)',
+                color: '#fecaca',
                 cursor: 'pointer',
                 fontSize: 13,
+                fontWeight: 600,
               }}
             >
               Đăng xuất
@@ -254,36 +273,116 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
           </div>
         </header>
 
-        {/* Primary V28 Navigation Tabs */}
-        <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {/* Live KPI Strip */}
+        <section
+          aria-label="Trạng thái nhanh V28"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))',
+            gap: 10,
+          }}
+        >
           {[
-            { id: 'dashboard', label: `🏛️ Dashboard & Quy hoạch (${activeWorld?.booths.length ?? '…'} gian)` },
-            { id: 'companies', label: '🏢 Quản lý Doanh nghiệp' },
-            { id: 'catalog', label: '📚 Kho Sản phẩm Độc lập' },
-            { id: 'excel', label: '📊 Import Excel (.xlsx)' },
-          ].map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setActiveTab(t.id as typeof activeTab)}
+            {
+              label: 'Gian hàng hoạt động',
+              value: activeWorld ? `${activeWorld.booths.length} gian` : '—',
+              sub: activeWorld ? `${activeWorld.zones.length} Khu chữ U` : '',
+              accent: '#0284c7',
+            },
+            {
+              label: 'Slot đã gán sản phẩm',
+              value: activeWorld
+                ? `${activeWorld.booths.reduce((s, b) => s + b.assignedSlotCount, 0)} / ${activeWorld.booths.length * 6}`
+                : '—',
+              sub: '6 slot / gian hàng',
+              accent: '#059669',
+            },
+            {
+              label: 'NPC Audio Cache',
+              value: audioOverview ? `${audioOverview.readyCount} Ready` : '—',
+              sub: audioOverview
+                ? `${audioOverview.pendingCount} Pending · ${audioOverview.failedCount} Failed`
+                : 'Đang kiểm tra',
+              accent: '#7c3aed',
+            },
+            {
+              label: 'Trạng thái AI Consultant',
+              value: aiStatus?.liveGeminiVerified ? 'Gemini Live' : 'Grounded Mock',
+              sub: aiStatus?.liveGeminiVerified ? 'Đã xác thực Live' : 'An toàn 0 chi phí',
+              accent: aiStatus?.liveGeminiVerified ? '#059669' : '#d97706',
+            },
+          ].map((kpi) => (
+            <div
+              key={kpi.label}
               style={{
-                padding: '10px 16px',
-                borderRadius: 10,
-                border: activeTab === t.id ? 'none' : '1px solid #cbd5e1',
-                background: activeTab === t.id ? '#0f172a' : '#fff',
-                color: activeTab === t.id ? '#fff' : '#0f172a',
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontSize: 13,
+                background: '#fff',
+                borderRadius: 14,
+                padding: '12px 15px',
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 2px 8px rgba(15,23,42,0.03)',
               }}
             >
-              {t.label}
-            </button>
+              <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                {kpi.label}
+              </div>
+              <div style={{ fontSize: 19, fontWeight: 800, color: kpi.accent, marginTop: 3 }}>{kpi.value}</div>
+              <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>{kpi.sub}</div>
+            </div>
           ))}
+        </section>
+
+        {/* Responsive Primary V28 Navigation Tabs */}
+        <nav
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+            background: '#fff',
+            padding: 8,
+            borderRadius: 14,
+            border: '1px solid #e2e8f0',
+          }}
+        >
+          {[
+            { id: 'dashboard', label: `🏛️ Dashboard & Quy hoạch (${activeWorld?.booths.length ?? '…'})` },
+            { id: 'url_import', label: '🔗 Import URL Sản phẩm' },
+            { id: 'catalog', label: '📚 Kho Sản phẩm' },
+            { id: 'companies', label: '🏢 Doanh nghiệp' },
+            { id: 'excel', label: '📊 Import Excel' },
+            { id: 'npc_audio', label: '🎙️ NPC & Audio Cache' },
+          ].map((t) => {
+            const active = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setActiveTab(t.id as typeof activeTab)}
+                style={{
+                  padding: '9px 14px',
+                  borderRadius: 10,
+                  border: active ? 'none' : '1px solid transparent',
+                  background: active ? '#0f172a' : 'transparent',
+                  color: active ? '#fff' : '#334155',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  transition: 'background 0.15s ease',
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
         </nav>
 
         {/* Tab Body */}
         {activeTab === 'dashboard' && <ExhibitionConfigurator onDataChanged={refreshActiveSummary} />}
+        {activeTab === 'url_import' && (
+          <UrlProductImport
+            onDataChanged={refreshActiveSummary}
+            onOpenDynamicWorld={onOpenDynamicWorld}
+          />
+        )}
         {activeTab === 'companies' && (
           <CompanyManagement
             onSelectCompanyForCatalog={(cid) => {
@@ -294,6 +393,7 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
         )}
         {activeTab === 'catalog' && <ProductCatalog initialCompanyId={selectedCompanyId} />}
         {activeTab === 'excel' && <ExcelImportWizard />}
+        {activeTab === 'npc_audio' && <NpcAudioManager activeWorld={activeWorld} />}
       </div>
     </div>
   );

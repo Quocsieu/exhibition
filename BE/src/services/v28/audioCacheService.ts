@@ -220,16 +220,13 @@ export class V28AudioCacheService {
     const audioId = `aud-${crypto.randomBytes(6).toString('hex')}`;
     const storageKey = `${params.entityType}_${params.entityId}_${params.slotKey}_${contentHash}.wav`;
 
-    // Safe zero-cost local WAV synthesis by default; live Gemini TTS only if explicitly configured & approved
-    const { buffer, durationSec } = synthesizeFallbackWav(normalized);
-    await this.storage.put(storageKey, buffer);
-
+    // Record pending state first so concurrent Admin monitors see real Pending -> Ready / Failed transitions
     this.db
       .prepare(
         `INSERT OR REPLACE INTO audio_assets (
           audio_id, entity_type, entity_id, slot_key, content_hash,
           language, voice_id, model_id, storage_key, mime_type, duration_sec, transcript, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', CURRENT_TIMESTAMP)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'pending', CURRENT_TIMESTAMP)`
       )
       .run(
         audioId,
@@ -242,9 +239,22 @@ export class V28AudioCacheService {
         modelId,
         storageKey,
         mimeType,
-        durationSec,
         normalized
       );
+
+    try {
+      // Safe zero-cost local WAV synthesis by default; live Gemini TTS only if explicitly configured & approved
+      const { buffer, durationSec } = synthesizeFallbackWav(normalized);
+      await this.storage.put(storageKey, buffer);
+
+      this.db
+        .prepare(`UPDATE audio_assets SET duration_sec = ?, status = 'ready' WHERE audio_id = ?`)
+        .run(durationSec, audioId);
+    } catch (err) {
+      this.metrics.generationFailures++;
+      this.db.prepare(`UPDATE audio_assets SET status = 'failed' WHERE audio_id = ?`).run(audioId);
+      throw err;
+    }
 
     const row = this.db
       .prepare('SELECT * FROM audio_assets WHERE audio_id = ?')
@@ -344,5 +354,74 @@ export class V28AudioCacheService {
     const buffer = await this.storage.get(row.storage_key);
     if (!buffer) return null;
     return { buffer, mimeType: row.mime_type || 'audio/wav' };
+  }
+
+  public getAdminAudioOverview(limit = 50): {
+    totalAssets: number;
+    readyCount: number;
+    pendingCount: number;
+    failedCount: number;
+    liveGeminiTtsEnabled: boolean;
+    providerLabel: string;
+    storageDriver: string;
+    metrics: { cacheHits: number; cacheMisses: number; generationFailures: number };
+    recentAssets: AudioAssetRecord[];
+  } {
+    const counts = this.db
+      .prepare(
+        `SELECT status, COUNT(*) as cnt FROM audio_assets GROUP BY status`
+      )
+      .all() as Array<{ status: string; cnt: number }>;
+
+    let readyCount = 0;
+    let pendingCount = 0;
+    let failedCount = 0;
+    for (const c of counts) {
+      if (c.status === 'ready') readyCount = Number(c.cnt);
+      else if (c.status === 'pending') pendingCount = Number(c.cnt);
+      else if (c.status === 'failed') failedCount = Number(c.cnt);
+    }
+
+    const rows = this.db
+      .prepare('SELECT * FROM audio_assets ORDER BY created_at DESC LIMIT ?')
+      .all(Math.max(1, Math.min(200, limit))) as Array<Record<string, unknown>>;
+
+    const liveGeminiTtsEnabled =
+      Boolean(process.env.GEMINI_API_KEY) && process.env.V28_ENABLE_LIVE_AI === 'true';
+
+    return {
+      totalAssets: readyCount + pendingCount + failedCount,
+      readyCount,
+      pendingCount,
+      failedCount,
+      liveGeminiTtsEnabled,
+      providerLabel: liveGeminiTtsEnabled
+        ? `Gemini Live TTS (${VERIFIED_GEMINI_TTS_MODEL})`
+        : 'Local Fallback WAV (Chế độ an toàn không phát sinh chi phí — LIVE GEMINI TTS NOT VERIFIED)',
+      storageDriver: this.storage.driverName,
+      metrics: { ...this.metrics },
+      recentAssets: rows.map((r) => this.mapRow(r)),
+    };
+  }
+
+  public async retryBoothAudio(booth: ExhibitionBoothPlacementView): Promise<{
+    boothId: string;
+    storageDriver: string;
+    liveGeminiTtsEnabled: boolean;
+    clips: AudioAssetRecord[];
+    cacheHits: number;
+    generatedCount: number;
+  }> {
+    // Clear any failed records for this booth or its assigned products before retrying safely
+    const productIds = booth.slots.map((s) => s.product?.id).filter((id): id is string => Boolean(id));
+    this.db
+      .prepare(`DELETE FROM audio_assets WHERE status = 'failed' AND entity_type = 'booth' AND entity_id = ?`)
+      .run(booth.boothId);
+    for (const pid of productIds) {
+      this.db
+        .prepare(`DELETE FROM audio_assets WHERE status = 'failed' AND entity_type = 'product' AND entity_id = ?`)
+        .run(pid);
+    }
+    return this.getOrPrepareBoothAudioPack(booth);
   }
 }

@@ -333,7 +333,38 @@ export const v28Api = {
       body: JSON.stringify(payload),
     }),
 
-  // Phase 5: Pre-generated Cached Audio
+  // Phase 5: Pre-generated Cached Audio & URL Import
+  importProductFromUrl: (payload: {
+    companyId: string;
+    boothId?: string;
+    url: string;
+    saveToCatalog?: boolean;
+  }) =>
+    v28Request<{
+      draft: {
+        name: string;
+        sku?: string;
+        price?: number;
+        currency?: string;
+        description?: string;
+        images?: string[];
+        videoUrl?: string;
+        sourceUrl?: string;
+        inStock?: boolean;
+      };
+      product?: V28Product;
+      saved: boolean;
+      duplicateWarning?: { existingProductId: string; existingProductName: string } | null;
+    }>('/imports/url', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getAudioOverview: (limit = 50) =>
+    v28Request<{ overview: V28AdminAudioOverview }>(`/audio/overview?limit=${limit}`),
+  retryBoothAudio: (boothId: string) =>
+    v28Request<V28BoothAudioPack>(`/booths/${encodeURIComponent(boothId)}/audio/retry`, {
+      method: 'POST',
+    }),
   getBoothAudio: (boothId: string) =>
     v28Request<V28BoothAudioPack>(`/booths/${encodeURIComponent(boothId)}/audio`),
 
@@ -411,6 +442,18 @@ export interface V28BoothAudioPack {
   clips: V28AudioClip[];
   cacheHits: number;
   generatedCount: number;
+}
+
+export interface V28AdminAudioOverview {
+  totalAssets: number;
+  readyCount: number;
+  pendingCount: number;
+  failedCount: number;
+  liveGeminiTtsEnabled: boolean;
+  providerLabel: string;
+  storageDriver: string;
+  metrics: { cacheHits: number; cacheMisses: number; generationFailures: number };
+  recentAssets: V28AudioClip[];
 }
 
 export interface V28AiStatusResponse {

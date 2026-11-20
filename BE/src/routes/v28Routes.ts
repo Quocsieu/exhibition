@@ -22,6 +22,33 @@ import { V28AiConsultantService } from '../services/v28/aiConsultantService.js';
 import { fetchExternalProductHtml, extractProductFromHtml } from '../integrations/productAdapter.js';
 import { z } from 'zod';
 
+export function sanitizePlainText(raw: string, maxLen = 2000): string {
+  return String(raw || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/javascript:/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLen);
+}
+
+const URL_IMPORT_RATE_WINDOW_MS = 60_000;
+const URL_IMPORT_MAX_PER_WINDOW = 15;
+const urlImportHistory = new Map<string, number[]>();
+
+function checkUrlImportRateLimit(actorKey: string): boolean {
+  const now = Date.now();
+  const recent = (urlImportHistory.get(actorKey) || []).filter((ts) => now - ts < URL_IMPORT_RATE_WINDOW_MS);
+  if (recent.length >= URL_IMPORT_MAX_PER_WINDOW) {
+    urlImportHistory.set(actorKey, recent);
+    return false;
+  }
+  recent.push(now);
+  urlImportHistory.set(actorKey, recent);
+  return true;
+}
+
 function getParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || '' : value || '';
 }
@@ -171,6 +198,18 @@ export function createV28ApiRoutes(
         res.status(404).json({ error: 'Không tìm thấy sản phẩm.' });
         return;
       }
+      // Trigger non-blocking incremental audio cache refresh for active booths displaying this product
+      try {
+        const activeWorld = exhibitionService.getActiveExhibitionWorld();
+        const affectedBooths = activeWorld.booths.filter((b) =>
+          b.slots.some((s) => s.product?.id === product.id)
+        );
+        for (const b of affectedBooths) {
+          void audioCacheService.getOrPrepareBoothAudioPack(b).catch(() => {});
+        }
+      } catch {
+        // ignore if no active exhibition yet
+      }
       res.json({ product });
     } catch (err) {
       res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
@@ -211,7 +250,12 @@ export function createV28ApiRoutes(
         parsed.data.productId
       );
       try {
-        onLayoutPublished?.(exhibitionService.getActiveExhibitionWorld());
+        const activeWorld = exhibitionService.getActiveExhibitionWorld();
+        onLayoutPublished?.(activeWorld);
+        const booth = activeWorld.booths.find((b) => b.boothId === getParam(req.params.id));
+        if (booth) {
+          void audioCacheService.getOrPrepareBoothAudioPack(booth).catch(() => {});
+        }
       } catch {
         // ignore if no active exhibition yet
       }
@@ -297,9 +341,17 @@ export function createV28ApiRoutes(
   });
 
   // ============================================================================
-  // D. URL PRODUCT IMPORT COMPATIBILITY (REUSES SSRF-SAFE productAdapter.ts)
+  // D. URL PRODUCT IMPORT COMPATIBILITY (REUSES SSRF-SAFE productAdapter.ts + RATE LIMIT + XSS GUARD)
   // ============================================================================
   router.post('/imports/url', requireAdminAuth, async (req: Request, res: Response) => {
+    const actorKey = `${(res.locals.adminUsername as string | undefined) || 'admin'}:${req.ip || 'local'}`;
+    if (!checkUrlImportRateLimit(actorKey)) {
+      res.status(429).json({
+        error: `Vượt quá giới hạn trích xuất URL (${URL_IMPORT_MAX_PER_WINDOW} lượt/phút). Vui lòng thử lại sau.`,
+      });
+      return;
+    }
+
     const parsed = V28UrlImportInputSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.issues[0]?.message || 'Dữ liệu import URL không hợp lệ.' });
@@ -312,22 +364,48 @@ export function createV28ApiRoutes(
       return;
     }
 
+    // Booth ownership verification when boothId is provided
+    if (parsed.data.boothId) {
+      const targetBooth = v28Db.listBooths({ includeArchived: true }).find((b) => b.id === parsed.data.boothId);
+      if (!targetBooth) {
+        res.status(404).json({ error: 'Gian hàng đích không tồn tại.' });
+        return;
+      }
+      if (targetBooth.companyId && targetBooth.companyId !== company.id) {
+        res.status(403).json({
+          error: `Gian hàng "${targetBooth.name}" không thuộc quyền quản lý của doanh nghiệp "${company.name}".`,
+        });
+        return;
+      }
+    }
+
     try {
       // Duplicate URL import protection per company
-      if (parsed.data.saveToCatalog) {
-        const dup = categoryService.findDuplicateProductBySourceUrl(parsed.data.companyId, parsed.data.url);
-        if (dup) {
-          res.status(409).json({
-            error: `URL này đã được nhập trước đó cho doanh nghiệp (sản phẩm "${dup.name}").`,
-            existingProductId: dup.id,
-          });
-          return;
-        }
+      const dup = categoryService.findDuplicateProductBySourceUrl(parsed.data.companyId, parsed.data.url);
+      if (dup && parsed.data.saveToCatalog) {
+        res.status(409).json({
+          error: `URL này đã được nhập trước đó cho doanh nghiệp (sản phẩm "${dup.name}").`,
+          existingProductId: dup.id,
+        });
+        return;
       }
       const { html, finalUrl } = await fetchExternalProductHtml(parsed.data.url);
-      const draft = extractProductFromHtml(html, finalUrl);
+      const rawDraft = extractProductFromHtml(html, finalUrl);
+      const draft = {
+        ...rawDraft,
+        name: sanitizePlainText(rawDraft.name, 180),
+        description: sanitizePlainText(rawDraft.description || '', 2000),
+        sku: sanitizePlainText(rawDraft.sku || '', 80),
+      };
+
       if (!parsed.data.saveToCatalog) {
-        res.json({ draft, saved: false });
+        res.json({
+          draft,
+          saved: false,
+          duplicateWarning: dup
+            ? { existingProductId: dup.id, existingProductName: dup.name }
+            : null,
+        });
         return;
       }
 
@@ -465,6 +543,8 @@ export function createV28ApiRoutes(
           getParam(req.params.versionId)
         );
         onLayoutPublished?.(version);
+        // Incremental non-blocking audio cache check/warm on publish (reuses unchanged content hashes)
+        void audioCacheService.syncVersionAudioIncremental(version, 20).catch(() => {});
         res.json({ version });
       } catch (err) {
         res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
@@ -526,6 +606,27 @@ export function createV28ApiRoutes(
   // ============================================================================
   // G. PHASE 5 — PRE-GENERATED CACHED AUDIO PIPELINE & STREAMING
   // ============================================================================
+  router.get('/audio/overview', requireAdminAuth, (req: Request, res: Response) => {
+    const limit = Number(req.query.limit || 50);
+    res.json({ overview: audioCacheService.getAdminAudioOverview(limit) });
+  });
+
+  router.post('/booths/:id/audio/retry', requireAdminAuth, async (req: Request, res: Response) => {
+    try {
+      const boothId = getParam(req.params.id);
+      const activeWorld = exhibitionService.getActiveExhibitionWorld();
+      const booth = activeWorld.booths.find((b) => b.boothId === boothId);
+      if (!booth) {
+        res.status(404).json({ error: 'Gian hàng không thuộc phiên bản đang công bố.' });
+        return;
+      }
+      const pack = await audioCacheService.retryBoothAudio(booth);
+      res.json(pack);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
   router.get('/booths/:id/audio', async (req: Request, res: Response) => {
     try {
       const boothId = getParam(req.params.id);
