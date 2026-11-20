@@ -14,6 +14,7 @@ import type { V28NpcAnimState } from './DynamicBoothNpc3D';
 const PEDESTAL_GEOM = new THREE.CylinderGeometry(0.28, 0.32, 0.85, 14);
 const CARD_FRAME_GEOM = new THREE.BoxGeometry(0.68, 0.52, 0.05);
 const CARD_FACE_GEOM = new THREE.PlaneGeometry(0.62, 0.44);
+const PRODUCT_LABEL_GEOM = new THREE.PlaneGeometry(0.74, 0.24);
 const SIGN_BOARD_GEOM = new THREE.PlaneGeometry(3.8, 0.72);
 const SIGN_BACK_GEOM = new THREE.BoxGeometry(3.92, 0.82, 0.08);
 const FOCUS_RING_GEOM = new THREE.RingGeometry(0.55, 0.72, 24);
@@ -81,6 +82,42 @@ function createBoothSignTexture(
   return tex;
 }
 
+function createProductLabelTexture(name: string, price: number, currency: string): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 160;
+  const ctx = canvas.getContext('2d')!;
+
+  // Sleek dark card with subtle border
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+
+  // Product name (clean truncation so it never clips or overlaps)
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 34px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const cleanName = name.length > 26 ? `${name.slice(0, 25)}…` : name;
+  ctx.fillText(cleanName, canvas.width / 2, 54);
+
+  // Real Catalog price (NEVER fabricate a price when price <= 0)
+  const priceLabel =
+    price > 0
+      ? `${price.toLocaleString('vi-VN')} ${currency || 'VND'}`
+      : 'Liên hệ báo giá';
+  ctx.fillStyle = price > 0 ? '#34d399' : '#cbd5e1';
+  ctx.font = 'bold 32px system-ui, -apple-system, sans-serif';
+  ctx.fillText(priceLabel, canvas.width / 2, 114);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 2;
+  return tex;
+}
+
 interface ProductDisplaySlotProps {
   position: [number, number, number];
   product: V28Product | null;
@@ -112,6 +149,12 @@ const ProductDisplaySlot: React.FC<ProductDisplaySlotProps> = React.memo(
     );
     useEffect(() => () => accentMat.dispose(), [accentMat]);
 
+    const labelTex = useMemo(
+      () => (product ? createProductLabelTexture(product.name, product.price, product.currency) : null),
+      [product?.name, product?.price, product?.currency]
+    );
+    useEffect(() => () => labelTex?.dispose(), [labelTex]);
+
     return (
       <group
         position={position}
@@ -129,7 +172,7 @@ const ProductDisplaySlot: React.FC<ProductDisplaySlotProps> = React.memo(
           castShadow
           receiveShadow
         />
-        {/* Product Display Frame (only when slot has a product) */}
+        {/* Product Display Frame + Crisp 3D Name & Price Label (only when slot has a product) */}
         {product ? (
           <group position={[0, 1.18, 0]}>
             <mesh geometry={CARD_FRAME_GEOM} material={CARD_FRAME_MAT} castShadow />
@@ -140,6 +183,11 @@ const ProductDisplaySlot: React.FC<ProductDisplaySlotProps> = React.memo(
                 <meshStandardMaterial color={brandColor || '#0ea5e9'} roughness={0.4} metalness={0.15} />
               )}
             </mesh>
+            {labelTex && (
+              <mesh position={[0, 0.44, 0.04]} geometry={PRODUCT_LABEL_GEOM}>
+                <meshBasicMaterial map={labelTex} toneMapped={false} />
+              </mesh>
+            )}
           </group>
         ) : (
           <mesh position={[0, 0.87, 0]} rotation={[-Math.PI / 2, 0, 0]}>

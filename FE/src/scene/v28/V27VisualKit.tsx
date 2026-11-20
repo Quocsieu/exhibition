@@ -143,16 +143,17 @@ export interface V27VisualKitLayerProps {
   playerX: number;
   playerZ: number;
   isOverview: boolean;
+  onOpenDirectoryMap?: () => void;
 }
 
 /**
  * Full V27.5 Environment Heritage Layer for V28:
- * - Main Welcome Plaza (Welcome Desk, Directory Monument, Mini Café, Rest Lounge, Planter Islands)
+ * - Main Welcome Plaza (Welcome Desk, Clickable Directory Monument, Mini Café, Rest Lounge, Planter Islands)
  * - North Focal Check-In Photo Stage
- * - Streamed 6-Booth Cluster Courtyard Plazas with Medallion & Deterministic V27.5 Centerpiece Variations
+ * - Streamed U-Shaped Courtyard Plazas with Medallion & Deterministic V27.5 Centerpiece Variations
  */
 export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
-  ({ world, playerX, playerZ, isOverview }) => {
+  ({ world, playerX, playerZ, isOverview, onOpenDirectoryMap }) => {
     const medallionTex = useMemo(() => createGrandExpoMedallionTexture(), []);
     useEffect(() => () => medallionTex.dispose(), [medallionTex]);
 
@@ -192,7 +193,24 @@ export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
         {/* Main Entrance Plaza Heritage GLBs (South Welcome Area) */}
         <group position={[0, 0, welcomeZ]}>
           <V27PlazaGlb url="/models/plaza/v27_4/welcome_desk_v27_4.glb" position={[-9.6, 0, 1.0]} />
-          <V27PlazaGlb url="/models/plaza/v27_4/directory_monument_v27_4.glb" position={[9.6, 0, 1.0]} />
+          {/* Clickable V27.5 Directory Monument -> opens Interactive 2D Exhibition Map */}
+          <group
+            position={[9.6, 0, 1.0]}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenDirectoryMap?.();
+            }}
+            onPointerOver={(e) => {
+              e.stopPropagation();
+              document.body.style.cursor = 'pointer';
+            }}
+            onPointerOut={(e) => {
+              e.stopPropagation();
+              document.body.style.cursor = 'auto';
+            }}
+          >
+            <V27PlazaGlb url="/models/plaza/v27_4/directory_monument_v27_4.glb" />
+          </group>
           <V27PlazaGlb url="/models/plaza/v27_4/mini_cafe_corner_v27_4.glb" position={[-18.5, 0, 0.4]} />
           <V27PlazaGlb url="/models/plaza/v27_4/rest_lounge_v27_4.glb" position={[18.5, 0, 0.4]} />
           <V27PlazaGlb url="/models/plaza/v27_5/avenue_planter_island_v27_5.glb" position={[-8.8, 0, -4.6]} />

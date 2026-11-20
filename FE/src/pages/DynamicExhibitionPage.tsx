@@ -34,6 +34,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   const [focusedBooth, setFocusedBooth] = useState<V28BoothPlacementView | null>(null);
   const [npcPanelOpen, setNpcPanelOpen] = useState<boolean>(false);
   const [npcAnimState, setNpcAnimState] = useState<V28NpcAnimState>('idle');
+  const [directoryOpenNonce, setDirectoryOpenNonce] = useState<number>(0);
 
   // Exact V27.5 Visitor Profile identity (sessionStorage: expo_visitor_name & expo_visitor_color)
   const [playerName, setPlayerName] = useState<string>(() => {
@@ -297,6 +298,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
           setNpcPanelOpen(true);
           setCameraMode('focus');
         }}
+        onOpenDirectoryMap={() => setDirectoryOpenNonce((n) => n + 1)}
         renderFarProxies={() => <FarBoothInstancedProxy booths={world.booths} lodMap={boothLodMap} />}
         renderRoof={({ cameraMode: cm, isMobilePortrait: mp }) => (
           <ParametricExpoRoof roofBounds={world.roofBounds} cameraMode={cm} isMobilePortrait={mp} />
@@ -312,6 +314,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         focusedBooth={focusedBooth}
         selectedProduct={selectedProduct}
         npcPanelOpen={npcPanelOpen}
+        directoryOpenNonce={directoryOpenNonce}
         playerName={playerName}
         playerColor={playerColor}
         onUpdateVisitorProfile={handleUpdateVisitorProfile}

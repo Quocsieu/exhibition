@@ -38,8 +38,20 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
   // String-backed numeric inputs (allow clearing completely, typing/pasting freely, zero wheel jumps or focus loss!)
   const [zoneCountInput, setZoneCountInput] = useState<string>('10');
   const [boothsPerZoneInput, setBoothsPerZoneInput] = useState<string>('10');
+  const [sourceMode, setSourceMode] = useState<'catalog' | 'url' | 'excel'>('catalog');
+  const [sourceCompanyId, setSourceCompanyId] = useState<string>('');
+  const [sourceWebsiteUrl, setSourceWebsiteUrl] = useState<string>('');
+  const [sourceExcelFile, setSourceExcelFile] = useState<{ name: string; base64: string } | null>(null);
+  const [autoAllocateProducts, setAutoAllocateProducts] = useState<boolean>(true);
   const [showCreateConfirm, setShowCreateConfirm] = useState<boolean>(false);
   const [confirmDeleteBooth, setConfirmDeleteBooth] = useState<V28BoothPlacementView | null>(null);
+  const [creationProgress, setCreationProgress] = useState<{
+    open: boolean;
+    running: boolean;
+    error: string;
+    summary: string;
+    steps: Array<{ key: string; label: string; status: 'pending' | 'running' | 'done' | 'error'; detail?: string }>;
+  } | null>(null);
   const [selectedBooth, setSelectedBooth] = useState<V28BoothPlacementView | null>(null);
   const [editBoothName, setEditBoothName] = useState<string>('');
   const [editZoneName, setEditZoneName] = useState<Record<string, string>>({});
@@ -87,6 +99,9 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
       ]);
       setExhibitions(exhRes.exhibitions);
       setCompanies(compRes.companies);
+      if (compRes.companies.length > 0) {
+        setSourceCompanyId((prev) => prev || compRes.companies[0].id);
+      }
       setArchetypes(archRes.archetypes);
       const first = exhRes.exhibitions[0];
       if (first) {
@@ -209,11 +224,106 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
   };
 
   const handleCreateDraft = async () => {
-    if (!selectedExhId || configValidationError) return;
+    if (!selectedExhId || configValidationError || creationProgress?.running) return;
+    setShowCreateConfirm(false);
     setLoading(true);
     setError('');
     setMessage('');
+
+    const initSteps = [
+      { key: 'validate', label: '1. Kiểm tra cấu hình khu & gian hàng', status: 'running' as const, detail: `${parsedZoneCount} khu × ${parsedBoothsPerZone} gian = ${computedTotalBooths} gian` },
+      { key: 'source', label: '2. Lấy dữ liệu sản phẩm', status: 'pending' as const, detail: sourceMode === 'url' ? sourceWebsiteUrl : sourceMode === 'excel' ? sourceExcelFile?.name : 'Sử dụng Catalog hiện có' },
+      { key: 'categorize', label: '3. Phân tích danh mục & chuẩn bị phân khu chữ U', status: 'pending' as const },
+      { key: 'layout', label: '4. Tạo bản Draft & bố cục 2D hai dãy chữ U', status: 'pending' as const },
+      { key: 'allocate', label: '5. Tự động phân bổ sản phẩm vào 6 slot/gian', status: 'pending' as const },
+    ];
+
+    const setStepState = (
+      key: string,
+      status: 'pending' | 'running' | 'done' | 'error',
+      detail?: string
+    ) => {
+      setCreationProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              steps: prev.steps.map((s) =>
+                s.key === key ? { ...s, status, detail: detail ?? s.detail } : s
+              ),
+            }
+          : prev
+      );
+    };
+
+    setCreationProgress({
+      open: true,
+      running: true,
+      error: '',
+      summary: '',
+      steps: initSteps,
+    });
+
     try {
+      // Step 1: Validate configuration
+      if (sourceMode === 'url' && !sourceWebsiteUrl.trim()) {
+        throw new Error('Vui lòng nhập URL website doanh nghiệp hoặc chọn chế độ dùng Catalog hiện có.');
+      }
+      if (sourceMode === 'excel' && !sourceExcelFile) {
+        throw new Error('Vui lòng chọn tệp Excel (.xlsx) hoặc chọn chế độ dùng Catalog hiện có.');
+      }
+      setStepState('validate', 'done', `Hợp lệ: ${parsedZoneCount} khu × ${parsedBoothsPerZone} gian`);
+
+      // Step 2: Fetch / Import product data from chosen source
+      setStepState('source', 'running');
+      let importedCount = 0;
+      const targetCompanyId = sourceCompanyId || companies[0]?.id || '';
+      if (sourceMode === 'url' && targetCompanyId) {
+        const disc = await v28Api.discoverWebsiteProducts({
+          companyId: targetCompanyId,
+          url: sourceWebsiteUrl.trim(),
+          maxPages: 6,
+        });
+        for (const item of disc.discoveredProducts) {
+          if (item.alreadyInCatalog || item.name.trim().length < 2) continue;
+          await v28Api.createProduct({
+            companyId: targetCompanyId,
+            boothId: null,
+            name: item.name.trim(),
+            sku: item.sku.trim(),
+            price: Math.max(0, Number(item.price) || 0),
+            currency: item.currency || 'VND',
+            description: item.description.trim(),
+            images: item.images,
+            sourceUrl: item.sourceUrl,
+            inStock: item.inStock,
+          });
+          importedCount++;
+        }
+        setStepState('source', 'done', `Quét ${disc.pagesScanned} trang · Thêm mới ${importedCount} SP (tìm thấy ${disc.discoveredProducts.length})`);
+      } else if (sourceMode === 'excel' && sourceExcelFile && targetCompanyId) {
+        const prev = await v28Api.previewExcel({
+          companyId: targetCompanyId,
+          filename: sourceExcelFile.name,
+          fileBase64: sourceExcelFile.base64,
+        });
+        const commit = await v28Api.commitExcel({
+          previewToken: prev.previewToken,
+          duplicateStrategy: 'skip',
+        });
+        importedCount = commit.report.createdCount;
+        setStepState('source', 'done', `Excel: thêm ${commit.report.createdCount} SP, bỏ qua ${commit.report.skippedCount}, lỗi ${commit.report.failedCount}`);
+      } else {
+        const catRes = await v28Api.listProducts({ status: 'active', page: 1, limit: 100 });
+        setStepState('source', 'done', `Đọc ${catRes.total} sản phẩm có sẵn trong Catalog`);
+      }
+
+      // Step 3: Analyze categories
+      setStepState('categorize', 'running');
+      const catList = await v28Api.listCategories().catch(() => ({ categories: [] }));
+      setStepState('categorize', 'done', `Áp dụng ${catList.categories.length} danh mục cho ${parsedZoneCount} khu chữ U`);
+
+      // Step 4: Create Draft & 2D U-shaped layout
+      setStepState('layout', 'running');
       const { version } = await v28Api.createDraftVersion(selectedExhId, {
         zoneCount: parsedZoneCount,
         boothsPerZone: parsedBoothsPerZone,
@@ -221,18 +331,66 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
         preferredZoneCapacity: parsedBoothsPerZone,
         baseVersionId: selectedVersionId || undefined,
       });
+      setStepState('layout', 'done', `Draft v${version.versionNumber} (${version.zones.length} khu · ${version.booths.length} gian · ${version.hallWidth}×${version.hallDepth}m)`);
+
+      // Step 5: Deterministic auto-allocation (up to 6 slots/booth, strictly matching company ownership, never fabricating products)
+      setStepState('allocate', 'running');
+      let allocatedSlots = 0;
+      if (autoAllocateProducts) {
+        const SLOT_KEYS = ['slot_01', 'slot_02', 'slot_03', 'slot_04', 'slot_05', 'slot_06'];
+        const productsByCompany = new Map<string, V28Product[]>();
+        for (const b of version.booths) {
+          if (!b.companyId || b.assignedSlotCount > 0) continue;
+          if (!productsByCompany.has(b.companyId)) {
+            const pRes = await v28Api
+              .listProducts({ companyId: b.companyId, status: 'active', page: 1, limit: 50 })
+              .catch(() => ({ items: [] as V28Product[] }));
+            productsByCompany.set(b.companyId, pRes.items);
+          }
+          const pool = productsByCompany.get(b.companyId) || [];
+          const toAssign = pool.slice(0, 6);
+          for (let i = 0; i < toAssign.length; i++) {
+            await v28Api.assignSlot(b.boothId, SLOT_KEYS[i], toAssign[i].id).catch(() => {});
+            allocatedSlots++;
+          }
+        }
+      }
+      setStepState(
+        'allocate',
+        'done',
+        allocatedSlots > 0
+          ? `Đã tự động gán ${allocatedSlots} vị trí trưng bày (tối đa 6 slot/gian)`
+          : 'Giữ nguyên phân bổ hiện tại (gian chưa có SP được đánh dấu đỏ)'
+      );
+
       await loadExhibitions();
+      const refreshed = await v28Api.getVersionDetail(selectedExhId, version.versionId);
       setSelectedVersionId(version.versionId);
-      setVersionDetail(version);
-      setShowCreateConfirm(false);
+      setVersionDetail(refreshed.version);
       setFilterZoneCode('ALL');
       setPage(1);
-      setMessage(
-        `Đã tạo bản Draft v${version.versionNumber} (${version.zones.length} khu × ${parsedBoothsPerZone} gian = ${version.booths.length} gian). World công khai chưa thay đổi cho đến khi bấm Publish.`
+
+      const withSp = refreshed.version.booths.filter((b) => b.assignedSlotCount > 0).length;
+      const emptySp = refreshed.version.booths.length - withSp;
+      const summaryText = `Đã tạo Draft v${refreshed.version.versionNumber}: ${refreshed.version.zones.length} khu × ${parsedBoothsPerZone} gian = ${refreshed.version.booths.length} gian (${withSp} gian có SP, ${emptySp} gian trống đánh dấu đỏ). Kiểm tra sơ đồ 2D và bấm "🚀 Publish" để xuất bản.`;
+      setCreationProgress((prev) =>
+        prev ? { ...prev, running: false, summary: summaryText } : prev
       );
+      setMessage(summaryText);
       onDataChanged?.();
     } catch (e) {
-      setError((e as Error).message);
+      const errMsg = (e as Error).message || 'Có lỗi xảy ra khi tạo không gian triển lãm.';
+      setError(errMsg);
+      setCreationProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              running: false,
+              error: errMsg,
+              steps: prev.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error', detail: errMsg } : s)),
+            }
+          : prev
+      );
     } finally {
       setLoading(false);
     }
@@ -580,6 +738,98 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
             ⚠️ {configValidationError}
           </div>
         )}
+
+        {/* Step 3: Optional Product Source Selector (Catalog / Business Website URL / Excel .xlsx) */}
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 10,
+            alignItems: 'center',
+            padding: '10px 12px',
+            borderRadius: 10,
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
+          }}
+        >
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: '#334155' }}>Nguồn sản phẩm:</span>
+          {[
+            { id: 'catalog', label: '📚 Dùng Catalog hiện có' },
+            { id: 'url', label: '🔗 Nhập URL Website doanh nghiệp' },
+            { id: 'excel', label: '📊 Tải file Excel (.xlsx)' },
+          ].map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setSourceMode(opt.id as typeof sourceMode)}
+              style={{
+                padding: '6px 11px',
+                borderRadius: 8,
+                border: sourceMode === opt.id ? '1.5px solid #0ea5e9' : '1px solid #cbd5e1',
+                background: sourceMode === opt.id ? '#e0f2fe' : '#fff',
+                color: sourceMode === opt.id ? '#0369a1' : '#334155',
+                fontWeight: 600,
+                fontSize: 12.5,
+                cursor: 'pointer',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+
+          {(sourceMode === 'url' || sourceMode === 'excel') && (
+            <select
+              value={sourceCompanyId}
+              onChange={(e) => setSourceCompanyId(e.target.value)}
+              style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12.5, background: '#fff' }}
+            >
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          )}
+
+          {sourceMode === 'url' && (
+            <input
+              type="url"
+              value={sourceWebsiteUrl}
+              onChange={(e) => setSourceWebsiteUrl(e.target.value)}
+              placeholder="https://example-business.com"
+              style={{ flex: '1 1 240px', padding: '6px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
+            />
+          )}
+
+          {sourceMode === 'excel' && (
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) {
+                  setSourceExcelFile(null);
+                  return;
+                }
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const res = String(reader.result || '');
+                  const base64 = res.includes(',') ? res.split(',')[1] : res;
+                  setSourceExcelFile({ name: file.name, base64 });
+                };
+                reader.readAsDataURL(file);
+              }}
+              style={{ fontSize: 12.5 }}
+            />
+          )}
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#334155', marginLeft: 'auto' }}>
+            <input
+              type="checkbox"
+              checked={autoAllocateProducts}
+              onChange={(e) => setAutoAllocateProducts(e.target.checked)}
+            />
+            Tự động phân bổ tối đa 6 SP/gian
+          </label>
+        </div>
 
         {showCreateConfirm && !configValidationError && (
           <div
@@ -1157,6 +1407,114 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
                 Sau →
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Real-Backend Progress Popup Modal (Section F4) */}
+      {creationProgress?.open && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Tiến trình tạo không gian triển lãm"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,23,42,0.58)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            zIndex: 10000,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 520,
+              background: '#fff',
+              borderRadius: 16,
+              padding: 22,
+              boxShadow: '0 24px 60px rgba(0,0,0,0.32)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: 17, color: '#0f172a' }}>
+              {creationProgress.running
+                ? '⏳ Đang tạo không gian triển lãm...'
+                : creationProgress.error
+                  ? '⚠️ Tạo không gian gặp sự cố'
+                  : '✅ Đã hoàn tất tạo bản nháp (Draft)'}
+            </h3>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {creationProgress.steps.map((st) => (
+                <div
+                  key={st.key}
+                  style={{
+                    padding: '9px 12px',
+                    borderRadius: 10,
+                    border: '1px solid #e2e8f0',
+                    background:
+                      st.status === 'done'
+                        ? '#f0fdf4'
+                        : st.status === 'running'
+                          ? '#eff6ff'
+                          : st.status === 'error'
+                            ? '#fef2f2'
+                            : '#f8fafc',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                    {st.status === 'done'
+                      ? '✅'
+                      : st.status === 'running'
+                        ? '⏳'
+                        : st.status === 'error'
+                          ? '❌'
+                          : '○'}{' '}
+                    {st.label}
+                  </div>
+                  {st.detail && (
+                    <div style={{ fontSize: 12, color: st.status === 'error' ? '#b91c1c' : '#475569' }}>
+                      {st.detail}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {creationProgress.summary && (
+              <div style={{ padding: 10, borderRadius: 10, background: '#ecfdf5', border: '1px solid #6ee7b7', color: '#065f46', fontSize: 13 }}>
+                {creationProgress.summary}
+              </div>
+            )}
+
+            {!creationProgress.running && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                {creationProgress.error && (
+                  <button
+                    type="button"
+                    onClick={handleCreateDraft}
+                    style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: '#0ea5e9', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
+                  >
+                    🔄 Thử lại an toàn
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setCreationProgress(null)}
+                  style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#0f172a', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
+                >
+                  {creationProgress.error ? 'Đóng' : '👁️ Xem sơ đồ 2D & Chỉnh sửa'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

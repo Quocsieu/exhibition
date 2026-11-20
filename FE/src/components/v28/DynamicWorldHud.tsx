@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   V28BoothPlacementView,
   V28ExhibitionVersionDetail,
@@ -17,6 +17,7 @@ export interface DynamicWorldHudProps {
   focusedBooth: V28BoothPlacementView | null;
   selectedProduct: { booth: V28BoothPlacementView; product: V28Product; slotId: string } | null;
   npcPanelOpen: boolean;
+  directoryOpenNonce?: number;
   playerName?: string;
   playerColor?: string;
   onUpdateVisitorProfile?: (name: string, color: string) => void;
@@ -43,6 +44,7 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   focusedBooth,
   selectedProduct,
   npcPanelOpen,
+  directoryOpenNonce = 0,
   playerName = 'Khách V28',
   playerColor = '#0ea5e9',
   onUpdateVisitorProfile,
@@ -62,6 +64,12 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedZoneCode, setSelectedZoneCode] = useState<string>('ALL');
   const [directoryOpen, setDirectoryOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (directoryOpenNonce > 0) {
+      setDirectoryOpen(true);
+    }
+  }, [directoryOpenNonce]);
   const [joystickEnabled, setJoystickEnabled] = useState<boolean>(false);
   const [editingProfile, setEditingProfile] = useState<boolean>(false);
   const [draftName, setDraftName] = useState<string>(playerName);
@@ -418,11 +426,12 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
             </button>
           </div>
 
-          {/* Interactive 2D Mini-map */}
+          {/* Interactive 2D Exhibition Map (live layout: U-zones, walkways, booths, player position) */}
           <svg
             viewBox={`${world.hallBounds.minX - 2} ${world.hallBounds.minZ - 2} ${world.hallWidth + 4} ${world.hallDepth + 4}`}
-            style={{ width: '100%', height: 130, background: '#f1f5f9', borderRadius: 10, border: '1px solid #cbd5e1', flexShrink: 0 }}
+            style={{ width: '100%', height: 175, background: '#f1f5f9', borderRadius: 10, border: '1px solid #cbd5e1', flexShrink: 0 }}
           >
+            {/* Central Main Avenue */}
             <rect
               x={world.centralAvenueBounds.minX}
               y={world.centralAvenueBounds.minZ}
@@ -430,23 +439,70 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               height={world.centralAvenueBounds.maxZ - world.centralAvenueBounds.minZ}
               fill="#e0f2fe"
             />
-            {world.booths.map((b) => (
-              <rect
-                key={b.boothId}
-                x={b.positionX - b.footprintWidth / 2}
-                y={b.positionZ - b.footprintDepth / 2}
-                width={b.footprintWidth}
-                height={b.footprintDepth}
-                fill={selectedZoneCode === 'ALL' || b.zoneCode === selectedZoneCode ? b.color : '#cbd5e1'}
-                onClick={() => {
-                  onTeleportToBooth(b);
-                  setDirectoryOpen(false);
-                }}
-                style={{ cursor: 'pointer' }}
-              />
-            ))}
-            <circle cx={playerPos.x} cy={playerPos.z} r={2.2} fill="#ef4444" stroke="#fff" strokeWidth={0.8} />
+            {/* Clickable U-Shaped Zones */}
+            {world.zones.map((z) => {
+              const activeZone = selectedZoneCode === z.code;
+              const cx = (z.bounds.minX + z.bounds.maxX) / 2;
+              const cz = (z.bounds.minZ + z.bounds.maxZ) / 2;
+              return (
+                <g
+                  key={z.id}
+                  onClick={() => setSelectedZoneCode(activeZone ? 'ALL' : z.code)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <rect
+                    x={z.bounds.minX}
+                    y={z.bounds.minZ}
+                    width={z.bounds.maxX - z.bounds.minX}
+                    height={z.bounds.maxZ - z.bounds.minZ}
+                    fill={activeZone ? 'rgba(14,165,233,0.16)' : 'rgba(255,255,255,0.65)'}
+                    stroke={activeZone ? '#0284c7' : '#cbd5e1'}
+                    strokeWidth={activeZone ? 1.8 : 0.8}
+                    rx={2}
+                  />
+                  <text
+                    x={cx}
+                    y={cz}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize={Math.max(4.5, Math.min(8, world.hallWidth * 0.032))}
+                    fontWeight="bold"
+                    fill={activeZone ? '#0369a1' : '#64748b'}
+                  >
+                    {z.code}
+                  </text>
+                </g>
+              );
+            })}
+            {/* Rotated Booth Footprints */}
+            {world.booths.map((b) => {
+              const cos = Math.abs(Math.cos(b.rotationY));
+              const sin = Math.abs(Math.sin(b.rotationY));
+              const rw = b.footprintWidth * cos + b.footprintDepth * sin;
+              const rd = b.footprintWidth * sin + b.footprintDepth * cos;
+              return (
+                <rect
+                  key={b.boothId}
+                  x={b.positionX - rw / 2}
+                  y={b.positionZ - rd / 2}
+                  width={rw}
+                  height={rd}
+                  fill={selectedZoneCode === 'ALL' || b.zoneCode === selectedZoneCode ? b.color : '#cbd5e1'}
+                  onClick={() => {
+                    onTeleportToBooth(b);
+                    setDirectoryOpen(false);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                />
+              );
+            })}
+            {/* Live Player Position Marker */}
+            <circle cx={playerPos.x} cy={playerPos.z} r={Math.max(2.6, world.hallWidth * 0.015)} fill="#ef4444" stroke="#fff" strokeWidth={1.1} />
           </svg>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#64748b' }}>
+            <span>🔴 Vị trí của bạn · Bấm khu hoặc gian để chọn/đi tới</span>
+            <span>{world.zones.length} khu chữ U</span>
+          </div>
 
           {/* Booth List with Teleport */}
           <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>

@@ -96,6 +96,7 @@ export interface DynamicExhibitionSceneProps {
   onFocusBooth: (booth: V28BoothPlacementView) => void;
   onSelectProduct: (booth: V28BoothPlacementView, product: V28Product, slotId: string) => void;
   onClickNpc?: (booth: V28BoothPlacementView) => void;
+  onOpenDirectoryMap?: () => void;
   renderRoof?: (props: { cameraMode: V28CameraMode; isMobilePortrait: boolean }) => React.ReactNode;
   renderFarProxies?: () => React.ReactNode;
 }
@@ -177,6 +178,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   onFocusBooth,
   onSelectProduct,
   onClickNpc,
+  onOpenDirectoryMap,
   renderRoof,
   renderFarProxies,
 }) => {
@@ -534,6 +536,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
         playerX={playerPosRef.current.x}
         playerZ={playerPosRef.current.z}
         isOverview={cameraMode === 'overview'}
+        onOpenDirectoryMap={onOpenDirectoryMap}
       />
 
       {/* Zone Overhead Banners */}

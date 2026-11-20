@@ -2,8 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '../services/api';
 import {
   v28Api,
-  type V28AdminAudioOverview,
-  type V28AiStatusResponse,
   type V28ExhibitionVersionDetail,
 } from '../services/v28Api';
 import { ExhibitionConfigurator } from '../components/adminV28/ExhibitionConfigurator';
@@ -11,7 +9,6 @@ import { CompanyManagement } from '../components/adminV28/CompanyManagement';
 import { ProductCatalog } from '../components/adminV28/ProductCatalog';
 import { ExcelImportWizard } from '../components/adminV28/ExcelImportWizard';
 import { UrlProductImport } from '../components/adminV28/UrlProductImport';
-import { NpcAudioManager } from '../components/adminV28/NpcAudioManager';
 
 export interface AdminV28PageProps {
   onOpenDynamicWorld: () => void;
@@ -28,22 +25,14 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
   const [authError, setAuthError] = useState<string>('');
   const [loggingIn, setLoggingIn] = useState<boolean>(false);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'url_import' | 'catalog' | 'companies' | 'excel' | 'npc_audio'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'url_import' | 'catalog' | 'companies' | 'excel'>('dashboard');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [activeWorld, setActiveWorld] = useState<V28ExhibitionVersionDetail | null>(null);
-  const [audioOverview, setAudioOverview] = useState<V28AdminAudioOverview | null>(null);
-  const [aiStatus, setAiStatus] = useState<V28AiStatusResponse | null>(null);
 
   const refreshActiveSummary = useCallback(async () => {
     try {
-      const [worldRes, audioRes, aiRes] = await Promise.all([
-        v28Api.getActiveWorld(),
-        v28Api.getAudioOverview(10).catch(() => null),
-        v28Api.getAiStatus().catch(() => null),
-      ]);
+      const worldRes = await v28Api.getActiveWorld();
       setActiveWorld(worldRes.world);
-      if (audioRes) setAudioOverview(audioRes.overview);
-      if (aiRes) setAiStatus(aiRes);
     } catch {
       // ignore
     }
@@ -298,18 +287,20 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
               accent: '#059669',
             },
             {
-              label: 'NPC Audio Cache',
-              value: audioOverview ? `${audioOverview.readyCount} Ready` : '—',
-              sub: audioOverview
-                ? `${audioOverview.pendingCount} Pending · ${audioOverview.failedCount} Failed`
-                : 'Đang kiểm tra',
-              accent: '#7c3aed',
+              label: 'Gian đã có sản phẩm',
+              value: activeWorld
+                ? `${activeWorld.booths.filter((b) => b.assignedSlotCount > 0).length} gian`
+                : '—',
+              sub: 'Đang trưng bày trên 3D',
+              accent: '#059669',
             },
             {
-              label: 'Trạng thái AI Consultant',
-              value: aiStatus?.liveGeminiVerified ? 'Gemini Live' : 'Grounded Mock',
-              sub: aiStatus?.liveGeminiVerified ? 'Đã xác thực Live' : 'An toàn 0 chi phí',
-              accent: aiStatus?.liveGeminiVerified ? '#059669' : '#d97706',
+              label: 'Gian trống (Chưa có SP)',
+              value: activeWorld
+                ? `${activeWorld.booths.filter((b) => b.assignedSlotCount === 0).length} gian`
+                : '—',
+              sub: 'Có thể gán SP hoặc xóa an toàn',
+              accent: '#dc2626',
             },
           ].map((kpi) => (
             <div
@@ -344,12 +335,11 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
           }}
         >
           {[
-            { id: 'dashboard', label: `🏛️ Dashboard & Quy hoạch (${activeWorld?.booths.length ?? '…'})` },
-            { id: 'url_import', label: '🔗 Import URL Sản phẩm' },
+            { id: 'dashboard', label: `🏛️ Tạo & Quản lý Triển lãm (${activeWorld?.booths.length ?? '…'})` },
+            { id: 'url_import', label: '🔗 Import URL Website' },
             { id: 'catalog', label: '📚 Kho Sản phẩm' },
             { id: 'companies', label: '🏢 Doanh nghiệp' },
             { id: 'excel', label: '📊 Import Excel' },
-            { id: 'npc_audio', label: '🎙️ NPC & Audio Cache' },
           ].map((t) => {
             const active = activeTab === t.id;
             return (
@@ -393,7 +383,6 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
         )}
         {activeTab === 'catalog' && <ProductCatalog initialCompanyId={selectedCompanyId} />}
         {activeTab === 'excel' && <ExcelImportWizard />}
-        {activeTab === 'npc_audio' && <NpcAudioManager activeWorld={activeWorld} />}
       </div>
     </div>
   );
