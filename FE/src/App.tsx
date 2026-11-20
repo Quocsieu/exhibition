@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ExhibitionPage } from './pages/ExhibitionPage';
 import { AdminPage } from './pages/AdminPage';
 import { DynamicExhibitionPage } from './pages/DynamicExhibitionPage';
+import { AdminV28Page } from './pages/AdminV28Page';
 
 interface ParsedRoute {
-  view: 'expo' | 'admin' | 'dynamic';
+  view: 'expo' | 'admin' | 'admin_v28' | 'dynamic';
   adminBoothId: string | null;
   previewBoothId?: string | null;
 }
@@ -12,6 +13,11 @@ interface ParsedRoute {
 function parseCurrentLocation(): ParsedRoute {
   const hash = window.location.hash || '';
   const pathname = window.location.pathname || '/';
+
+  // 0. Dedicated V28 Admin Portal (/admin/v28 or #/admin/v28)
+  if (/^#\/?admin\/v28\/?$/i.test(hash) || /^\/admin\/v28\/?$/i.test(pathname)) {
+    return { view: 'admin_v28', adminBoothId: null };
+  }
 
   // 1. Check hash routes: #admin, #dashboard, #/admin/booths, #/admin/booths/:boothId/slots
   const hashSlotMatch = hash.match(/^#\/?admin\/booths\/([^/]+)(?:\/slots)?$/i);
@@ -84,14 +90,34 @@ export const App: React.FC = () => {
     setRoute({ view: 'expo', adminBoothId: null, previewBoothId });
   }, []);
 
-  return route.view === 'admin' ? (
+  const openAdminV28 = useCallback(() => {
+    window.history.pushState({}, '', '/admin/v28');
+    window.location.hash = '';
+    setRoute({ view: 'admin_v28', adminBoothId: null });
+  }, []);
+
+  const openDynamicWorld = useCallback(() => {
+    window.history.pushState({}, '', '/?world=dynamic');
+    window.location.hash = '';
+    setRoute({ view: 'dynamic', adminBoothId: null });
+  }, []);
+
+  return route.view === 'admin_v28' ? (
+    <AdminV28Page
+      onOpenDynamicWorld={openDynamicWorld}
+      onOpenLegacyAdmin={() => {
+        window.history.pushState({}, '', '/admin');
+        setRoute({ view: 'admin', adminBoothId: null });
+      }}
+    />
+  ) : route.view === 'admin' ? (
     <AdminPage
       initialBoothId={route.adminBoothId}
       onNavigateBoothSlots={openAdmin}
       onBackToExpo={openExpo}
     />
   ) : route.view === 'dynamic' ? (
-    <DynamicExhibitionPage onOpenAdmin={() => openAdmin(null)} />
+    <DynamicExhibitionPage onOpenAdmin={openAdminV28} />
   ) : (
     <ExhibitionPage
       initialFocusBoothId={route.previewBoothId || null}

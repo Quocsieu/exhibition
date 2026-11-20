@@ -109,6 +109,26 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     loadActiveWorld();
   }, [loadActiveWorld]);
 
+  // Listen for instant cross-tab V28 Admin sync (Publish / Slot Update)
+  useEffect(() => {
+    let ch: BroadcastChannel | null = null;
+    try {
+      ch = new BroadcastChannel('v28-expo-sync');
+      ch.onmessage = () => {
+        loadActiveWorld();
+      };
+    } catch {
+      // BroadcastChannel not supported
+    }
+    return () => {
+      try {
+        ch?.close();
+      } catch {
+        // ignore
+      }
+    };
+  }, [loadActiveWorld]);
+
   const { remoteAvatars, onlineCount, overflowCount, sendMove, sendTeleport } =
     useV28SpatialRealtime({
       versionId: world?.versionId ?? null,

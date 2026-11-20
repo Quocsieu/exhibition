@@ -84,8 +84,18 @@ describe('V28 PHASE 4 — 100 Booths, Spatial AOI, Security Guards, Hotspot Budg
         }
       });
 
-      // Valid move by B along central avenue
-      const deltaPromise = waitForEvent<{ upsert: Array<{ sessionId: string; seq: number }> }>(cA, 'v28:delta');
+      // Valid move by B along central avenue — wait specifically for delta carrying seq === 1
+      const deltaPromise = new Promise<{ upsert: Array<{ sessionId: string; seq: number }> }>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Timeout waiting for seq=1 delta')), 4000);
+        const handler = (d: { upsert: Array<{ sessionId: string; seq: number }> }) => {
+          if (d.upsert.some((u) => u.sessionId === snapB.sessionId && u.seq === 1)) {
+            clearTimeout(timer);
+            cA.off('v28:delta', handler);
+            resolve(d);
+          }
+        };
+        cA.on('v28:delta', handler);
+      });
       cB.emit('v28:move', {
         sessionId: snapB.sessionId,
         versionId: v100.versionId,

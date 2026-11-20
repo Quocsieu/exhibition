@@ -398,11 +398,40 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
         <meshStandardMaterial color="#cbd5e1" roughness={0.9} />
       </mesh>
 
-      {/* Central Main Avenue Strip */}
+      {/* Central Main Avenue Strip + Architectural Border Lines */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 0]} receiveShadow>
         <planeGeometry args={[avenueW - 0.8, world.hallDepth - 2]} />
-        <meshStandardMaterial color="#e0f2fe" roughness={0.65} metalness={0.08} />
+        <meshStandardMaterial color="#e0f2fe" roughness={0.62} metalness={0.08} />
       </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-avenueW / 2 + 0.55, 0.02, 0]}>
+        <planeGeometry args={[0.22, world.hallDepth - 4]} />
+        <meshBasicMaterial color="#0284c7" transparent opacity={0.45} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[avenueW / 2 - 0.55, 0.02, 0]}>
+        <planeGeometry args={[0.22, world.hallDepth - 4]} />
+        <meshBasicMaterial color="#0284c7" transparent opacity={0.45} />
+      </mesh>
+
+      {/* Avenue Landscape Planters flanking the Central Avenue (non-blocking, outside [-3.4, +3.4] walk lane) */}
+      {world.zones.map((z) => {
+        const cz = (z.bounds.minZ + z.bounds.maxZ) / 2;
+        return (
+          <group key={`planter-${z.id}`}>
+            {[-4.25, 4.25].map((px) => (
+              <group key={px} position={[px, 0, cz]}>
+                <mesh position={[0, 0.24, 0]} castShadow>
+                  <boxGeometry args={[0.85, 0.48, 2.2]} />
+                  <meshStandardMaterial color="#f8fafc" roughness={0.5} />
+                </mesh>
+                <mesh position={[0, 0.72, 0]} castShadow>
+                  <boxGeometry args={[0.62, 0.55, 1.85]} />
+                  <meshStandardMaterial color="#15803d" roughness={0.85} />
+                </mesh>
+              </group>
+            ))}
+          </group>
+        );
+      })}
 
       {/* Welcome Area Plaza Highlight */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, welcomeCenterZ]} receiveShadow>

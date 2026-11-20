@@ -246,7 +246,17 @@ export const ParametricExpoRoof: React.FC<ParametricExpoRoofProps> = React.memo(
           frustumCulled={false}
         />
 
-        {/* Overhead Structural Arch Ribs + Longitudinal Purlins (cut away cleanly in Overview) */}
+        {/* Perimeter Side Eave Beams + End Portal Arch Ribs (visible in Overview to frame the dome cleanly without occluding booths!) */}
+        <mesh position={[-spec.hallWidth / 2 + 0.5, spec.eaveHeight, 0]} material={steelMat}>
+          <boxGeometry args={[0.45, 0.55, spec.hallDepth]} />
+        </mesh>
+        <mesh position={[spec.hallWidth / 2 - 0.5, spec.eaveHeight, 0]} material={steelMat}>
+          <boxGeometry args={[0.45, 0.55, spec.hallDepth]} />
+        </mesh>
+        <mesh position={[0, 0, -spec.hallDepth / 2]} geometry={ribGeom} material={steelMat} />
+        <mesh position={[0, 0, spec.hallDepth / 2]} geometry={ribGeom} material={steelMat} />
+
+        {/* Interior Overhead Structural Arch Ribs + Longitudinal Purlins (cut away cleanly in Overview) */}
         <group visible={showOverheadStructure}>
           <instancedMesh
             ref={ribRef}

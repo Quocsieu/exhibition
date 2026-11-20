@@ -212,6 +212,13 @@ export const v28Api = {
         body: JSON.stringify({ productId }),
       }
     ),
+  clearSlot: (boothId: string, slotId: string) =>
+    v28Request<{ cleared: boolean }>(
+      `/booths/${encodeURIComponent(boothId)}/slots/${encodeURIComponent(slotId)}`,
+      {
+        method: 'DELETE',
+      }
+    ),
 
   // Excel Import
   previewExcel: (payload: { companyId: string; filename: string; fileBase64: string }) =>

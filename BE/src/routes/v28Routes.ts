@@ -204,6 +204,11 @@ export function createV28ApiRoutes(
         getParam(req.params.slotId),
         parsed.data.productId
       );
+      try {
+        onLayoutPublished?.(exhibitionService.getActiveExhibitionWorld());
+      } catch {
+        // ignore if no active exhibition yet
+      }
       res.json({ assignment });
     } catch (err) {
       res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
@@ -212,6 +217,11 @@ export function createV28ApiRoutes(
 
   router.delete('/booths/:id/slots/:slotId', requireAdminAuth, (req: Request, res: Response) => {
     v28Db.clearBoothSlot(getParam(req.params.id), getParam(req.params.slotId));
+    try {
+      onLayoutPublished?.(exhibitionService.getActiveExhibitionWorld());
+    } catch {
+      // ignore if no active exhibition yet
+    }
     res.json({ cleared: true });
   });
 
