@@ -86,8 +86,21 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     const onResize = () => {
       setIsMobilePortrait(window.innerWidth <= 640 && window.innerHeight >= window.innerWidth);
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedProduct(null);
+        setNpcPanelOpen(false);
+        setNpcAnimState('idle');
+        setFocusedBooth(null);
+        setCameraMode('explore');
+      }
+    };
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
 
   const loadActiveWorld = useCallback(async () => {

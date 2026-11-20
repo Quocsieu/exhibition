@@ -494,11 +494,27 @@ export interface V28ZoneRecord {
   id: string;
   versionId: string;
   code: string;
+  categoryId?: string | null;
   displayName: string;
   categoryTag: string;
   bounds: V28RectBounds;
   sortOrder: number;
   boothCount: number;
+}
+
+export interface V28ClusterSpec {
+  clusterId: string;
+  clusterIndex: number;
+  zoneCode: string;
+  zoneName: string;
+  categoryId: string | null;
+  centerX: number;
+  centerZ: number;
+  width: number;
+  depth: number;
+  boothCount: number;
+  variationSeed: number;
+  centerpieceKind: 'medallion_oasis' | 'landscape_lounge' | 'interactive_corner' | 'cafe_rest';
 }
 
 export interface V28BoothPlacementView {
@@ -564,6 +580,7 @@ export interface V28ExhibitionVersionDetail {
     ribSpacing: number;
     skylightRatio: number;
   };
+  clusters?: V28ClusterSpec[];
   zones: V28ZoneRecord[];
   booths: V28BoothPlacementView[];
   validation: {

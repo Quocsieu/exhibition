@@ -6,6 +6,7 @@ import {
   generateDynamicExhibitionLayout,
   validateExhibitionLayout,
   getBoothWorldAabb,
+  type GeneratedClusterSpec,
   type GeneratedExhibitionLayout,
   type LayoutGeneratorInput,
   type LayoutValidationResult,
@@ -42,6 +43,7 @@ export interface ExhibitionZoneRecord {
   id: string;
   versionId: string;
   code: string;
+  categoryId: string | null;
   displayName: string;
   categoryTag: string;
   bounds: RectBounds;
@@ -104,6 +106,7 @@ export interface ExhibitionVersionDetail {
   cameraOverviewBounds: GeneratedExhibitionLayout['cameraOverviewBounds'];
   roofBounds: RoofBoundsMetadata;
   walkwayGraph: GeneratedExhibitionLayout['walkwayGraph'];
+  clusters: GeneratedClusterSpec[];
   zones: ExhibitionZoneRecord[];
   booths: ExhibitionBoothPlacementView[];
   validation: LayoutValidationResult;
@@ -247,7 +250,30 @@ export class V28ExhibitionService {
       throw httpError(404, 'Không tìm thấy triển lãm.');
     }
 
-    const layout = generateDynamicExhibitionLayout(input);
+    // Phase 8.3: Auto-derive Category-Based Zones (`Khu + Tên danh mục`) from DB categories when not explicitly supplied
+    let effectiveCategoryZones = input.categoryZones;
+    if (!effectiveCategoryZones || effectiveCategoryZones.length === 0) {
+      const catRows = this.db
+        .prepare('SELECT id, name FROM categories ORDER BY sort_order ASC, name ASC')
+        .all() as Array<{ id: string; name: string }>;
+      if (catRows.length > 0) {
+        const count = Math.max(1, Math.floor(input.targetBoothCount));
+        const activeCatCount = Math.min(catRows.length, Math.max(1, Math.ceil(count / 12)));
+        const chosen = catRows.slice(0, activeCatCount);
+        const base = Math.floor(count / chosen.length);
+        let rem = count % chosen.length;
+        effectiveCategoryZones = chosen.map((c) => {
+          const extra = rem > 0 ? 1 : 0;
+          if (rem > 0) rem--;
+          return { categoryId: c.id, categoryName: c.name, boothCount: base + extra };
+        });
+      }
+    }
+
+    const layout = generateDynamicExhibitionLayout({
+      ...input,
+      categoryZones: effectiveCategoryZones,
+    });
     const activeCompanies = this.v28Db.listCompanies({ status: 'active' });
     if (activeCompanies.length === 0) {
       throw httpError(400, 'Cần có ít nhất 1 doanh nghiệp đang hoạt động để sinh layout.');
@@ -365,27 +391,31 @@ export class V28ExhibitionService {
             directoryPoint: layout.directoryPoint,
             cameraOverviewBounds: layout.cameraOverviewBounds,
             walkwayGraph: layout.walkwayGraph,
+            clusters: layout.clusters,
           }),
           JSON.stringify(layout.roofBounds)
         );
 
-      // 4. Insert zones
+      // 4. Insert zones (preserving stable category_id)
       const zoneIdByCode = new Map<string, string>();
       const insertZone = this.db.prepare(`
-        INSERT INTO zones (id, version_id, code, display_name, category_tag, bounds_json, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO zones (id, version_id, code, display_name, category_tag, bounds_json, sort_order, category_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const z of layout.zones) {
         const zId = `zone-${versionId}-${z.code}`;
         const preserved = existingZoneNames.get(z.code);
+        const keepPreservedName =
+          preserved && (!z.categoryId || !/^Khu\s+[A-Z]+$/i.test(preserved.displayName));
         insertZone.run(
           zId,
           versionId,
           z.code,
-          preserved?.displayName || z.displayName,
-          preserved?.categoryTag || z.categoryTag,
+          keepPreservedName ? preserved.displayName : z.displayName,
+          keepPreservedName ? preserved.categoryTag : z.categoryTag,
           JSON.stringify(z.bounds),
-          z.sortOrder
+          z.sortOrder,
+          z.categoryId || null
         );
         zoneIdByCode.set(z.code, zId);
       }
@@ -553,6 +583,7 @@ export class V28ExhibitionService {
       id: String(z.id),
       versionId,
       code: String(z.code),
+      categoryId: z.category_id ? String(z.category_id) : null,
       displayName: String(z.display_name),
       categoryTag: String(z.category_tag || ''),
       bounds: JSON.parse(String(z.bounds_json || '{}')),
@@ -560,22 +591,32 @@ export class V28ExhibitionService {
       boothCount: boothCountByZone.get(String(z.id)) || 0,
     }));
 
+    const clusters: GeneratedClusterSpec[] = Array.isArray(layoutMeta.clusters)
+      ? layoutMeta.clusters
+      : [];
+
     const validation = validateExhibitionLayout({
       hallBounds: layoutMeta.hallBounds,
       centralAvenueBounds: layoutMeta.centralAvenueBounds,
       welcomeAreaBounds: layoutMeta.welcomeAreaBounds,
       walkwayGraph: layoutMeta.walkwayGraph,
+      clusters,
       zones: zones.map((z) => ({
         code: z.code,
+        categoryId: z.categoryId,
         displayName: z.displayName,
         categoryTag: z.categoryTag,
         bounds: z.bounds,
         sortOrder: z.sortOrder,
         boothCount: z.boothCount,
+        clusterCount: clusters.filter((c) => c.zoneCode === z.code).length || 1,
       })),
       placements: booths.map((b) => ({
         slotIndex: b.slotIndex,
+        clusterId: 'cluster-01',
+        clusterIndex: 0,
         zoneCode: b.zoneCode,
+        categoryId: null,
         positionX: b.positionX,
         positionZ: b.positionZ,
         rotationY: b.rotationY,
@@ -607,6 +648,7 @@ export class V28ExhibitionService {
       cameraOverviewBounds: layoutMeta.cameraOverviewBounds,
       roofBounds,
       walkwayGraph: layoutMeta.walkwayGraph,
+      clusters,
       zones,
       booths,
       validation,

@@ -319,7 +319,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({ 
           <div style={{ fontSize: 12, color: '#64748b' }}>Tổng gian hàng (V28)</div>
           <div style={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{stats.totalBooths}</div>
           <div style={{ fontSize: 12, color: '#0284c7' }}>
-            {stats.zoneCount} phân khu ({versionDetail?.zones[0]?.code || 'A'}–{versionDetail?.zones[versionDetail.zones.length - 1]?.code || 'A'})
+            {stats.zoneCount} khu danh mục · {versionDetail?.clusters?.length || Math.ceil(stats.totalBooths / 6)} cụm 6 gian
           </div>
         </div>
         <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0' }}>

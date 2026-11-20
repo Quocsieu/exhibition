@@ -1,14 +1,11 @@
 /**
- * GRAND EXPO WORLD V28 — DYNAMIC LAYOUT GENERATOR
+ * GRAND EXPO WORLD V28 — PHASE 8 DYNAMIC SIX-BOOTH CLUSTER LAYOUT GENERATOR
  *
- * Pure, deterministic, mathematically verified exhibition hall & booth layout generator.
- * Uses real measured bounding-box footprints of the 6 V27.4 GLB archetypes:
- *   - signature_ring  (living):   9.39m x 6.91m x 4.02m
- *   - organic_flow    (design):   6.72m x 5.19m x 3.82m
- *   - grand_portal    (tech):     6.72m x 5.19m x 3.80m
- *   - wave_pavilion   (energy):   6.72m x 6.63m x 5.68m
- *   - gallery_arch    (coffee):   6.72m x 5.19m x 3.78m
- *   - dynamic_frame   (robotics): 6.87m x 5.19m x 4.23m
+ * Uses V27.5's iconic U-Shaped 6-Booth Courtyard as the modular spatial unit:
+ *   - Max 6 booths per cluster, all facing INWARD toward a spacious 25m+ cluster plaza.
+ *   - Uses real measured bounding-box footprints of the 6 V27.4 GLB archetypes.
+ *   - Supports Category-Based Zones (`Khu + Category Name`), deterministic cluster centerpiece
+ *     variations, zero fake booths for partial clusters, 0 overlaps, and 100% BFS walkway connectivity.
  */
 
 export type V28ArchetypeId =
@@ -24,9 +21,9 @@ export interface ArchetypeFootprintSpec {
   theme: 'living' | 'design' | 'tech' | 'energy' | 'coffee' | 'robotics';
   label: string;
   glbPath: string;
-  width: number; // local X width (m)
-  depth: number; // local Z depth (m)
-  height: number; // local Y height (m)
+  width: number;
+  depth: number;
+  height: number;
 }
 
 export const V28_ARCHETYPES: readonly ArchetypeFootprintSpec[] = [
@@ -97,29 +94,62 @@ export interface RectBounds {
   maxZ: number;
 }
 
+export interface CategoryZoneInput {
+  categoryId: string;
+  categoryName: string;
+  boothCount: number;
+}
+
 export interface LayoutGeneratorInput {
   targetBoothCount: number;
-  preferredZoneCapacity?: number; // default 10
+  preferredZoneCapacity?: number;
   hallStyle?: 'grand_expo' | 'modular_pavilion';
-  mainAvenueWidth?: number; // default 10.0m
-  aisleWidth?: number; // default 8.4m (focus clearance guaranteed)
-  perimeterWidth?: number; // default 6.0m
+  mainAvenueWidth?: number;
+  aisleWidth?: number;
+  perimeterWidth?: number;
   layoutSeed?: number;
+  categoryZones?: CategoryZoneInput[];
   reservedAreas?: Array<{ id: string; label: string; bounds: RectBounds }>;
 }
 
+export type ClusterCenterpieceKind =
+  | 'medallion_oasis'
+  | 'landscape_lounge'
+  | 'interactive_corner'
+  | 'cafe_rest';
+
+export interface GeneratedClusterSpec {
+  clusterId: string;
+  clusterIndex: number;
+  zoneCode: string;
+  zoneName: string;
+  categoryId: string | null;
+  centerX: number;
+  centerZ: number;
+  width: number;
+  depth: number;
+  boothCount: number;
+  variationSeed: number;
+  centerpieceKind: ClusterCenterpieceKind;
+}
+
 export interface GeneratedZoneSpec {
-  code: string; // A, B, C...
-  displayName: string; // Khu A, Khu B...
+  code: string;
+  categoryId: string | null;
+  displayName: string;
   categoryTag: string;
   bounds: RectBounds;
   sortOrder: number;
   boothCount: number;
+  clusterCount: number;
 }
 
 export interface GeneratedBoothPlacement {
   slotIndex: number;
+  clusterId: string;
+  clusterIndex: number;
   zoneCode: string;
+  categoryId: string | null;
   positionX: number;
   positionZ: number;
   rotationY: number;
@@ -134,7 +164,7 @@ export interface WalkwayNode {
   id: string;
   x: number;
   z: number;
-  kind: 'spawn' | 'avenue' | 'aisle' | 'perimeter' | 'approach';
+  kind: 'spawn' | 'avenue' | 'aisle' | 'perimeter' | 'approach' | 'cluster_center';
   boothSlotIndex?: number;
 }
 
@@ -154,7 +184,8 @@ export interface RoofBoundsMetadata {
 }
 
 export interface GeneratedExhibitionLayout {
-  config: Required<Omit<LayoutGeneratorInput, 'reservedAreas'>> & {
+  config: Required<Omit<LayoutGeneratorInput, 'reservedAreas' | 'categoryZones'>> & {
+    categoryZones: CategoryZoneInput[];
     reservedAreas: Array<{ id: string; label: string; bounds: RectBounds }>;
   };
   hallWidth: number;
@@ -165,6 +196,7 @@ export interface GeneratedExhibitionLayout {
   welcomeAreaBounds: RectBounds;
   spawnPoint: { x: number; z: number; rotationY: number };
   directoryPoint: { x: number; z: number };
+  clusters: GeneratedClusterSpec[];
   zones: GeneratedZoneSpec[];
   placements: GeneratedBoothPlacement[];
   walkwayGraph: WalkwayGraph;
@@ -184,6 +216,7 @@ export interface LayoutValidationResult {
   stats: {
     boothCount: number;
     zoneCount: number;
+    clusterCount: number;
     overlapCount: number;
     outOfBoundsCount: number;
     blockedWalkwayCount: number;
@@ -192,24 +225,45 @@ export interface LayoutValidationResult {
   };
 }
 
-// Unified structural constants derived from real GLB footprints
-const MAX_ARCHETYPE_WIDTH = Math.max(...V28_ARCHETYPES.map((a) => a.width)); // 9.4m
-const MAX_ARCHETYPE_DEPTH = Math.max(...V28_ARCHETYPES.map((a) => a.depth)); // 6.95m
-export const BOOTH_CLEARANCE_X = 2.0; // gap between adjacent booths in same row
-export const BOOTH_CLEARANCE_BACK = 3.2; // service/cross aisle between back-to-back rows
-export const CELL_WIDTH = Number((MAX_ARCHETYPE_WIDTH + 0.6).toFixed(2)); // 10.0m envelope
-export const CELL_DEPTH = Number((MAX_ARCHETYPE_DEPTH + 0.45).toFixed(2)); // 7.4m envelope
-export const PITCH_X = Number((CELL_WIDTH + BOOTH_CLEARANCE_X).toFixed(2)); // 12.0m
-export const WELCOME_AREA_DEPTH = 14.0; // unobstructed South welcome & check-in plaza
-export const APPROACH_OFFSET_M = 2.2; // visitor standing distance in front of booth face
-export const FOCUS_CAMERA_OFFSET_M = 4.2; // camera focus distance in front of booth face
+// ============================================================================
+// V27.5 SIX-BOOTH U-SHAPED COURTYARD CLUSTER TEMPLATE (Local Coordinates)
+// Derived directly from FE/src/scene/worldLayout.ts V27_BOOTH_LAYOUT_SPECS
+// ============================================================================
+export const MAX_BOOTHS_PER_CLUSTER = 6;
+export const CLUSTER_WIDTH = 44.0;
+export const CLUSTER_DEPTH = 38.0;
+export const CLUSTER_GAP_X = 8.0;
+export const CLUSTER_GAP_Z = 9.0;
+export const WELCOME_AREA_DEPTH = 18.0;
+export const APPROACH_OFFSET_M = 2.4;
+export const FOCUS_CAMERA_OFFSET_M = 4.4;
+
+const V27_CLUSTER_SLOTS: ReadonlyArray<{
+  localX: number;
+  localZ: number;
+  rotationY: number;
+  defaultArchetype: V28ArchetypeId;
+}> = [
+  { localX: -7.2, localZ: -13.6, rotationY: 0, defaultArchetype: 'signature_ring' },
+  { localX: 7.2, localZ: -13.6, rotationY: 0, defaultArchetype: 'organic_flow' },
+  { localX: -16.0, localZ: -4.2, rotationY: Number((Math.PI / 2).toFixed(4)), defaultArchetype: 'grand_portal' },
+  { localX: 16.0, localZ: -4.2, rotationY: Number((-Math.PI / 2).toFixed(4)), defaultArchetype: 'wave_pavilion' },
+  { localX: -16.0, localZ: 7.2, rotationY: Number((Math.PI / 2).toFixed(4)), defaultArchetype: 'gallery_arch' },
+  { localX: 16.0, localZ: 7.2, rotationY: Number((-Math.PI / 2).toFixed(4)), defaultArchetype: 'dynamic_frame' },
+];
+
+const CENTERPIECE_VARIANTS: readonly ClusterCenterpieceKind[] = [
+  'medallion_oasis',
+  'landscape_lounge',
+  'interactive_corner',
+  'cafe_rest',
+];
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
 function zoneCodeForIndex(index: number): string {
-  // 0..25 -> A..Z, 26+ -> AA, AB...
   let n = index;
   let code = '';
   do {
@@ -219,9 +273,6 @@ function zoneCodeForIndex(index: number): string {
   return code;
 }
 
-/**
- * Compute world-space AABB for a booth placement taking rotationY into account.
- */
 export function getBoothWorldAabb(
   positionX: number,
   positionZ: number,
@@ -262,7 +313,6 @@ function segmentIntersectsRect(
   z2: number,
   r: RectBounds
 ): boolean {
-  // Liang-Barsky line-rectangle intersection test
   const dx = x2 - x1;
   const dz = z2 - z1;
   let t0 = 0;
@@ -291,54 +341,109 @@ function segmentIntersectsRect(
 }
 
 /**
- * Determine optimal number of booths per wing-row (columns per side of central avenue)
- * so the hall keeps a balanced architectural aspect ratio across 6..200+ booths.
+ * Build deterministic Six-Booth U-Shaped Courtyard Cluster Layout.
+ * - 1..6 booths -> 1 central courtyard cluster (matching V27.5 spirit!)
+ * - 7..200 booths -> symmetrical West & East wing clusters flanking Central Main Avenue.
+ * - Supports Category-Based Zones (`Khu + Category Name`) or fallback balanced zones.
  */
-function computeColumnsPerWing(targetBoothCount: number): number {
-  if (targetBoothCount <= 6) return 2;
-  if (targetBoothCount <= 12) return 2;
-  if (targetBoothCount <= 24) return 3;
-  if (targetBoothCount <= 48) return 4;
-  if (targetBoothCount <= 80) return 5;
-  if (targetBoothCount <= 120) return 5;
-  return 6;
-}
-
 export function generateDynamicExhibitionLayout(
   input: LayoutGeneratorInput
 ): GeneratedExhibitionLayout {
   const targetBoothCount = Math.max(1, Math.min(500, Math.floor(input.targetBoothCount)));
-  const preferredZoneCapacity = Math.max(4, Math.min(50, Math.floor(input.preferredZoneCapacity ?? 10)));
+  const preferredZoneCapacity = Math.max(4, Math.min(50, Math.floor(input.preferredZoneCapacity ?? 12)));
   const hallStyle = input.hallStyle ?? 'grand_expo';
-  const mainAvenueWidth = Math.max(8.0, input.mainAvenueWidth ?? 10.0);
-  const aisleWidth = Math.max(7.6, input.aisleWidth ?? 8.4);
-  const perimeterWidth = Math.max(5.0, input.perimeterWidth ?? 6.0);
+  const mainAvenueWidth = Math.max(10.0, input.mainAvenueWidth ?? 12.0);
+  const aisleWidth = Math.max(8.0, input.aisleWidth ?? 8.4);
+  const perimeterWidth = Math.max(6.0, input.perimeterWidth ?? 7.0);
   const layoutSeed = input.layoutSeed ?? 28;
   const reservedAreas = input.reservedAreas ?? [];
+  const categoryZones = input.categoryZones ?? [];
 
-  const colsPerWing = computeColumnsPerWing(targetBoothCount);
-  const boothsPerRow = colsPerWing * 2; // West wing + East wing
-  const boothsPerCorridorStrip = boothsPerRow * 2; // North row facing +Z, South row facing -Z
-  const numCorridorStrips = Math.ceil(targetBoothCount / boothsPerCorridorStrip);
+  // 1. Partition total booths into Cluster Specs (max 6 booths per cluster, zero fake booths!)
+  interface PendingCluster {
+    zoneCode: string;
+    zoneName: string;
+    categoryId: string | null;
+    categoryTag: string;
+    boothCount: number;
+  }
+  const pendingClusters: PendingCluster[] = [];
 
-  // Corridor strip Z geometry:
-  // Inside each strip:
-  //   northRowCenterZ = stripTopZ + CELL_DEPTH / 2        (faces +Z into aisle, rotY = 0)
-  //   aisleCenterZ    = stripTopZ + CELL_DEPTH + aisleWidth / 2
-  //   southRowCenterZ = stripTopZ + CELL_DEPTH + aisleWidth + CELL_DEPTH / 2 (faces -Z into aisle, rotY = PI)
-  //   stripHeight     = 2 * CELL_DEPTH + aisleWidth
-  const stripHeight = round2(2 * CELL_DEPTH + aisleWidth);
-  const stripPitchZ = round2(stripHeight + BOOTH_CLEARANCE_BACK);
+  if (categoryZones.length > 0) {
+    let zIdx = 0;
+    let remainingGlobal = targetBoothCount;
+    for (const cz of categoryZones) {
+      if (remainingGlobal <= 0) break;
+      const countForCat = Math.min(remainingGlobal, Math.max(0, Math.floor(cz.boothCount)));
+      if (countForCat <= 0) continue;
+      remainingGlobal -= countForCat;
+      const code = zoneCodeForIndex(zIdx++);
+      const displayName = cz.categoryName.startsWith('Khu ') ? cz.categoryName : `Khu ${cz.categoryName}`;
+      let rem = countForCat;
+      while (rem > 0) {
+        const take = Math.min(MAX_BOOTHS_PER_CLUSTER, rem);
+        pendingClusters.push({
+          zoneCode: code,
+          zoneName: displayName,
+          categoryId: cz.categoryId,
+          categoryTag: cz.categoryName,
+          boothCount: take,
+        });
+        rem -= take;
+      }
+    }
+    // If sum(categoryZones) < targetBoothCount, add remaining in a General zone
+    if (remainingGlobal > 0) {
+      const code = zoneCodeForIndex(zIdx++);
+      while (remainingGlobal > 0) {
+        const take = Math.min(MAX_BOOTHS_PER_CLUSTER, remainingGlobal);
+        pendingClusters.push({
+          zoneCode: code,
+          zoneName: 'Khu Tổng hợp',
+          categoryId: null,
+          categoryTag: 'Tổng hợp',
+          boothCount: take,
+        });
+        remainingGlobal -= take;
+      }
+    }
+  } else {
+    const totalClusters = Math.ceil(targetBoothCount / MAX_BOOTHS_PER_CLUSTER);
+    const clustersPerZone = Math.max(1, Math.ceil(preferredZoneCapacity / MAX_BOOTHS_PER_CLUSTER));
+    let remaining = targetBoothCount;
+    for (let c = 0; c < totalClusters; c++) {
+      const take = Math.min(MAX_BOOTHS_PER_CLUSTER, remaining);
+      remaining -= take;
+      const zIdx = Math.floor(c / clustersPerZone);
+      const code = zoneCodeForIndex(zIdx);
+      pendingClusters.push({
+        zoneCode: code,
+        zoneName: `Khu ${code}`,
+        categoryId: null,
+        categoryTag: `Phân khu ${code}`,
+        boothCount: take,
+      });
+    }
+  }
 
-  const halfWingSpanX = round2(colsPerWing * PITCH_X);
-  const halfHallWidth = round2(mainAvenueWidth / 2 + halfWingSpanX + perimeterWidth);
+  const numClusters = pendingClusters.length;
+  const singleCentered = numClusters === 1;
+
+  // Grid dimensions for clusters
+  const colsPerWing = singleCentered ? 1 : numClusters <= 4 ? 1 : numClusters <= 16 ? 2 : 3;
+  const clustersPerRow = singleCentered ? 1 : colsPerWing * 2;
+  const numRows = Math.ceil(numClusters / clustersPerRow);
+
+  const pitchX = CLUSTER_WIDTH + CLUSTER_GAP_X;
+  const pitchZ = CLUSTER_DEPTH + CLUSTER_GAP_Z;
+
+  const halfHallWidth = singleCentered
+    ? round2(CLUSTER_WIDTH / 2 + perimeterWidth)
+    : round2(mainAvenueWidth / 2 + colsPerWing * CLUSTER_WIDTH + (colsPerWing - 1) * CLUSTER_GAP_X + CLUSTER_GAP_X / 2 + perimeterWidth);
   const hallWidth = round2(halfHallWidth * 2);
 
-  // Total Z span from North wall to South wall
-  const boothsTotalDepthZ = round2(
-    numCorridorStrips * stripHeight + Math.max(0, numCorridorStrips - 1) * BOOTH_CLEARANCE_BACK
-  );
-  const hallDepth = round2(perimeterWidth + boothsTotalDepthZ + WELCOME_AREA_DEPTH + perimeterWidth);
+  const clustersTotalDepthZ = round2(numRows * CLUSTER_DEPTH + Math.max(0, numRows - 1) * CLUSTER_GAP_Z);
+  const hallDepth = round2(perimeterWidth + clustersTotalDepthZ + WELCOME_AREA_DEPTH + perimeterWidth);
   const halfHallDepth = round2(hallDepth / 2);
 
   const hallBounds: RectBounds = {
@@ -349,171 +454,204 @@ export function generateDynamicExhibitionLayout(
   };
 
   const walkableBounds: RectBounds = {
-    minX: round2(hallBounds.minX + 1.2),
-    maxX: round2(hallBounds.maxX - 1.2),
-    minZ: round2(hallBounds.minZ + 1.2),
-    maxZ: round2(hallBounds.maxZ - 1.2),
+    minX: round2(hallBounds.minX + 1.4),
+    maxX: round2(hallBounds.maxX - 1.4),
+    minZ: round2(hallBounds.minZ + 1.4),
+    maxZ: round2(hallBounds.maxZ - 1.4),
   };
 
-  const centralAvenueBounds: RectBounds = {
-    minX: round2(-mainAvenueWidth / 2),
-    maxX: round2(mainAvenueWidth / 2),
-    minZ: hallBounds.minZ,
-    maxZ: hallBounds.maxZ,
-  };
+  // In single-cluster mode (1..6 booths), Central Avenue runs from South Welcome into the courtyard center
+  const centralAvenueBounds: RectBounds = singleCentered
+    ? { minX: -5.1, maxX: 5.1, minZ: -8.0, maxZ: hallBounds.maxZ }
+    : { minX: round2(-mainAvenueWidth / 2), maxX: round2(mainAvenueWidth / 2), minZ: hallBounds.minZ, maxZ: hallBounds.maxZ };
 
-  const firstStripTopZ = round2(hallBounds.minZ + perimeterWidth);
-  const boothsEndZ = round2(firstStripTopZ + boothsTotalDepthZ);
+  const firstRowTopZ = round2(hallBounds.minZ + perimeterWidth);
+  const clustersEndZ = round2(firstRowTopZ + clustersTotalDepthZ);
 
   const welcomeAreaBounds: RectBounds = {
     minX: round2(hallBounds.minX + perimeterWidth),
     maxX: round2(hallBounds.maxX - perimeterWidth),
-    minZ: boothsEndZ,
+    minZ: clustersEndZ,
     maxZ: round2(hallBounds.maxZ - perimeterWidth),
   };
 
   const spawnPoint = {
     x: 0,
-    z: round2(hallBounds.maxZ - perimeterWidth - 3.5),
-    rotationY: Math.PI, // facing North (-Z) straight down Central Avenue
+    z: round2(hallBounds.maxZ - perimeterWidth - 4.0),
+    rotationY: Math.PI,
   };
 
   const directoryPoint = {
     x: round2(-mainAvenueWidth / 2 - 2.4),
-    z: round2(boothsEndZ + WELCOME_AREA_DEPTH * 0.45),
+    z: round2(clustersEndZ + WELCOME_AREA_DEPTH * 0.48),
   };
 
-  // Generate booth slots in corridor-by-corridor order
+  // 2. Place clusters & their <= 6 booths
+  const clusters: GeneratedClusterSpec[] = [];
   const placements: GeneratedBoothPlacement[] = [];
-  const aisleCenterZs: number[] = [];
+  const rowBoulevardZs: number[] = [];
 
-  for (let stripIdx = 0; stripIdx < numCorridorStrips; stripIdx++) {
-    const stripTopZ = round2(firstStripTopZ + stripIdx * stripPitchZ);
-    const northRowZ = round2(stripTopZ + CELL_DEPTH / 2);
-    const aisleCenterZ = round2(stripTopZ + CELL_DEPTH + aisleWidth / 2);
-    const southRowZ = round2(stripTopZ + CELL_DEPTH + aisleWidth + CELL_DEPTH / 2);
-    aisleCenterZs.push(aisleCenterZ);
+  for (let row = 0; row < numRows; row++) {
+    const centerZ = round2(firstRowTopZ + row * pitchZ + CLUSTER_DEPTH / 2);
+    // Horizontal visitor boulevard just South of each cluster row (open side of U-shaped courtyard!)
+    const southBoulevardZ = round2(centerZ + CLUSTER_DEPTH / 2 + CLUSTER_GAP_Z / 2);
+    rowBoulevardZs.push(southBoulevardZ);
 
-    // Order within strip: North-West, North-East, South-West, South-East
-    const rowSpecs: Array<{ z: number; rotY: number }> = [
-      { z: northRowZ, rotY: 0 }, // faces +Z (toward aisle)
-      { z: southRowZ, rotY: Number(Math.PI.toFixed(4)) }, // faces -Z (toward aisle)
-    ];
+    for (let colIdx = 0; colIdx < clustersPerRow; colIdx++) {
+      const cIdx = row * clustersPerRow + colIdx;
+      if (cIdx >= numClusters) break;
+      const pc = pendingClusters[cIdx];
 
-    for (const row of rowSpecs) {
-      // West wing (closest to central avenue first, going outward)
-      for (let col = 0; col < colsPerWing; col++) {
-        if (placements.length >= targetBoothCount) break;
-        const px = round2(-(mainAvenueWidth / 2 + BOOTH_CLEARANCE_X / 2 + CELL_WIDTH / 2 + col * PITCH_X));
-        placements.push(makePlacement(placements.length, px, row.z, row.rotY, preferredZoneCapacity, layoutSeed));
+      let centerX: number;
+      if (singleCentered) {
+        centerX = 0;
+      } else {
+        const isWest = colIdx < colsPerWing;
+        const wingCol = isWest ? colIdx : colIdx - colsPerWing;
+        const offsetFromAvenue = mainAvenueWidth / 2 + CLUSTER_GAP_X / 2 + CLUSTER_WIDTH / 2 + wingCol * pitchX;
+        centerX = round2(isWest ? -offsetFromAvenue : offsetFromAvenue);
       }
-      // East wing (closest to central avenue first, going outward)
-      for (let col = 0; col < colsPerWing; col++) {
-        if (placements.length >= targetBoothCount) break;
-        const px = round2(mainAvenueWidth / 2 + BOOTH_CLEARANCE_X / 2 + CELL_WIDTH / 2 + col * PITCH_X);
-        placements.push(makePlacement(placements.length, px, row.z, row.rotY, preferredZoneCapacity, layoutSeed));
+
+      const clusterId = `cluster-${String(cIdx + 1).padStart(2, '0')}`;
+      const variationSeed = (cIdx * 37 + layoutSeed) % 997;
+      const centerpieceKind = CENTERPIECE_VARIANTS[(cIdx + layoutSeed) % CENTERPIECE_VARIANTS.length];
+
+      clusters.push({
+        clusterId,
+        clusterIndex: cIdx,
+        zoneCode: pc.zoneCode,
+        zoneName: pc.zoneName,
+        categoryId: pc.categoryId,
+        centerX,
+        centerZ,
+        width: CLUSTER_WIDTH,
+        depth: CLUSTER_DEPTH,
+        boothCount: pc.boothCount,
+        variationSeed,
+        centerpieceKind,
+      });
+
+      for (let localSlot = 0; localSlot < pc.boothCount; localSlot++) {
+        const tmpl = V27_CLUSTER_SLOTS[localSlot];
+        const archSpec = ARCHETYPE_MAP[tmpl.defaultArchetype];
+        const px = round2(centerX + tmpl.localX);
+        const pz = round2(centerZ + tmpl.localZ);
+        const rotY = tmpl.rotationY;
+        const fx = Math.sin(rotY);
+        const fz = Math.cos(rotY);
+
+        placements.push({
+          slotIndex: placements.length,
+          clusterId,
+          clusterIndex: cIdx,
+          zoneCode: pc.zoneCode,
+          categoryId: pc.categoryId,
+          positionX: px,
+          positionZ: pz,
+          rotationY: rotY,
+          archetypeId: archSpec.id,
+          footprintWidth: archSpec.width,
+          footprintDepth: archSpec.depth,
+          approachPoint: {
+            x: round2(px + fx * (archSpec.depth / 2 + APPROACH_OFFSET_M)),
+            z: round2(pz + fz * (archSpec.depth / 2 + APPROACH_OFFSET_M)),
+          },
+          focusCameraPoint: {
+            x: round2(px + fx * (archSpec.depth / 2 + FOCUS_CAMERA_OFFSET_M)),
+            z: round2(pz + fz * (archSpec.depth / 2 + FOCUS_CAMERA_OFFSET_M)),
+          },
+        });
       }
     }
   }
 
-  // Build Zone summaries with exact bounding boxes enclosing each zone's booths
-  const zoneCount = Math.ceil(targetBoothCount / preferredZoneCapacity);
-  const zones: GeneratedZoneSpec[] = [];
-  for (let zIdx = 0; zIdx < zoneCount; zIdx++) {
-    const code = zoneCodeForIndex(zIdx);
-    const zoneBooths = placements.filter((p) => p.zoneCode === code);
+  // 3. Build Zone summaries
+  const zoneOrder: string[] = [];
+  const zoneMetaByCode = new Map<string, { displayName: string; categoryId: string | null; categoryTag: string }>();
+  for (const pc of pendingClusters) {
+    if (!zoneMetaByCode.has(pc.zoneCode)) {
+      zoneOrder.push(pc.zoneCode);
+      zoneMetaByCode.set(pc.zoneCode, {
+        displayName: pc.zoneName,
+        categoryId: pc.categoryId,
+        categoryTag: pc.categoryTag,
+      });
+    }
+  }
+
+  const zones: GeneratedZoneSpec[] = zoneOrder.map((code, idx) => {
+    const meta = zoneMetaByCode.get(code)!;
+    const zClusters = clusters.filter((c) => c.zoneCode === code);
+    const zBooths = placements.filter((p) => p.zoneCode === code);
     let minX = Infinity;
     let maxX = -Infinity;
     let minZ = Infinity;
     let maxZ = -Infinity;
-    for (const b of zoneBooths) {
-      const aabb = getBoothWorldAabb(b.positionX, b.positionZ, b.rotationY, b.archetypeId, 1.0);
-      minX = Math.min(minX, aabb.minX);
-      maxX = Math.max(maxX, aabb.maxX);
-      minZ = Math.min(minZ, aabb.minZ);
-      maxZ = Math.max(maxZ, aabb.maxZ);
+    for (const c of zClusters) {
+      minX = Math.min(minX, c.centerX - c.width / 2);
+      maxX = Math.max(maxX, c.centerX + c.width / 2);
+      minZ = Math.min(minZ, c.centerZ - c.depth / 2);
+      maxZ = Math.max(maxZ, c.centerZ + c.depth / 2);
     }
-    zones.push({
+    return {
       code,
-      displayName: `Khu ${code}`,
-      categoryTag: zIdx === 0 ? 'Tổng hợp' : `Phân khu ${code}`,
-      bounds: {
-        minX: round2(minX),
-        maxX: round2(maxX),
-        minZ: round2(minZ),
-        maxZ: round2(maxZ),
-      },
-      sortOrder: zIdx + 1,
-      boothCount: zoneBooths.length,
-    });
-  }
+      categoryId: meta.categoryId,
+      displayName: meta.displayName,
+      categoryTag: meta.categoryTag,
+      bounds: { minX: round2(minX), maxX: round2(maxX), minZ: round2(minZ), maxZ: round2(maxZ) },
+      sortOrder: idx + 1,
+      boothCount: zBooths.length,
+      clusterCount: zClusters.length,
+    };
+  });
 
-  // Build connected walkway graph: Spawn -> Central Avenue Spine -> Horizontal Aisles -> Booth Approaches
+  // 4. Build BFS-connected Walkway Graph:
+  //    Spawn -> Central Avenue Spine -> Row South Boulevards -> Cluster Courtyard Centers -> Booth Approaches
   const nodes: WalkwayNode[] = [];
   const edges: Array<[string, string]> = [];
-
   const spawnNodeId = 'walk-spawn';
   nodes.push({ id: spawnNodeId, x: spawnPoint.x, z: spawnPoint.z, kind: 'spawn' });
 
   let prevSpineId = spawnNodeId;
-  // Walk from South (nearest spawn) to North along Central Avenue (x = 0)
-  for (let i = aisleCenterZs.length - 1; i >= 0; i--) {
-    const az = aisleCenterZs[i];
-    const spineId = `walk-avenue-${i}`;
-    nodes.push({ id: spineId, x: 0, z: az, kind: 'avenue' });
+  for (let row = numRows - 1; row >= 0; row--) {
+    const blvdZ = rowBoulevardZs[row];
+    const spineId = `walk-avenue-row-${row}`;
+    nodes.push({ id: spineId, x: 0, z: blvdZ, kind: 'avenue' });
     edges.push([prevSpineId, spineId]);
     prevSpineId = spineId;
 
-    // Connect West & East aisle endpoints
-    const westEndId = `walk-aisle-${i}-west`;
-    const eastEndId = `walk-aisle-${i}-east`;
-    const westX = round2(hallBounds.minX + perimeterWidth / 2);
-    const eastX = round2(hallBounds.maxX - perimeterWidth / 2);
-    nodes.push({ id: westEndId, x: westX, z: az, kind: 'perimeter' });
-    nodes.push({ id: eastEndId, x: eastX, z: az, kind: 'perimeter' });
+    const rowClusters = clusters.filter((c) => Math.floor(c.clusterIndex / clustersPerRow) === row);
+    const westClusters = rowClusters.filter((c) => c.centerX < 0).sort((a, b) => b.centerX - a.centerX);
+    const eastClusters = rowClusters.filter((c) => c.centerX >= 0).sort((a, b) => a.centerX - b.centerX);
 
-    // Connect every booth whose approach point shares this aisle
-    const stripBooths = placements.filter(
-      (p) => Math.abs(p.approachPoint.z - az) <= aisleWidth / 2 + 0.5
-    );
-    const westBooths = stripBooths.filter((p) => p.positionX < 0).sort((a, b) => b.positionX - a.positionX);
-    const eastBooths = stripBooths.filter((p) => p.positionX > 0).sort((a, b) => a.positionX - b.positionX);
+    const connectClusterList = (list: GeneratedClusterSpec[]) => {
+      let prevBlvdNode = spineId;
+      for (const c of list) {
+        const entryId = `walk-entry-${c.clusterId}`;
+        const centerId = `walk-center-${c.clusterId}`;
+        nodes.push({ id: entryId, x: c.centerX, z: blvdZ, kind: 'aisle' });
+        nodes.push({ id: centerId, x: c.centerX, z: c.centerZ, kind: 'cluster_center' });
+        edges.push([prevBlvdNode, entryId]);
+        edges.push([entryId, centerId]);
+        prevBlvdNode = entryId;
 
-    let lastWestAisleNode = spineId;
-    for (const b of westBooths) {
-      const aisleDropId = `walk-aisle-${i}-b${b.slotIndex}`;
-      const approachId = `walk-approach-${b.slotIndex}`;
-      nodes.push({ id: aisleDropId, x: b.approachPoint.x, z: az, kind: 'aisle' });
-      nodes.push({
-        id: approachId,
-        x: b.approachPoint.x,
-        z: b.approachPoint.z,
-        kind: 'approach',
-        boothSlotIndex: b.slotIndex,
-      });
-      edges.push([lastWestAisleNode, aisleDropId]);
-      edges.push([aisleDropId, approachId]);
-      lastWestAisleNode = aisleDropId;
-    }
-    edges.push([lastWestAisleNode, westEndId]);
+        const cBooths = placements.filter((p) => p.clusterId === c.clusterId);
+        for (const b of cBooths) {
+          const appId = `walk-approach-${b.slotIndex}`;
+          nodes.push({
+            id: appId,
+            x: b.approachPoint.x,
+            z: b.approachPoint.z,
+            kind: 'approach',
+            boothSlotIndex: b.slotIndex,
+          });
+          edges.push([centerId, appId]);
+        }
+      }
+    };
 
-    let lastEastAisleNode = spineId;
-    for (const b of eastBooths) {
-      const aisleDropId = `walk-aisle-${i}-b${b.slotIndex}`;
-      const approachId = `walk-approach-${b.slotIndex}`;
-      nodes.push({ id: aisleDropId, x: b.approachPoint.x, z: az, kind: 'aisle' });
-      nodes.push({
-        id: approachId,
-        x: b.approachPoint.x,
-        z: b.approachPoint.z,
-        kind: 'approach',
-        boothSlotIndex: b.slotIndex,
-      });
-      edges.push([lastEastAisleNode, aisleDropId]);
-      edges.push([aisleDropId, approachId]);
-      lastEastAisleNode = aisleDropId;
-    }
-    edges.push([lastEastAisleNode, eastEndId]);
+    connectClusterList(westClusters);
+    connectClusterList(eastClusters);
   }
 
   const radius = round2(Math.hypot(halfHallWidth, halfHallDepth));
@@ -521,24 +659,13 @@ export function generateDynamicExhibitionLayout(
     centerX: 0,
     centerZ: 0,
     radius,
-    recommendedHeight: round2(Math.max(26, radius * 0.85)),
-    recommendedDistance: round2(Math.max(32, radius * 1.15)),
+    recommendedHeight: round2(Math.max(28, radius * 0.78)),
+    recommendedDistance: round2(Math.max(36, radius * 1.08)),
   };
 
-  // Roof bounds metadata for Phase 3 Parametric Dome Roof
-  const eaveHeight = hallWidth > 110 ? 13.5 : hallWidth > 75 ? 11.5 : 10.0;
-  const roofRise = round2(Math.min(18, Math.max(6.5, hallWidth * 0.12)));
-  const ribSpacing = hallDepth > 120 ? 12.0 : 10.0;
-
-  const roofBounds: RoofBoundsMetadata = {
-    hallWidth,
-    hallDepth,
-    bounds: hallBounds,
-    eaveHeight,
-    roofRise,
-    ribSpacing,
-    skylightRatio: 0.28,
-  };
+  const eaveHeight = hallWidth > 140 ? 15.0 : hallWidth > 90 ? 12.5 : 10.5;
+  const roofRise = round2(Math.min(22, Math.max(7.0, hallWidth * 0.11)));
+  const ribSpacing = hallDepth > 140 ? 14.0 : 12.0;
 
   return {
     config: {
@@ -549,6 +676,7 @@ export function generateDynamicExhibitionLayout(
       aisleWidth,
       perimeterWidth,
       layoutSeed,
+      categoryZones,
       reservedAreas,
     },
     hallWidth,
@@ -559,63 +687,28 @@ export function generateDynamicExhibitionLayout(
     welcomeAreaBounds,
     spawnPoint,
     directoryPoint,
+    clusters,
     zones,
     placements,
     walkwayGraph: { nodes, edges },
     cameraOverviewBounds,
-    roofBounds,
-  };
-}
-
-function makePlacement(
-  slotIndex: number,
-  positionX: number,
-  positionZ: number,
-  rotationY: number,
-  preferredZoneCapacity: number,
-  layoutSeed: number
-): GeneratedBoothPlacement {
-  const archetype = V28_ARCHETYPES[(slotIndex + layoutSeed) % V28_ARCHETYPES.length];
-  const zoneIndex = Math.floor(slotIndex / preferredZoneCapacity);
-  const zoneCode = zoneCodeForIndex(zoneIndex);
-
-  const forwardX = Math.sin(rotationY);
-  const forwardZ = Math.cos(rotationY);
-  const halfDepth = archetype.depth / 2;
-
-  return {
-    slotIndex,
-    zoneCode,
-    positionX,
-    positionZ,
-    rotationY,
-    archetypeId: archetype.id,
-    footprintWidth: archetype.width,
-    footprintDepth: archetype.depth,
-    approachPoint: {
-      x: round2(positionX + forwardX * (halfDepth + APPROACH_OFFSET_M)),
-      z: round2(positionZ + forwardZ * (halfDepth + APPROACH_OFFSET_M)),
-    },
-    focusCameraPoint: {
-      x: round2(positionX + forwardX * (halfDepth + FOCUS_CAMERA_OFFSET_M)),
-      z: round2(positionZ + forwardZ * (halfDepth + FOCUS_CAMERA_OFFSET_M)),
+    roofBounds: {
+      hallWidth,
+      hallDepth,
+      bounds: hallBounds,
+      eaveHeight,
+      roofRise,
+      ribSpacing,
+      skylightRatio: 0.3,
     },
   };
 }
 
-/**
- * Validate ANY exhibition layout (auto-generated OR admin-edited) for:
- *  1. Hall bounds containment (strictly inside hall bounds with perimeter margin)
- *  2. Zero AABB overlap between booths (including 0.4m physical clearance)
- *  3. Zero intrusion into Central Avenue or Welcome Area
- *  4. Focus camera clearance (no focus camera inside another booth AABB)
- *  5. Walkway connectivity via BFS from spawnPoint to 100% of booth approach points
- */
 export function validateExhibitionLayout(
   layout: Pick<
     GeneratedExhibitionLayout,
     'hallBounds' | 'centralAvenueBounds' | 'welcomeAreaBounds' | 'placements' | 'walkwayGraph' | 'zones'
-  >
+  > & { clusters?: GeneratedClusterSpec[] }
 ): LayoutValidationResult {
   const errors: string[] = [];
   let overlapCount = 0;
@@ -630,7 +723,6 @@ export function validateExhibitionLayout(
     getBoothWorldAabb(p.positionX, p.positionZ, p.rotationY, p.archetypeId, 0)
   );
 
-  // 1. Bounds & Walkway intrusion checks
   for (let i = 0; i < layout.placements.length; i++) {
     const p = layout.placements[i];
     const box = strictAabbs[i];
@@ -653,7 +745,6 @@ export function validateExhibitionLayout(
     }
   }
 
-  // 2. Pairwise AABB overlap & Focus camera clip check
   for (let i = 0; i < layout.placements.length; i++) {
     for (let j = i + 1; j < layout.placements.length; j++) {
       if (rectsOverlap(aabbs[i], aabbs[j])) {
@@ -661,7 +752,6 @@ export function validateExhibitionLayout(
         errors.push(`Booth #${layout.placements[i].slotIndex} và Booth #${layout.placements[j].slotIndex} bị chồng lấn.`);
       }
     }
-    // Check focus camera point of booth i against all other booths j
     const fp = layout.placements[i].focusCameraPoint;
     for (let j = 0; j < layout.placements.length; j++) {
       if (i === j) continue;
@@ -672,7 +762,6 @@ export function validateExhibitionLayout(
     }
   }
 
-  // 3. BFS Walkway connectivity from spawn to every booth approach point
   const nodeMap = new Map<string, WalkwayNode>();
   for (const n of layout.walkwayGraph.nodes) nodeMap.set(n.id, n);
 
@@ -681,7 +770,6 @@ export function validateExhibitionLayout(
     const nu = nodeMap.get(u);
     const nv = nodeMap.get(v);
     if (!nu || !nv) continue;
-    // Verify walkway edge does not pass through any booth AABB
     let blocked = false;
     for (const box of strictAabbs) {
       if (segmentIntersectsRect(nu.x, nu.z, nv.x, nv.z, box)) {
@@ -727,6 +815,7 @@ export function validateExhibitionLayout(
     stats: {
       boothCount: layout.placements.length,
       zoneCount: layout.zones.length,
+      clusterCount: layout.clusters?.length ?? Math.ceil(layout.placements.length / MAX_BOOTHS_PER_CLUSTER),
       overlapCount,
       outOfBoundsCount,
       blockedWalkwayCount,

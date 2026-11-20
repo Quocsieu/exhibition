@@ -10,6 +10,16 @@ import type {
 import { DynamicBooth3D } from './DynamicBooth3D';
 import type { V28NpcAnimState } from './DynamicBoothNpc3D';
 import { getTextureCacheStats } from './v28BoothAssets';
+import { V27VisualKitLayer, useV27TerrazzoFloorTexture } from './V27VisualKit';
+import {
+  DRAG_YAW_SENSITIVITY,
+  DRAG_PITCH_SENSITIVITY,
+  TOUCH_YAW_SENSITIVITY,
+  TOUCH_PITCH_SENSITIVITY,
+  CAMERA_DRAG_THRESHOLD_PX,
+  MIN_CAMERA_PITCH,
+  MAX_CAMERA_PITCH,
+} from '../ExhibitionScene';
 
 export type V28CameraMode = 'overview' | 'explore' | 'focus';
 
@@ -139,6 +149,19 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   const keysRef = useRef<Record<string, boolean>>({});
   const moveTargetRef = useRef<{ x: number; z: number } | null>(null);
   const lastReportRef = useRef<number>(0);
+  const camOrbitRef = useRef<{ yawOffset: number; pitchOffset: number; zoomScale: number }>({
+    yawOffset: 0,
+    pitchOffset: 0,
+    zoomScale: 1.0,
+  });
+  const dragStateRef = useRef<{ active: boolean; pointerId: number; lastX: number; lastY: number; dragged: boolean }>({
+    active: false,
+    pointerId: -1,
+    lastX: 0,
+    lastY: 0,
+    dragged: false,
+  });
+  const terrazzoTex = useV27TerrazzoFloorTexture(world.hallWidth, world.hallDepth);
   const fpsAccumRef = useRef<{ frames: number; lastTime: number; fps: number }>({
     frames: 0,
     lastTime: performance.now(),
@@ -179,7 +202,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teleportNonce]);
 
-  // Desktop WASD listeners
+  // Desktop WASD + V27.5 Drag-to-Rotate & Wheel Zoom listeners
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
       if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
@@ -188,13 +211,56 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
     const onUp = (e: KeyboardEvent) => {
       keysRef.current[e.key.toLowerCase()] = false;
     };
+    const canvasEl = gl.domElement;
+    const onPtrDown = (e: PointerEvent) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      dragStateRef.current = { active: true, pointerId: e.pointerId, lastX: e.clientX, lastY: e.clientY, dragged: false };
+    };
+    const onPtrMove = (e: PointerEvent) => {
+      const ds = dragStateRef.current;
+      if (!ds.active || ds.pointerId !== e.pointerId) return;
+      const dx = e.clientX - ds.lastX;
+      const dy = e.clientY - ds.lastY;
+      if (!ds.dragged && Math.hypot(dx, dy) < CAMERA_DRAG_THRESHOLD_PX) return;
+      ds.dragged = true;
+      ds.lastX = e.clientX;
+      ds.lastY = e.clientY;
+      const yawSens = e.pointerType === 'touch' ? TOUCH_YAW_SENSITIVITY : DRAG_YAW_SENSITIVITY;
+      const pitchSens = e.pointerType === 'touch' ? TOUCH_PITCH_SENSITIVITY : DRAG_PITCH_SENSITIVITY;
+      camOrbitRef.current.yawOffset -= THREE.MathUtils.clamp(dx, -120, 120) * yawSens;
+      camOrbitRef.current.pitchOffset = THREE.MathUtils.clamp(
+        camOrbitRef.current.pitchOffset + THREE.MathUtils.clamp(dy, -120, 120) * pitchSens,
+        MIN_CAMERA_PITCH,
+        MAX_CAMERA_PITCH
+      );
+    };
+    const onPtrUp = (e: PointerEvent) => {
+      if (dragStateRef.current.pointerId === e.pointerId) {
+        dragStateRef.current.active = false;
+      }
+    };
+    const onWheel = (e: WheelEvent) => {
+      camOrbitRef.current.zoomScale = THREE.MathUtils.clamp(
+        camOrbitRef.current.zoomScale + e.deltaY * 0.0006,
+        0.55,
+        1.75
+      );
+    };
     window.addEventListener('keydown', onDown);
     window.addEventListener('keyup', onUp);
+    canvasEl.addEventListener('pointerdown', onPtrDown);
+    window.addEventListener('pointermove', onPtrMove);
+    window.addEventListener('pointerup', onPtrUp);
+    canvasEl.addEventListener('wheel', onWheel, { passive: true });
     return () => {
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
+      canvasEl.removeEventListener('pointerdown', onPtrDown);
+      window.removeEventListener('pointermove', onPtrMove);
+      window.removeEventListener('pointerup', onPtrUp);
+      canvasEl.removeEventListener('wheel', onWheel);
     };
-  }, []);
+  }, [gl.domElement]);
 
   // Precomputed booth AABBs for fast client-side walk collision
   const boothColliders = useMemo(
@@ -285,18 +351,21 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       avatarRef.current.rotation.y = p.rotationY;
     }
 
-    // 2. Smooth Camera Controller (Overview / Explore / Focus)
+    // 2. Smooth Camera Controller (V27.5 Heritage Overview / Explore + Drag-Rotate & Zoom / Dynamic Focus)
+    const { yawOffset, pitchOffset, zoomScale } = camOrbitRef.current;
     if (cameraMode === 'overview') {
       const ob = world.cameraOverviewBounds;
       const portraitMult = isMobilePortrait ? 1.32 : 1.0;
+      const dist = ob.recommendedDistance * portraitMult * 0.74 * zoomScale;
+      const elev = ob.recommendedHeight * portraitMult * zoomScale * (1 + pitchOffset * 0.45);
       desiredCamPos.set(
-        ob.centerX,
-        ob.recommendedHeight * portraitMult,
-        ob.centerZ + ob.recommendedDistance * portraitMult * 0.72
+        ob.centerX + Math.sin(yawOffset) * dist,
+        Math.max(18, elev),
+        ob.centerZ + Math.cos(yawOffset) * dist
       );
       lookTargetVec.set(ob.centerX, 0, ob.centerZ);
     } else if (cameraMode === 'focus' && focusedBooth) {
-      const liftY = isMobilePortrait ? 4.6 : 3.2;
+      const liftY = isMobilePortrait ? 4.6 : 3.0;
       const extraDist = isMobilePortrait ? 2.4 : 0;
       const fx = Math.sin(focusedBooth.rotationY);
       const fz = Math.cos(focusedBooth.rotationY);
@@ -307,9 +376,15 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       );
       lookTargetVec.set(focusedBooth.positionX, isMobilePortrait ? 1.8 : 1.5, focusedBooth.positionZ);
     } else {
-      // Explore follow camera
-      desiredCamPos.set(p.x, isMobilePortrait ? 10.5 : 8.2, p.z + (isMobilePortrait ? 12.0 : 9.8));
-      lookTargetVec.set(p.x, 1.4, p.z - 2.5);
+      // Explore follow camera with V27.5 drag-to-rotate yaw/pitch & zoom
+      const baseDist = (isMobilePortrait ? 12.2 : 9.8) * zoomScale;
+      const baseY = (isMobilePortrait ? 10.5 : 8.2) * zoomScale + pitchOffset * 5.0;
+      desiredCamPos.set(
+        p.x + Math.sin(yawOffset) * baseDist,
+        Math.max(3.2, baseY),
+        p.z + Math.cos(yawOffset) * baseDist
+      );
+      lookTargetVec.set(p.x, 1.5, p.z - 2.0);
     }
 
     camera.position.lerp(desiredCamPos, Math.min(1, dt * 6.5));
@@ -348,6 +423,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       versionId: world.versionId,
       boothCount: world.booths.length,
       zoneCount: world.zones.length,
+      clusterCount: world.clusters?.length ?? 0,
       cameraMode,
       roofCutawayActive: cameraMode === 'overview',
       fps: fpsAccumRef.current.fps,
@@ -362,99 +438,50 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
     };
   });
 
-  const avenueW = world.centralAvenueBounds.maxX - world.centralAvenueBounds.minX;
-  const welcomeW = world.welcomeAreaBounds.maxX - world.welcomeAreaBounds.minX;
-  const welcomeD = world.welcomeAreaBounds.maxZ - world.welcomeAreaBounds.minZ;
-  const welcomeCenterZ = (world.welcomeAreaBounds.minZ + world.welcomeAreaBounds.maxZ) / 2;
-
   return (
     <>
-      {/* Bright Architectural Lighting matched to V27.5 */}
-      <color attach="background" args={['#dbeafe']} />
-      <fog attach="fog" args={['#dbeafe', Math.max(85, world.hallDepth * 0.9), Math.max(190, world.hallDepth * 2.2)]} />
-      <ambientLight intensity={0.78} color="#f8fafc" />
-      <hemisphereLight args={['#e0f2fe', '#e2e8f0', 0.65]} />
+      {/* Bright Architectural Exhibition Lighting matched to V27.5 */}
+      <color attach="background" args={['#eef2f7']} />
+      <fog attach="fog" args={['#eef2f7', Math.max(110, world.hallDepth * 0.95), Math.max(240, world.hallDepth * 2.4)]} />
+      <ambientLight intensity={0.82} color="#ffffff" />
+      <hemisphereLight args={['#f0f6ff', '#d8dee8', 0.72]} />
       <directionalLight
-        position={[world.hallWidth * 0.35, 42, world.hallDepth * 0.3]}
-        intensity={1.15}
-        color="#fffbeb"
+        position={[world.hallWidth * 0.35, 48, world.hallDepth * 0.3]}
+        intensity={1.18}
+        color="#fffbf0"
         castShadow
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
       />
 
-      {/* Dynamic Hall Floor (Click/Tap to move) */}
+      {/* Dynamic Hall Floor with V27.5 Satin Architectural Terrazzo Texture */}
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0, 0]}
         receiveShadow
         onClick={(e) => {
+          if (dragStateRef.current.dragged) return;
           e.stopPropagation();
           onFloorClick(e.point.x, e.point.z);
         }}
       >
         <planeGeometry args={[world.hallWidth, world.hallDepth]} />
-        <meshStandardMaterial color="#f1f5f9" roughness={0.72} metalness={0.06} />
+        <meshStandardMaterial map={terrazzoTex} roughness={0.62} metalness={0.08} />
       </mesh>
 
       {/* Architectural Perimeter Floor Apron */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.04, 0]}>
-        <planeGeometry args={[world.hallWidth + 40, world.hallDepth + 40]} />
-        <meshStandardMaterial color="#cbd5e1" roughness={0.9} />
+        <planeGeometry args={[world.hallWidth + 50, world.hallDepth + 50]} />
+        <meshStandardMaterial color="#cfd7e3" roughness={0.88} />
       </mesh>
 
-      {/* Central Main Avenue Strip + Architectural Border Lines */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 0]} receiveShadow>
-        <planeGeometry args={[avenueW - 0.8, world.hallDepth - 2]} />
-        <meshStandardMaterial color="#e0f2fe" roughness={0.62} metalness={0.08} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-avenueW / 2 + 0.55, 0.02, 0]}>
-        <planeGeometry args={[0.22, world.hallDepth - 4]} />
-        <meshBasicMaterial color="#0284c7" transparent opacity={0.45} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[avenueW / 2 - 0.55, 0.02, 0]}>
-        <planeGeometry args={[0.22, world.hallDepth - 4]} />
-        <meshBasicMaterial color="#0284c7" transparent opacity={0.45} />
-      </mesh>
-
-      {/* Avenue Landscape Planters flanking the Central Avenue (non-blocking, outside [-3.4, +3.4] walk lane) */}
-      {world.zones.map((z) => {
-        const cz = (z.bounds.minZ + z.bounds.maxZ) / 2;
-        return (
-          <group key={`planter-${z.id}`}>
-            {[-4.25, 4.25].map((px) => (
-              <group key={px} position={[px, 0, cz]}>
-                <mesh position={[0, 0.24, 0]} castShadow>
-                  <boxGeometry args={[0.85, 0.48, 2.2]} />
-                  <meshStandardMaterial color="#f8fafc" roughness={0.5} />
-                </mesh>
-                <mesh position={[0, 0.72, 0]} castShadow>
-                  <boxGeometry args={[0.62, 0.55, 1.85]} />
-                  <meshStandardMaterial color="#15803d" roughness={0.85} />
-                </mesh>
-              </group>
-            ))}
-          </group>
-        );
-      })}
-
-      {/* Welcome Area Plaza Highlight */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, welcomeCenterZ]} receiveShadow>
-        <planeGeometry args={[welcomeW, welcomeD]} />
-        <meshStandardMaterial color="#fef9c3" roughness={0.7} />
-      </mesh>
-
-      {/* Welcome Directory Kiosk */}
-      <group position={[world.directoryPoint.x, 0, world.directoryPoint.z]}>
-        <mesh position={[0, 1.35, 0]} castShadow>
-          <boxGeometry args={[1.6, 2.7, 0.45]} />
-          <meshStandardMaterial color="#0f172a" roughness={0.35} metalness={0.5} />
-        </mesh>
-        <mesh position={[0, 1.55, 0.24]}>
-          <planeGeometry args={[1.35, 1.6]} />
-          <meshBasicMaterial color="#38bdf8" />
-        </mesh>
-      </group>
+      {/* V27.5 Visual Heritage Layer: Central Avenue, Champagne Inlays, Welcome Plaza, Check-In Stage & Streamed Cluster Courtyards */}
+      <V27VisualKitLayer
+        world={world}
+        playerX={playerPosRef.current.x}
+        playerZ={playerPosRef.current.z}
+        isOverview={cameraMode === 'overview'}
+      />
 
       {/* Zone Overhead Banners */}
       {world.zones.map((z) => (
