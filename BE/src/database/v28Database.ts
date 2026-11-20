@@ -486,6 +486,114 @@ export class V28CatalogDatabase {
       }
     }
 
+    // Phase 4.2 + 5 + 6 Migration: user_version 4 -> 5 (categories, audio_assets, booth_faqs, ai_usage_logs)
+    const vAfterP2 = Number(
+      ((this.db.prepare('PRAGMA user_version').get() as { user_version: number } | undefined)?.user_version) || 0
+    );
+    if (vAfterP2 < 5) {
+      this.db.exec('BEGIN IMMEDIATE;');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS categories (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL UNIQUE,
+            description TEXT NOT NULL DEFAULT '',
+            color TEXT NOT NULL DEFAULT '#0ea5e9',
+            sort_order INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+          );
+
+          CREATE TABLE IF NOT EXISTS audio_assets (
+            audio_id TEXT PRIMARY KEY,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            slot_key TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            language TEXT NOT NULL DEFAULT 'vi-VN',
+            voice_id TEXT NOT NULL DEFAULT 'vi-VN-default',
+            model_id TEXT NOT NULL DEFAULT 'gemini-3.8-flash-lite-tts',
+            storage_key TEXT NOT NULL,
+            mime_type TEXT NOT NULL DEFAULT 'audio/wav',
+            duration_sec REAL NOT NULL DEFAULT 0,
+            transcript TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'ready',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (entity_type, entity_id, slot_key, content_hash)
+          );
+
+          CREATE TABLE IF NOT EXISTS booth_faqs (
+            id TEXT PRIMARY KEY,
+            booth_id TEXT NOT NULL,
+            company_id TEXT NOT NULL,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            approved INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (booth_id) REFERENCES booths(id) ON DELETE CASCADE,
+            FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+          );
+
+          CREATE TABLE IF NOT EXISTS ai_usage_logs (
+            id TEXT PRIMARY KEY,
+            booth_id TEXT NOT NULL,
+            company_id TEXT NOT NULL,
+            session_id TEXT NOT NULL DEFAULT '',
+            mode TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            prompt_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            duration_sec REAL NOT NULL DEFAULT 0,
+            estimated_cost_usd REAL NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_audio_entity ON audio_assets(entity_type, entity_id, slot_key);
+          CREATE INDEX IF NOT EXISTS idx_audio_hash ON audio_assets(content_hash);
+          CREATE INDEX IF NOT EXISTS idx_faqs_booth ON booth_faqs(booth_id, approved);
+          CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage_logs(created_at, mode);
+        `);
+
+        // Add nullable category_id columns safely
+        const prodCols = this.db.prepare('PRAGMA table_info(products)').all() as { name: string }[];
+        if (!prodCols.some((c) => c.name === 'category_id')) {
+          this.db.exec('ALTER TABLE products ADD COLUMN category_id TEXT NULL REFERENCES categories(id) ON DELETE SET NULL;');
+        }
+        const zoneCols = this.db.prepare('PRAGMA table_info(zones)').all() as { name: string }[];
+        if (!zoneCols.some((c) => c.name === 'category_id')) {
+          this.db.exec('ALTER TABLE zones ADD COLUMN category_id TEXT NULL REFERENCES categories(id) ON DELETE SET NULL;');
+        }
+        const evbCols = this.db.prepare('PRAGMA table_info(exhibition_version_booths)').all() as { name: string }[];
+        if (!evbCols.some((c) => c.name === 'category_id')) {
+          this.db.exec('ALTER TABLE exhibition_version_booths ADD COLUMN category_id TEXT NULL REFERENCES categories(id) ON DELETE SET NULL;');
+        }
+
+        // Seed 6 standard stable exhibition categories idempotently
+        const defaultCats = [
+          ['cat-tech', 'Công nghệ & Điện tử', 'cong-nghe-dien-tu', 'Thiết bị thông minh, AI, phần cứng & phần mềm', '#0ea5e9', 1],
+          ['cat-living', 'Nội thất & Trang trí', 'noi-that-trang-tri', 'Kiến trúc, nội thất hiện đại & chiếu sáng', '#8b5cf6', 2],
+          ['cat-food', 'Thực phẩm & Đồ uống', 'thuc-pham-do-uong', 'Nông sản, cà phê đặc sản & đồ uống hữu cơ', '#10b981', 3],
+          ['cat-industrial', 'Thiết bị công nghiệp', 'thiet-bi-cong-nghiep', 'Tự động hóa, robot & sản xuất thông minh', '#f59e0b', 4],
+          ['cat-energy', 'Năng lượng & Xanh', 'nang-luong-xanh', 'Điện mặt trời, lưu trữ & giải pháp bền vững', '#14b8a6', 5],
+          ['cat-lifestyle', 'Thời trang & Mỹ phẩm', 'thoi-trang-my-pham', 'Thời trang thiết kế, làm đẹp & chăm sóc cá nhân', '#ec4899', 6],
+        ] as const;
+        const insCat = this.db.prepare(`
+          INSERT OR IGNORE INTO categories (id, name, slug, description, color, sort_order)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        for (const c of defaultCats) {
+          insCat.run(c[0], c[1], c[2], c[3], c[4], c[5]);
+        }
+
+        this.db.exec('PRAGMA user_version = 5;');
+        this.db.exec('COMMIT;');
+      } catch (err) {
+        this.db.exec('ROLLBACK;');
+        throw err;
+      }
+    }
+
     const fkRows = this.db.prepare('PRAGMA foreign_key_check').all();
     const integrityRow = this.db.prepare('PRAGMA integrity_check').get() as { integrity_check: string };
     const jmRow = this.db.prepare('PRAGMA journal_mode').get() as { journal_mode: string };
@@ -499,7 +607,7 @@ export class V28CatalogDatabase {
 
     return {
       fromVersion,
-      toVersion: 4,
+      toVersion: 5,
       journalMode: String(jmRow?.journal_mode || ''),
       foreignKeyCheckOk: fkRows.length === 0,
       integrityCheckOk: integrityRow.integrity_check === 'ok',

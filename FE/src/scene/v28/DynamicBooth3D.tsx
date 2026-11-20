@@ -8,6 +8,7 @@ import {
   loadV28ArchetypePrototype,
   releaseSharedTexture,
 } from './v28BoothAssets';
+import { DynamicBoothNpc3D, type V28NpcAnimState } from './DynamicBoothNpc3D';
 
 // Shared lightweight geometries & materials for product display pedestals (reused across all booths)
 const PEDESTAL_GEOM = new THREE.CylinderGeometry(0.28, 0.32, 0.85, 14);
@@ -155,12 +156,14 @@ export interface DynamicBooth3DProps {
   booth: V28BoothPlacementView;
   lodTier: 0 | 1 | 2; // 0 = Near Full Detail, 1 = Mid Shell Only, 2 = Far (handled by InstancedProxy)
   isFocused: boolean;
+  npcAnimState?: V28NpcAnimState;
   onFocusBooth: (booth: V28BoothPlacementView) => void;
   onSelectProduct: (booth: V28BoothPlacementView, product: V28Product, slotId: string) => void;
+  onClickNpc?: (booth: V28BoothPlacementView) => void;
 }
 
 export const DynamicBooth3D: React.FC<DynamicBooth3DProps> = React.memo(
-  ({ booth, lodTier, isFocused, onFocusBooth, onSelectProduct }) => {
+  ({ booth, lodTier, isFocused, npcAnimState = 'idle', onFocusBooth, onSelectProduct, onClickNpc }) => {
     const [modelGroup, setModelGroup] = useState<THREE.Group | null>(() => {
       const cached = getCachedArchetypePrototype(booth.archetypeId);
       return cached ? cloneArchetypeShared(cached) : null;
@@ -254,6 +257,17 @@ export const DynamicBooth3D: React.FC<DynamicBooth3DProps> = React.memo(
               onSelect={(prod, sId) => onSelectProduct(booth, prod, sId)}
             />
           ))}
+
+        {/* Booth AI Consultant NPC (Mounted ONLY in Ring 0 Near, positioned at front-right corner without blocking products) */}
+        {lodTier === 0 && (
+          <DynamicBoothNpc3D
+            position={[Math.max(1.8, booth.footprintWidth / 2 - 1.1), 0, booth.footprintDepth / 2 - 0.65]}
+            companyName={booth.companyName}
+            brandColor={booth.color}
+            animState={isFocused ? npcAnimState : 'idle'}
+            onClickNpc={() => onClickNpc?.(booth)}
+          />
+        )}
       </group>
     );
   }

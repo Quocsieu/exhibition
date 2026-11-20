@@ -50,7 +50,7 @@ describe('V28 PHASE 2 — Dynamic Layout Generator, Exhibition Versioning, Resiz
 
   it('migrates to user_version 4, enforces Draft/Publish immutability, preserves stable Booth IDs & slots across 20->10->20 resize, and supports rollback', async () => {
     const v28Db = new V28CatalogDatabase(':memory:');
-    expect(v28Db.lastMigrationReport.toVersion).toBe(4);
+    expect(v28Db.lastMigrationReport.toVersion).toBeGreaterThanOrEqual(4);
     expect(v28Db.lastMigrationReport.foreignKeyCheckOk).toBe(true);
     expect(v28Db.lastMigrationReport.integrityCheckOk).toBe(true);
 

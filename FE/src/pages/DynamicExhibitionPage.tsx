@@ -20,6 +20,7 @@ import {
 import { FarBoothInstancedProxy } from '../scene/v28/FarBoothInstancedProxy';
 import { ParametricExpoRoof } from '../scene/v28/ParametricExpoRoof';
 import { useV28SpatialRealtime } from '../hooks/useV28SpatialRealtime';
+import type { V28NpcAnimState } from '../scene/v28/DynamicBoothNpc3D';
 
 export interface DynamicExhibitionPageProps {
   onOpenAdmin: () => void;
@@ -31,6 +32,8 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   const [error, setError] = useState<string>('');
   const [cameraMode, setCameraMode] = useState<V28CameraMode>('overview');
   const [focusedBooth, setFocusedBooth] = useState<V28BoothPlacementView | null>(null);
+  const [npcPanelOpen, setNpcPanelOpen] = useState<boolean>(false);
+  const [npcAnimState, setNpcAnimState] = useState<V28NpcAnimState>('idle');
   const [selectedProduct, setSelectedProduct] = useState<{
     booth: V28BoothPlacementView;
     product: V28Product;
@@ -170,6 +173,8 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     setPlayerTarget({ x, z });
     setFocusedBooth(null);
     setSelectedProduct(null);
+    setNpcPanelOpen(false);
+    setNpcAnimState('idle');
     setCameraMode('explore');
   }, []);
 
@@ -234,6 +239,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         isMobilePortrait={isMobilePortrait}
         boothLodMap={boothLodMap}
         remoteAvatars={remoteAvatars}
+        npcAnimState={npcAnimState}
         onPlayerMove={(pos) => {
           setPlayerPos(pos);
           sendMove(pos.x, pos.z, pos.rotationY);
@@ -241,6 +247,12 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         onFloorClick={handleFloorClick}
         onFocusBooth={handleFocusBooth}
         onSelectProduct={handleSelectProduct}
+        onClickNpc={(booth) => {
+          setFocusedBooth(booth);
+          setSelectedProduct(null);
+          setNpcPanelOpen(true);
+          setCameraMode('focus');
+        }}
         renderFarProxies={() => <FarBoothInstancedProxy booths={world.booths} lodMap={boothLodMap} />}
         renderRoof={({ cameraMode: cm, isMobilePortrait: mp }) => (
           <ParametricExpoRoof roofBounds={world.roofBounds} cameraMode={cm} isMobilePortrait={mp} />
@@ -255,6 +267,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         playerPos={playerPos}
         focusedBooth={focusedBooth}
         selectedProduct={selectedProduct}
+        npcPanelOpen={npcPanelOpen}
         onlineCount={onlineCount}
         overflowVisitorCount={overflowCount}
         onChangeCameraMode={(mode) => {
@@ -262,6 +275,8 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
           if (mode !== 'focus') {
             setFocusedBooth(null);
             setSelectedProduct(null);
+            setNpcPanelOpen(false);
+            setNpcAnimState('idle');
           }
         }}
         onTeleportToBooth={handleTeleportToBooth}
@@ -270,8 +285,16 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         onCloseFocus={() => {
           setFocusedBooth(null);
           setSelectedProduct(null);
+          setNpcPanelOpen(false);
+          setNpcAnimState('idle');
           setCameraMode('explore');
         }}
+        onOpenNpcPanel={() => setNpcPanelOpen(true)}
+        onCloseNpcPanel={() => {
+          setNpcPanelOpen(false);
+          setNpcAnimState('idle');
+        }}
+        onNpcAnimStateChange={setNpcAnimState}
         onJoystickChange={setJoystickVec}
         onOpenAdmin={onOpenAdmin}
       />

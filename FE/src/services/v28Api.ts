@@ -316,7 +316,134 @@ export const v28Api = {
         body: JSON.stringify({ targetVersionId }),
       }
     ),
+
+  // Phase 4.2: Categories & Allocation Planner
+  listCategories: () => v28Request<{ categories: V28Category[] }>('/categories'),
+  createCategory: (payload: { name: string; description?: string; color?: string }) =>
+    v28Request<{ category: V28Category }>('/categories', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  planCategoryZones: (payload: {
+    targetBoothCount: number;
+    allocations?: Array<{ categoryId: string; boothCount: number }>;
+  }) =>
+    v28Request<{ plan: V28CategoryAllocationPlan }>('/categories/plan', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // Phase 5: Pre-generated Cached Audio
+  getBoothAudio: (boothId: string) =>
+    v28Request<V28BoothAudioPack>(`/booths/${encodeURIComponent(boothId)}/audio`),
+
+  // Phase 6: AI Chat & Voice Consultant
+  getAiStatus: () => v28Request<V28AiStatusResponse>('/ai/status'),
+  chatWithBoothNpc: (payload: { boothId: string; userId: string; message: string }) =>
+    v28Request<V28AiChatResponse>('/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  startVoiceSession: (payload: { boothId: string; userId: string }) =>
+    v28Request<{ session: V28VoiceSessionInfo }>('/ai/voice/start', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  sendVoiceTurn: (sessionId: string, transcript: string) =>
+    v28Request<V28AiChatResponse & { sessionId: string; remainingSec: number; pipelineMode: string }>(
+      `/ai/voice/${encodeURIComponent(sessionId)}/turn`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ transcript }),
+      }
+    ),
+  endVoiceSession: (sessionId: string) =>
+    v28Request<{ ended: boolean; durationSec: number }>(
+      `/ai/voice/${encodeURIComponent(sessionId)}/end`,
+      { method: 'POST' }
+    ),
 };
+
+export interface V28Category {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  color: string;
+  sortOrder: number;
+}
+
+export interface V28CategoryAllocationPlan {
+  targetBoothCount: number;
+  allocatedTotal: number;
+  mismatch: number;
+  warnings: string[];
+  canPublish: boolean;
+  zones: Array<{
+    code: string;
+    categoryId: string;
+    categoryName: string;
+    displayName: string;
+    boothCount: number;
+    color: string;
+  }>;
+}
+
+export interface V28AudioClip {
+  audioId: string;
+  entityType: 'booth' | 'product' | 'faq';
+  entityId: string;
+  slotKey: string;
+  contentHash: string;
+  language: string;
+  voiceId: string;
+  modelId: string;
+  durationSec: number;
+  transcript: string;
+  status: string;
+  audioUrl: string;
+}
+
+export interface V28BoothAudioPack {
+  boothId: string;
+  storageDriver: string;
+  liveGeminiTtsEnabled: boolean;
+  clips: V28AudioClip[];
+  cacheHits: number;
+  generatedCount: number;
+}
+
+export interface V28AiStatusResponse {
+  provider: string;
+  liveGeminiVerified: boolean;
+  liveStatusNote: string;
+  verifiedModelIds: Record<string, string>;
+  voicePipelineMode: string;
+  trialQuotas: {
+    maxVoiceSessionSec: number;
+    maxVoiceSessionsPerUserPerHour: number;
+    maxConcurrentVoiceSessions: number;
+  };
+}
+
+export interface V28AiChatResponse {
+  reply: string;
+  provider: string;
+  modelId: string;
+  liveGeminiVerified: boolean;
+  groundedBoothId: string;
+  groundedCompanyId: string;
+  disclosure: string;
+}
+
+export interface V28VoiceSessionInfo {
+  sessionId: string;
+  boothId: string;
+  pipelineMode: 'FALLBACK_STT_CHAT_TTS' | 'GEMINI_LIVE_API';
+  liveGeminiVerified: boolean;
+  maxDurationSec: number;
+  remainingSessionsThisHour: number;
+}
 
 export type V28ArchetypeId =
   | 'signature_ring'

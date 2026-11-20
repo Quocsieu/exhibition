@@ -5,6 +5,8 @@ import type {
   V28Product,
 } from '../../services/v28Api';
 import type { V28CameraMode, V28PlayerState } from '../../scene/v28/DynamicExhibitionScene';
+import type { V28NpcAnimState } from '../../scene/v28/DynamicBoothNpc3D';
+import { V28NpcConsultantPanel } from './V28NpcConsultantPanel';
 
 export interface DynamicWorldHudProps {
   world: V28ExhibitionVersionDetail;
@@ -14,6 +16,7 @@ export interface DynamicWorldHudProps {
   playerPos: V28PlayerState;
   focusedBooth: V28BoothPlacementView | null;
   selectedProduct: { booth: V28BoothPlacementView; product: V28Product; slotId: string } | null;
+  npcPanelOpen: boolean;
   onlineCount?: number;
   overflowVisitorCount?: number;
   onChangeCameraMode: (mode: V28CameraMode) => void;
@@ -21,6 +24,9 @@ export interface DynamicWorldHudProps {
   onSelectProduct: (booth: V28BoothPlacementView, product: V28Product, slotId: string) => void;
   onCloseProduct: () => void;
   onCloseFocus: () => void;
+  onOpenNpcPanel: () => void;
+  onCloseNpcPanel: () => void;
+  onNpcAnimStateChange: (state: V28NpcAnimState) => void;
   onJoystickChange: (vec: { x: number; y: number }) => void;
   onOpenAdmin: () => void;
 }
@@ -33,6 +39,7 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   playerPos,
   focusedBooth,
   selectedProduct,
+  npcPanelOpen,
   onlineCount = 1,
   overflowVisitorCount = 0,
   onChangeCameraMode,
@@ -40,6 +47,9 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   onSelectProduct,
   onCloseProduct,
   onCloseFocus,
+  onOpenNpcPanel,
+  onCloseNpcPanel,
+  onNpcAnimStateChange,
   onJoystickChange,
   onOpenAdmin,
 }) => {
@@ -433,8 +443,17 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
           </div>
         )}
 
-        {/* Focused Booth / Product Bottom Sheet (Mobile Portrait) or Floating Card (Desktop) */}
-        {(selectedProduct || focusedBooth) && (
+        {/* Focused Booth / Product / NPC AI Consultant Bottom Sheet or Floating Card */}
+        {npcPanelOpen && focusedBooth ? (
+          <div style={{ marginLeft: 'auto', width: isMobilePortrait ? '100%' : 'auto' }}>
+            <V28NpcConsultantPanel
+              booth={focusedBooth}
+              isMobilePortrait={isMobilePortrait}
+              onAnimStateChange={onNpcAnimStateChange}
+              onClose={onCloseNpcPanel}
+            />
+          </div>
+        ) : (selectedProduct || focusedBooth) && (
           <div
             style={{
               pointerEvents: 'auto',
@@ -506,8 +525,27 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
                     ✕
                   </button>
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>
-                  Sản phẩm trưng bày ({focusedBooth.assignedSlotCount}/6 vị trí):
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>
+                    Sản phẩm trưng bày ({focusedBooth.assignedSlotCount}/6 vị trí):
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onOpenNpcPanel}
+                    style={{
+                      minHeight: 36,
+                      padding: '0 12px',
+                      borderRadius: 10,
+                      border: 'none',
+                      background: '#0284c7',
+                      color: '#fff',
+                      fontWeight: 700,
+                      fontSize: 12,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🤖 Hỏi Trợ lý AI / Audio
+                  </button>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8 }}>
                   {focusedBooth.slots.map((s) => (

@@ -8,6 +8,7 @@ import type {
   V28ZoneRecord,
 } from '../../services/v28Api';
 import { DynamicBooth3D } from './DynamicBooth3D';
+import type { V28NpcAnimState } from './DynamicBoothNpc3D';
 import { getTextureCacheStats } from './v28BoothAssets';
 
 export type V28CameraMode = 'overview' | 'explore' | 'focus';
@@ -38,10 +39,12 @@ export interface DynamicExhibitionSceneProps {
   isMobilePortrait: boolean;
   boothLodMap?: Record<string, 0 | 1 | 2>;
   remoteAvatars?: V28RemoteAvatarView[];
+  npcAnimState?: V28NpcAnimState;
   onPlayerMove?: (pos: V28PlayerState) => void;
   onFloorClick: (x: number, z: number) => void;
   onFocusBooth: (booth: V28BoothPlacementView) => void;
   onSelectProduct: (booth: V28BoothPlacementView, product: V28Product, slotId: string) => void;
+  onClickNpc?: (booth: V28BoothPlacementView) => void;
   renderRoof?: (props: { cameraMode: V28CameraMode; isMobilePortrait: boolean }) => React.ReactNode;
   renderFarProxies?: () => React.ReactNode;
 }
@@ -117,10 +120,12 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   isMobilePortrait,
   boothLodMap,
   remoteAvatars = [],
+  npcAnimState = 'idle',
   onPlayerMove,
   onFloorClick,
   onFocusBooth,
   onSelectProduct,
+  onClickNpc,
   renderRoof,
   renderFarProxies,
 }) => {
@@ -463,8 +468,10 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
           booth={booth}
           lodTier={boothLodMap ? (boothLodMap[booth.boothId] ?? 0) : 0}
           isFocused={focusedBooth?.boothId === booth.boothId}
+          npcAnimState={npcAnimState}
           onFocusBooth={onFocusBooth}
           onSelectProduct={onSelectProduct}
+          onClickNpc={onClickNpc}
         />
       ))}
 

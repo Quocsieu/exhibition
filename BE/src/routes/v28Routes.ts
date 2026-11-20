@@ -16,6 +16,9 @@ import {
   RollbackVersionInputSchema,
 } from '../schemas/v28Schemas.js';
 import { V28ExhibitionService, type ExhibitionVersionDetail } from '../services/v28/exhibitionService.js';
+import { V28CategoryService } from '../services/v28/categoryService.js';
+import { V28AudioCacheService } from '../services/v28/audioCacheService.js';
+import { V28AiConsultantService } from '../services/v28/aiConsultantService.js';
 import { fetchExternalProductHtml, extractProductFromHtml } from '../integrations/productAdapter.js';
 import { z } from 'zod';
 
@@ -47,8 +50,11 @@ export function createV28ApiRoutes(
   v28Db: V28CatalogDatabase,
   excelService = new V28ExcelImportService(v28Db),
   exhibitionService = new V28ExhibitionService(v28Db),
-  onLayoutPublished?: (version: ExhibitionVersionDetail) => void
+  onLayoutPublished?: (version: ExhibitionVersionDetail) => void,
+  audioCacheService = new V28AudioCacheService(v28Db),
+  aiConsultantService = new V28AiConsultantService(v28Db, exhibitionService)
 ): Router {
+  const categoryService = new V28CategoryService(v28Db);
   const router = Router();
   // Allow up to ~7.5MB JSON body specifically on V28 routes for 5MB base64-encoded .xlsx uploads
   router.use(express.json({ limit: '8mb' }));
@@ -307,6 +313,17 @@ export function createV28ApiRoutes(
     }
 
     try {
+      // Duplicate URL import protection per company
+      if (parsed.data.saveToCatalog) {
+        const dup = categoryService.findDuplicateProductBySourceUrl(parsed.data.companyId, parsed.data.url);
+        if (dup) {
+          res.status(409).json({
+            error: `URL này đã được nhập trước đó cho doanh nghiệp (sản phẩm "${dup.name}").`,
+            existingProductId: dup.id,
+          });
+          return;
+        }
+      }
       const { html, finalUrl } = await fetchExternalProductHtml(parsed.data.url);
       const draft = extractProductFromHtml(html, finalUrl);
       if (!parsed.data.saveToCatalog) {
@@ -471,6 +488,142 @@ export function createV28ApiRoutes(
     } catch (err) {
       res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
     }
+  });
+
+  // ============================================================================
+  // F. PHASE 4.2 — CATEGORIES & CATEGORY-BASED ZONE ALLOCATION PLANNER
+  // ============================================================================
+  router.get('/categories', (_req: Request, res: Response) => {
+    res.json({ categories: categoryService.listCategories() });
+  });
+
+  router.post('/categories', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const { name, description, color } = (req.body || {}) as Record<string, string>;
+      const category = categoryService.createCategory({ name: name || '', description, color });
+      res.status(201).json({ category });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/categories/plan', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        targetBoothCount?: number;
+        allocations?: Array<{ categoryId: string; boothCount: number }>;
+      };
+      const plan = categoryService.planCategoryZones(
+        Number(body.targetBoothCount || 20),
+        body.allocations
+      );
+      res.json({ plan });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  // ============================================================================
+  // G. PHASE 5 — PRE-GENERATED CACHED AUDIO PIPELINE & STREAMING
+  // ============================================================================
+  router.get('/booths/:id/audio', async (req: Request, res: Response) => {
+    try {
+      const boothId = getParam(req.params.id);
+      const activeWorld = exhibitionService.getActiveExhibitionWorld();
+      const booth = activeWorld.booths.find((b) => b.boothId === boothId);
+      if (!booth) {
+        res.status(404).json({ error: 'Gian hàng không thuộc phiên bản đang công bố.' });
+        return;
+      }
+      const pack = await audioCacheService.getOrPrepareBoothAudioPack(booth);
+      res.json(pack);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get('/audio/:audioId/stream', async (req: Request, res: Response) => {
+    try {
+      const audioId = getParam(req.params.audioId);
+      const result = await audioCacheService.getAudioStreamBuffer(audioId);
+      if (!result) {
+        res.status(404).json({ error: 'Không tìm thấy tệp âm thanh.' });
+        return;
+      }
+      res.setHeader('Content-Type', result.mimeType);
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(result.buffer);
+    } catch (err) {
+      res.status(getHttpStatus(err, 500)).json({ error: (err as Error).message });
+    }
+  });
+
+  // ============================================================================
+  // H. PHASE 6 — GEMINI AI CHAT & LIVE VOICE (GROUNDED + QUOTA CONTROLLED)
+  // ============================================================================
+  router.get('/ai/status', (_req: Request, res: Response) => {
+    res.json({
+      ...aiConsultantService.getProviderStatus(),
+      usage: aiConsultantService.getUsageSummary(),
+      audioCacheMetrics: audioCacheService.metrics,
+    });
+  });
+
+  router.post('/ai/chat', async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as { boothId?: string; userId?: string; message?: string };
+      if (!body.boothId || !body.message) {
+        res.status(400).json({ error: 'Thiếu boothId hoặc nội dung câu hỏi.' });
+        return;
+      }
+      const response = await aiConsultantService.chatWithBoothNpc({
+        boothId: body.boothId,
+        userId: body.userId || req.ip || 'anon',
+        message: body.message,
+      });
+      res.json(response);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/ai/voice/start', (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as { boothId?: string; userId?: string };
+      if (!body.boothId) {
+        res.status(400).json({ error: 'Thiếu boothId.' });
+        return;
+      }
+      const session = aiConsultantService.startVoiceSession({
+        boothId: body.boothId,
+        userId: body.userId || req.ip || 'anon',
+      });
+      res.status(201).json({ session });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/ai/voice/:sessionId/turn', async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as { transcript?: string };
+      if (!body.transcript) {
+        res.status(400).json({ error: 'Thiếu transcript giọng nói.' });
+        return;
+      }
+      const result = await aiConsultantService.processVoiceTurn({
+        sessionId: getParam(req.params.sessionId),
+        transcript: body.transcript,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/ai/voice/:sessionId/end', (req: Request, res: Response) => {
+    const result = aiConsultantService.endVoiceSession(getParam(req.params.sessionId));
+    res.json(result);
   });
 
   return router;
