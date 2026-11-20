@@ -122,6 +122,7 @@ export function requireAdminAuth(req: Request, res: Response, next: NextFunction
     return;
   }
 
+  res.locals.adminUsername = verified.username || 'admin';
   next();
 }
 

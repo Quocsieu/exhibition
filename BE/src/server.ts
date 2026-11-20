@@ -6,9 +6,11 @@ import express, { type Express } from 'express';
 import cors from 'cors';
 import type { Server } from 'socket.io';
 import { ExpoDatabase } from './database/db.js';
+import { V28CatalogDatabase } from './database/v28Database.js';
 import { ExpoService } from './services/expoService.js';
 import { ExpoController, type DataMutationCallback } from './controllers/expoController.js';
 import { createApiRoutes } from './routes/apiRoutes.js';
+import { createV28ApiRoutes } from './routes/v28Routes.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 import type { ServerToClientEvents, ClientToServerEvents } from './schemas/expoSchemas.js';
 
@@ -52,7 +54,8 @@ export function buildCorsOriginChecker(rawCors: string = '*'): CorsOriginConfig 
 export function createApp(
   db: ExpoDatabase,
   corsOrigin: CorsOriginConfig = '*',
-  onMutation?: DataMutationCallback
+  onMutation?: DataMutationCallback,
+  v28Db?: V28CatalogDatabase
 ): Express {
   const app = express();
   app.use(cors({ origin: corsOrigin }));
@@ -72,6 +75,11 @@ export function createApp(
   });
   app.use('/api', createApiRoutes(controller));
 
+  if (v28Db) {
+    app.locals.v28Db = v28Db;
+    app.use('/api/v28', createV28ApiRoutes(v28Db));
+  }
+
   return app;
 }
 
@@ -88,8 +96,15 @@ if (isMain) {
       ? rawDbPath
       : path.resolve(BE_ROOT_DIR, rawDbPath);
 
+  const rawV28DbPath = process.env.V28_SQLITE_DB_PATH || './data/expo_v28_dev.db';
+  const v28DbPath =
+    rawV28DbPath === ':memory:' || path.isAbsolute(rawV28DbPath)
+      ? rawV28DbPath
+      : path.resolve(BE_ROOT_DIR, rawV28DbPath);
+
   const db = new ExpoDatabase(dbPath);
-  const app = createApp(db, CORS_ORIGIN);
+  const v28Db = new V28CatalogDatabase(v28DbPath);
+  const app = createApp(db, CORS_ORIGIN, undefined, v28Db);
   const httpServer = http.createServer(app);
 
   const io = attachSocketServer(httpServer, db, CORS_ORIGIN);
@@ -97,6 +112,8 @@ if (isMain) {
 
   httpServer.listen(PORT, () => {
     console.log(`[Virtual Expo BE] Running on http://localhost:${PORT}`);
+    console.log(`[Virtual Expo BE] Legacy V27.5 DB: ${dbPath}`);
+    console.log(`[Virtual Expo BE] Isolated V28 DB: ${v28DbPath}`);
     const svc = app.locals.expoService as ExpoService | undefined;
     svc?.prewarmTtsWorker();
   });
@@ -107,6 +124,7 @@ if (isMain) {
       httpServer.close(() => {
         try {
           db.close();
+          v28Db.close();
         } catch {
           // ignore
         }

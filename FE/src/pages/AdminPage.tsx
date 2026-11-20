@@ -10,6 +10,7 @@ import {
 } from '../types/expo';
 import { apiClient, buildBoothSlotViews } from '../services/api';
 import { formatCurrency } from '../components/ProductPanel';
+import { V28Phase1Workspace } from '../components/adminV28/V28Phase1Workspace';
 
 export interface AdminPageProps {
   initialBoothId?: string | null;
@@ -73,7 +74,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'slots' | 'booths' | 'products'>('slots');
+  const [activeTab, setActiveTab] = useState<'slots' | 'booths' | 'products' | 'v28-catalog'>('slots');
   const [booths, setBooths] = useState<Booth[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [slotAssignments, setSlotAssignments] = useState<BoothSlotAssignment[]>([]);
@@ -728,7 +729,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         >
           📦 Kho Sản phẩm ({products.length})
         </button>
+        <button
+          type="button"
+          className={`dashboard-tab ${activeTab === 'v28-catalog' ? 'dashboard-tab--active' : ''}`}
+          onClick={() => setActiveTab('v28-catalog')}
+        >
+          🚀 V28 Doanh nghiệp, Catalog & Excel
+        </button>
       </nav>
+
+      {activeTab === 'v28-catalog' && <V28Phase1Workspace />}
 
       {loading && <p className="loading-text">⏳ Đang đồng bộ dữ liệu...</p>}
 
