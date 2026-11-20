@@ -99,6 +99,7 @@ export interface ExhibitionVersionDetail {
   hallDepth: number;
   hallBounds: RectBounds;
   walkableBounds: RectBounds;
+  walkableRegions?: RectBounds[];
   centralAvenueBounds: RectBounds;
   welcomeAreaBounds: RectBounds;
   spawnPoint: { x: number; z: number; rotationY: number };
@@ -385,6 +386,7 @@ export class V28ExhibitionService {
             hallDepth: layout.hallDepth,
             hallBounds: layout.hallBounds,
             walkableBounds: layout.walkableBounds,
+            walkableRegions: layout.walkableRegions,
             centralAvenueBounds: layout.centralAvenueBounds,
             welcomeAreaBounds: layout.welcomeAreaBounds,
             spawnPoint: layout.spawnPoint,
@@ -642,6 +644,7 @@ export class V28ExhibitionService {
       hallDepth: Number(layoutMeta.hallDepth || 80),
       hallBounds: layoutMeta.hallBounds,
       walkableBounds: layoutMeta.walkableBounds,
+      walkableRegions: Array.isArray(layoutMeta.walkableRegions) ? layoutMeta.walkableRegions : undefined,
       centralAvenueBounds: layoutMeta.centralAvenueBounds,
       welcomeAreaBounds: layoutMeta.welcomeAreaBounds,
       spawnPoint: layoutMeta.spawnPoint,

@@ -11,6 +11,13 @@ import { DynamicBooth3D } from './DynamicBooth3D';
 import type { V28NpcAnimState } from './DynamicBoothNpc3D';
 import { getTextureCacheStats } from './v28BoothAssets';
 import { V27VisualKitLayer, useV27TerrazzoFloorTexture } from './V27VisualKit';
+import {
+  clampCameraPosition,
+  clampPointToWalkable,
+  computeRotatedBoothCollider,
+  deriveWalkableRegions,
+  isPointWalkable,
+} from './v28NavigationBounds';
 import { AvatarCharacter } from '../LocalPlayer';
 import { SalesAssistantNpc } from '../SalesAssistantNpc';
 import type { Booth as LegacyBooth } from '../../types/expo';
@@ -217,20 +224,41 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
     }
   }, [world.versionId, world.spawnPoint.x, world.spawnPoint.z, world.spawnPoint.rotationY]);
 
-  // Apply click/tap target
+  // Precomputed ROTATED booth AABBs & adaptive multi-region walkable areas
+  const boothColliders = useMemo(
+    () => world.booths.map((b) => computeRotatedBoothCollider(b, 0.35)),
+    [world.booths]
+  );
+  const walkableRegions = useMemo(() => deriveWalkableRegions(world), [world]);
+
+  const isWalkable = (x: number, z: number) =>
+    isPointWalkable(x, z, walkableRegions, boothColliders);
+
+  // Apply click/tap target ONLY when inside valid walkable regions
   useEffect(() => {
     if (playerTarget) {
-      moveTargetRef.current = { ...playerTarget };
+      if (isPointWalkable(playerTarget.x, playerTarget.z, walkableRegions, boothColliders)) {
+        moveTargetRef.current = { ...playerTarget };
+      } else {
+        moveTargetRef.current = null;
+      }
     }
-  }, [playerTarget]);
+  }, [playerTarget, walkableRegions, boothColliders]);
 
-  // Apply instant teleport
+  // Apply instant teleport (strictly validated & clamped into valid walkable regions)
   useEffect(() => {
     if (teleportPos) {
-      playerPosRef.current = { ...teleportPos, state: 'idle' };
+      const safe = clampPointToWalkable(
+        teleportPos.x,
+        teleportPos.z,
+        walkableRegions,
+        boothColliders,
+        world.spawnPoint
+      );
+      playerPosRef.current = { x: safe.x, z: safe.z, rotationY: teleportPos.rotationY, state: 'idle' };
       moveTargetRef.current = null;
       if (avatarRef.current) {
-        avatarRef.current.position.set(teleportPos.x, 0, teleportPos.z);
+        avatarRef.current.position.set(safe.x, 0, safe.z);
         avatarRef.current.rotation.y = teleportPos.rotationY;
       }
       onPlayerMove?.({ ...playerPosRef.current });
@@ -297,33 +325,6 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       canvasEl.removeEventListener('wheel', onWheel);
     };
   }, [gl.domElement]);
-
-  // Precomputed booth AABBs for fast client-side walk collision
-  const boothColliders = useMemo(
-    () =>
-      world.booths.map((b) => ({
-        minX: b.positionX - b.footprintWidth / 2 - 0.35,
-        maxX: b.positionX + b.footprintWidth / 2 + 0.35,
-        minZ: b.positionZ - b.footprintDepth / 2 - 0.35,
-        maxZ: b.positionZ + b.footprintDepth / 2 + 0.35,
-      })),
-    [world.booths]
-  );
-
-  const isWalkable = (x: number, z: number) => {
-    if (
-      x < world.walkableBounds.minX ||
-      x > world.walkableBounds.maxX ||
-      z < world.walkableBounds.minZ ||
-      z > world.walkableBounds.maxZ
-    ) {
-      return false;
-    }
-    for (const c of boothColliders) {
-      if (x >= c.minX && x <= c.maxX && z >= c.minZ && z <= c.maxZ) return false;
-    }
-    return true;
-  };
 
   const lookTargetVec = useMemo(() => new THREE.Vector3(), []);
   const desiredCamPos = useMemo(() => new THREE.Vector3(), []);
@@ -424,6 +425,14 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       lookTargetVec.set(p.x, 1.5, p.z - 2.0);
     }
 
+    const clampedCam = clampCameraPosition(
+      desiredCamPos,
+      world.hallBounds,
+      cameraMode,
+      world.cameraOverviewBounds.radius
+    );
+    desiredCamPos.set(clampedCam.x, clampedCam.y, clampedCam.z);
+
     camera.position.lerp(desiredCamPos, Math.min(1, dt * 6.5));
     camera.lookAt(lookTargetVec);
 
@@ -470,7 +479,13 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       textures: gl.info.memory.textures,
       textureCache: getTextureCacheStats(),
       lodCounts,
+      walkableRegionCount: walkableRegions.length,
       player: { x: Math.round(p.x * 10) / 10, z: Math.round(p.z * 10) / 10 },
+      cameraPos: {
+        x: Math.round(camera.position.x * 10) / 10,
+        y: Math.round(camera.position.y * 10) / 10,
+        z: Math.round(camera.position.z * 10) / 10,
+      },
       remoteAvatarCount: remoteAvatars.length,
     };
   });
@@ -499,6 +514,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
         onClick={(e) => {
           if (dragStateRef.current.dragged) return;
           e.stopPropagation();
+          if (!isWalkable(e.point.x, e.point.z)) return;
           onFloorClick(e.point.x, e.point.z);
         }}
       >

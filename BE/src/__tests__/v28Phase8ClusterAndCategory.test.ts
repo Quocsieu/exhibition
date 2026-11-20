@@ -8,20 +8,29 @@ import { V28CatalogDatabase } from '../database/v28Database.js';
 import { V28ExhibitionService } from '../services/v28/exhibitionService.js';
 
 describe('V28 PHASE 8 — Multiple Variable-Size U-Shaped Category Zones & V27.5 Reuse', () => {
-  it('generates valid, overlap-free, BFS-connected multi-U layouts for 6, 20, 50, 100 and 150 booths', () => {
-    for (const count of [6, 20, 50, 100, 150]) {
+  it('generates valid, overlap-free, BFS-connected multi-U layouts for 1, 5, 6, 20, 50, 100 and 150 booths with adaptive walkableRegions', () => {
+    for (const count of [1, 5, 6, 20, 50, 100, 150]) {
       const layout = generateDynamicExhibitionLayout({ targetBoothCount: count });
       const val = validateExhibitionLayout(layout);
 
       expect(layout.placements.length, `booths=${count}`).toBe(count);
       expect(layout.clusters.length).toBe(layout.zones.length); // 1 U-shaped zone per category zone!
       expect(layout.clusters.reduce((s, c) => s + c.boothCount, 0)).toBe(count);
+      expect(layout.walkableRegions.length).toBeGreaterThanOrEqual(3);
       expect(val.valid, `errors for ${count}: ${val.errors.join('; ')}`).toBe(true);
       expect(val.stats.overlapCount).toBe(0);
       expect(val.stats.outOfBoundsCount).toBe(0);
       expect(val.stats.blockedWalkwayCount).toBe(0);
       expect(val.stats.unreachableBoothCount).toBe(0);
       expect(val.stats.focusClipCount).toBe(0);
+
+      // Every booth approachPoint & Spawn must fall inside at least one adaptive walkableRegion
+      const inRegions = (x: number, z: number) =>
+        layout.walkableRegions.some((r) => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ);
+      expect(inRegions(layout.spawnPoint.x, layout.spawnPoint.z), `spawn in regions (${count})`).toBe(true);
+      for (const p of layout.placements) {
+        expect(inRegions(p.approachPoint.x, p.approachPoint.z), `approach #${p.slotIndex} in regions (${count})`).toBe(true);
+      }
     }
   });
 
@@ -63,6 +72,18 @@ describe('V28 PHASE 8 — Multiple Variable-Size U-Shaped Category Zones & V27.5
       expect(v1.validation.valid).toBe(true);
       expect(v1.zones.some((z) => z.displayName.includes('Công nghệ'))).toBe(true);
       expect(v1.zones.every((z) => z.categoryId !== null)).toBe(true);
+      expect(Array.isArray(v1.walkableRegions) && v1.walkableRegions.length >= 6).toBe(true);
+
+      // Verify exact dynamic counts (1, 5, 6, 20, 50, 100, 150), 0 duplicate Booth IDs & non-destructive resize
+      for (const n of [1, 5, 6, 20, 50, 150, 100]) {
+        const draft = exhSvc.createDraftVersion(exh.id, { targetBoothCount: n });
+        const published = exhSvc.publishVersion(exh.id, draft.versionId);
+        const reloaded = exhSvc.getActiveExhibitionWorld();
+        expect(published.booths.length).toBe(n);
+        expect(reloaded.booths.length).toBe(n);
+        expect(new Set(reloaded.booths.map((b) => b.boothId)).size).toBe(n);
+        expect(reloaded.validation.valid).toBe(true);
+      }
     } finally {
       v28Db.close();
     }

@@ -560,6 +560,7 @@ export interface V28ExhibitionVersionDetail {
   hallDepth: number;
   hallBounds: V28RectBounds;
   walkableBounds: V28RectBounds;
+  walkableRegions?: V28RectBounds[];
   centralAvenueBounds: V28RectBounds;
   welcomeAreaBounds: V28RectBounds;
   spawnPoint: { x: number; z: number; rotationY: number };

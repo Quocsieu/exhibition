@@ -35,54 +35,54 @@ export const V28_ARCHETYPES: readonly ArchetypeFootprintSpec[] = [
     theme: 'living',
     label: 'Signature Ring',
     glbPath: 'models/booths/v27_4/booth_01_signature_ring_v27_4.glb',
-    width: 9.4,
-    depth: 6.95,
-    height: 4.05,
+    width: 6.72,
+    depth: 5.19,
+    height: 3.96,
   },
   {
     id: 'organic_flow',
     theme: 'design',
     label: 'Organic Flow',
     glbPath: 'models/booths/v27_4/booth_02_organic_flow_v27_4.glb',
-    width: 6.75,
-    depth: 5.2,
-    height: 3.85,
+    width: 6.72,
+    depth: 5.19,
+    height: 3.82,
   },
   {
     id: 'grand_portal',
     theme: 'tech',
     label: 'Grand Portal',
     glbPath: 'models/booths/v27_4/booth_03_grand_portal_v27_4.glb',
-    width: 6.75,
-    depth: 5.2,
-    height: 3.85,
+    width: 6.72,
+    depth: 5.19,
+    height: 3.8,
   },
   {
     id: 'wave_pavilion',
     theme: 'energy',
     label: 'Wave Pavilion',
     glbPath: 'models/booths/v27_4/booth_04_wave_pavilion_v27_4.glb',
-    width: 6.75,
-    depth: 6.65,
-    height: 5.7,
+    width: 6.72,
+    depth: 5.19,
+    height: 3.93,
   },
   {
     id: 'gallery_arch',
     theme: 'coffee',
     label: 'Gallery Arch',
     glbPath: 'models/booths/v27_4/booth_05_gallery_arch_v27_4.glb',
-    width: 6.75,
-    depth: 5.2,
-    height: 3.8,
+    width: 6.72,
+    depth: 5.19,
+    height: 3.78,
   },
   {
     id: 'dynamic_frame',
     theme: 'robotics',
     label: 'Dynamic Frame',
     glbPath: 'models/booths/v27_4/booth_06_dynamic_frame_v27_4.glb',
-    width: 6.9,
-    depth: 5.2,
-    height: 4.25,
+    width: 6.87,
+    depth: 5.19,
+    height: 4.02,
   },
 ] as const;
 
@@ -110,6 +110,7 @@ export interface LayoutGeneratorInput {
   mainAvenueWidth?: number;
   aisleWidth?: number;
   perimeterWidth?: number;
+  boothGap?: number;
   layoutSeed?: number;
   categoryZones?: CategoryZoneInput[];
   reservedAreas?: Array<{ id: string; label: string; bounds: RectBounds }>;
@@ -204,6 +205,7 @@ export interface GeneratedExhibitionLayout {
   hallDepth: number;
   hallBounds: RectBounds;
   walkableBounds: RectBounds;
+  walkableRegions: RectBounds[];
   centralAvenueBounds: RectBounds;
   welcomeAreaBounds: RectBounds;
   spawnPoint: { x: number; z: number; rotationY: number };
@@ -238,17 +240,21 @@ export interface LayoutValidationResult {
 }
 
 // ============================================================================
-// VARIABLE-SIZE U-SHAPED ZONE CONSTANTS (Spacious, Zero-Overlap, V27.5 Heritage)
+// VARIABLE-SIZE U-SHAPED ZONE CONSTANTS (Measured 6-GLB BBox, Balanced Spacing)
+// Real GLB max footprint: W = 6.87m (dynamic_frame), 6.72m (others); D = 5.19m
 // ============================================================================
 export const MAX_BOOTHS_PER_CLUSTER = 6; // legacy export kept for compatibility
-export const BOOTH_PITCH_M = 12.2; // accommodates 9.4m widest archetype + 2.8m clear gap
-export const BOOTH_EDGE_INSET_M = 4.6; // center offset from outer U wall to booth center
-export const CORNER_CLEARANCE_M = 10.8; // generous clearance between back-row & side-wing booths
-export const MIN_U_INTERIOR_WIDTH_M = 25.0; // spacious >= 25m interior courtyard matching V27.5
-export const ZONE_GAP_X_M = 14.0; // wide walkway between adjacent U-zones
-export const GRAND_BOULEVARD_WIDTH_M = 18.0; // grand horizontal central avenue between facing U rows
-export const ENTRY_SPINE_WIDTH_M = 14.0; // clear North-South entrance boulevard from Spawn
-export const WELCOME_AREA_DEPTH = 18.0;
+export const MAX_ARCHETYPE_WIDTH_M = 6.87;
+export const MAX_ARCHETYPE_DEPTH_M = 5.19;
+export const BOOTH_GAP_M = 2.2; // clear gap between adjacent booths (NPC + signage breathing room)
+export const BOOTH_PITCH_M = 9.07; // MAX_ARCHETYPE_WIDTH_M + BOOTH_GAP_M
+export const BOOTH_EDGE_INSET_M = 3.2; // half-depth (2.60m) + 0.60m clean outer wall margin
+export const CORNER_CLEARANCE_M = 8.4; // back half-depth (2.60m) + wing half-width (3.44m) + 2.36m corner breathing room
+export const MIN_U_INTERIOR_WIDTH_M = 19.0; // >= 2*(2.60 + 4.40 focus) + 5.0m clear promenade
+export const ZONE_GAP_X_M = 10.0; // clean walkway between adjacent U-zones
+export const GRAND_BOULEVARD_WIDTH_M = 14.0; // grand horizontal central avenue between facing U rows
+export const ENTRY_SPINE_WIDTH_M = 12.0; // clear North-South entrance boulevard from Spawn
+export const WELCOME_AREA_DEPTH = 14.0;
 export const APPROACH_OFFSET_M = 2.4;
 export const FOCUS_CAMERA_OFFSET_M = 4.4;
 
@@ -298,7 +304,7 @@ export function computeUZoneSideCounts(count: number): {
   return { backCount, leftCount, rightCount };
 }
 
-function computeUZoneDimensions(count: number): {
+function computeUZoneDimensions(count: number, boothGap = BOOTH_GAP_M): {
   width: number;
   depth: number;
   backCount: number;
@@ -307,17 +313,34 @@ function computeUZoneDimensions(count: number): {
 } {
   const { backCount, leftCount, rightCount } = computeUZoneSideCounts(count);
   const sideMax = Math.max(leftCount, rightCount);
+  const effectivePitch = MAX_ARCHETYPE_WIDTH_M + boothGap;
 
   // Back wall needs enough width so back booths don't collide with left/right wings at corners
-  const backSpan = backCount > 0 ? backCount * BOOTH_PITCH_M : 0;
-  const interiorWidth = Math.max(MIN_U_INTERIOR_WIDTH_M, backSpan + 6.0);
-  const width = round2(interiorWidth + BOOTH_EDGE_INSET_M * 2 + 4.0);
+  const backSpan = backCount > 0 ? backCount * effectivePitch - boothGap : 0;
+  const interiorWidth = Math.max(MIN_U_INTERIOR_WIDTH_M, backSpan + 4.4);
+  const width = round2(interiorWidth + BOOTH_EDGE_INSET_M * 2 + 2.0);
 
   // Depth covers back wall + corner clearance + wing booths + open front apron
-  const wingSpan = sideMax > 0 ? sideMax * BOOTH_PITCH_M : 0;
-  const depth = round2(Math.max(36.0, CORNER_CLEARANCE_M + wingSpan + 8.0));
+  const wingSpan = sideMax > 0 ? sideMax * effectivePitch - boothGap : 0;
+  const depth = round2(Math.max(24.0, CORNER_CLEARANCE_M + wingSpan + 6.0));
 
   return { width, depth, backCount, leftCount, rightCount };
+}
+
+/**
+ * Computes centered local 1D offsets along a U-side using each booth's ACTUAL measured archetype width
+ * plus the configured clear gap (so different model widths never share a naive uniform pitch).
+ */
+function computeSideCenteredOffsets(widths: number[], gap: number): number[] {
+  if (widths.length === 0) return [];
+  const totalSpan = widths.reduce((s, w) => s + w, 0) + Math.max(0, widths.length - 1) * gap;
+  const offsets: number[] = [];
+  let cursor = -totalSpan / 2;
+  for (const w of widths) {
+    offsets.push(round2(cursor + w / 2));
+    cursor += w + gap;
+  }
+  return offsets;
 }
 
 export function getBoothWorldAabb(
@@ -396,9 +419,10 @@ export function generateDynamicExhibitionLayout(
   const targetBoothCount = Math.max(1, Math.min(500, Math.floor(input.targetBoothCount)));
   const preferredZoneCapacity = Math.max(4, Math.min(50, Math.floor(input.preferredZoneCapacity ?? 20)));
   const hallStyle = input.hallStyle ?? 'grand_expo';
-  const mainAvenueWidth = Math.max(12.0, input.mainAvenueWidth ?? ENTRY_SPINE_WIDTH_M);
+  const mainAvenueWidth = Math.max(10.0, input.mainAvenueWidth ?? ENTRY_SPINE_WIDTH_M);
   const aisleWidth = Math.max(8.0, input.aisleWidth ?? 10.0);
-  const perimeterWidth = Math.max(7.0, input.perimeterWidth ?? 8.0);
+  const perimeterWidth = Math.max(6.0, input.perimeterWidth ?? 7.0);
+  const boothGap = Math.max(1.2, Math.min(4.5, input.boothGap ?? BOOTH_GAP_M));
   const layoutSeed = input.layoutSeed ?? 28;
   const reservedAreas = input.reservedAreas ?? [];
   const categoryZones = input.categoryZones ?? [];
@@ -430,7 +454,7 @@ export function generateDynamicExhibitionLayout(
         displayName,
         categoryTag: cz.categoryName,
         boothCount: take,
-        dims: computeUZoneDimensions(take),
+        dims: computeUZoneDimensions(take, boothGap),
       });
     }
     if (remaining > 0) {
@@ -441,7 +465,7 @@ export function generateDynamicExhibitionLayout(
         displayName: 'Khu Tổng hợp',
         categoryTag: 'Tổng hợp',
         boothCount: remaining,
-        dims: computeUZoneDimensions(remaining),
+        dims: computeUZoneDimensions(remaining, boothGap),
       });
     }
   } else {
@@ -459,7 +483,7 @@ export function generateDynamicExhibitionLayout(
         displayName: `Khu ${code}`,
         categoryTag: `Phân khu ${code}`,
         boothCount: take,
-        dims: computeUZoneDimensions(take),
+        dims: computeUZoneDimensions(take, boothGap),
       });
     }
   }
@@ -694,27 +718,38 @@ export function generateDynamicExhibitionLayout(
     };
 
     const dirSign = openingDirection === 'south' ? 1 : -1;
+    const peekArch = (offsetIdx: number) =>
+      V28_ARCHETYPES[(placements.length + offsetIdx + layoutSeed) % V28_ARCHETYPES.length];
+
     // 1. Back Wall booths (facing INWARD toward the open side: +Z if opening south, -Z if opening north)
     const backZ = centerZ - dirSign * (depth / 2 - BOOTH_EDGE_INSET_M);
     const backRotY = openingDirection === 'south' ? 0 : Number(Math.PI.toFixed(4));
-    const backStartX = centerX - ((backCount - 1) * BOOTH_PITCH_M) / 2;
+    const backWidths = Array.from({ length: backCount }, (_, i) => peekArch(i).width);
+    const backOffsets = computeSideCenteredOffsets(backWidths, boothGap);
     for (let i = 0; i < backCount; i++) {
-      addBooth(backStartX + i * BOOTH_PITCH_M, backZ, backRotY);
+      addBooth(centerX + backOffsets[i], backZ, backRotY);
     }
 
     // 2. Left Wing booths (West wall, facing East +X into the courtyard)
     const leftX = centerX - (width / 2 - BOOTH_EDGE_INSET_M);
     const leftRotY = Number((Math.PI / 2).toFixed(4));
-    const wingStartZ = centerZ - dirSign * (depth / 2 - CORNER_CLEARANCE_M - BOOTH_PITCH_M / 2);
+    const leftWidths = Array.from({ length: leftCount }, (_, i) => peekArch(i).width);
+    const leftSpan = leftWidths.reduce((s, w) => s + w, 0) + Math.max(0, leftCount - 1) * boothGap;
+    const leftOffsets = computeSideCenteredOffsets(leftWidths, boothGap);
+    const leftCenterZ = centerZ - dirSign * (depth / 2 - CORNER_CLEARANCE_M - leftSpan / 2);
     for (let i = 0; i < leftCount; i++) {
-      addBooth(leftX, wingStartZ + dirSign * i * BOOTH_PITCH_M, leftRotY);
+      addBooth(leftX, leftCenterZ + dirSign * leftOffsets[i], leftRotY);
     }
 
     // 3. Right Wing booths (East wall, facing West -X into the courtyard)
     const rightX = centerX + (width / 2 - BOOTH_EDGE_INSET_M);
     const rightRotY = Number((-Math.PI / 2).toFixed(4));
+    const rightWidths = Array.from({ length: rightCount }, (_, i) => peekArch(i).width);
+    const rightSpan = rightWidths.reduce((s, w) => s + w, 0) + Math.max(0, rightCount - 1) * boothGap;
+    const rightOffsets = computeSideCenteredOffsets(rightWidths, boothGap);
+    const rightCenterZ = centerZ - dirSign * (depth / 2 - CORNER_CLEARANCE_M - rightSpan / 2);
     for (let i = 0; i < rightCount; i++) {
-      addBooth(rightX, wingStartZ + dirSign * i * BOOTH_PITCH_M, rightRotY);
+      addBooth(rightX, rightCenterZ + dirSign * rightOffsets[i], rightRotY);
     }
   };
 
@@ -733,13 +768,78 @@ export function generateDynamicExhibitionLayout(
     placeOneUZone(z, runningIdx++, southCentersX[i], cz, 'north');
   }
 
+  // 4. Build Adaptive Walkable Regions (union of U-zone courtyards, Grand Boulevard, Entry Spine, Welcome Area,
+  //    and inter-U-zone connecting walkways — strictly EXCLUDING empty void outside narrower rows or behind walls!)
+  const walkableRegions: RectBounds[] = [];
+  const allZoneMinX = zones.reduce((m, z) => Math.min(m, z.bounds.minX), -mainAvenueWidth / 2);
+  const allZoneMaxX = zones.reduce((m, z) => Math.max(m, z.bounds.maxX), mainAvenueWidth / 2);
+
+  // 4a. Grand Central Boulevard (horizontal spine connecting all facing U-zone mouths)
+  walkableRegions.push({
+    minX: round2(allZoneMinX),
+    maxX: round2(allZoneMaxX),
+    minZ: round2(northRowBottomZ - 1.5),
+    maxZ: round2(hasSouthRow ? southRowTopZ + 1.5 : northRowBottomZ + WELCOME_AREA_DEPTH),
+  });
+
+  // 4b. South Entry Spine (from Grand Boulevard down to Spawn & Welcome Area)
+  walkableRegions.push({
+    minX: round2(-mainAvenueWidth / 2 - 1.5),
+    maxX: round2(mainAvenueWidth / 2 + 1.5),
+    minZ: round2(northRowBottomZ - 1.5),
+    maxZ: round2(hallBounds.maxZ - 2.0),
+  });
+
+  // 4c. Welcome Area apron around Spawn (bounded horizontally to Entry Spine + South row span)
+  const southSpanMinX = southZones.length > 0
+    ? Math.min(...zones.filter((z) => z.openingDirection === 'north').map((z) => z.bounds.minX))
+    : -mainAvenueWidth / 2 - 8.0;
+  const southSpanMaxX = southZones.length > 0
+    ? Math.max(...zones.filter((z) => z.openingDirection === 'north').map((z) => z.bounds.maxX))
+    : mainAvenueWidth / 2 + 8.0;
+  walkableRegions.push({
+    minX: round2(Math.max(walkableBounds.minX, southSpanMinX)),
+    maxX: round2(Math.min(walkableBounds.maxX, southSpanMaxX)),
+    minZ: round2(zonesEndZ - 1.0),
+    maxZ: round2(hallBounds.maxZ - 2.0),
+  });
+
+  // 4d. Each U-Zone's Interior Courtyard & Open Entrance Apron
+  for (const z of zones) {
+    walkableRegions.push({
+      minX: round2(z.bounds.minX + 0.8),
+      maxX: round2(z.bounds.maxX - 0.8),
+      minZ: round2(z.openingDirection === 'south' ? z.bounds.minZ + 0.8 : z.bounds.minZ - 1.5),
+      maxZ: round2(z.openingDirection === 'south' ? z.bounds.maxZ + 1.5 : z.bounds.maxZ - 0.8),
+    });
+  }
+
+  // 4e. Inter-U-Zone Walkways ONLY between adjacent U-zones in the same row
+  const addRowInterWalkways = (rowZones: GeneratedZoneSpec[]) => {
+    const sorted = [...rowZones].sort((a, b) => a.bounds.minX - b.bounds.minX);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const left = sorted[i];
+      const right = sorted[i + 1];
+      if (right.bounds.minX > left.bounds.maxX) {
+        walkableRegions.push({
+          minX: round2(left.bounds.maxX - 0.5),
+          maxX: round2(right.bounds.minX + 0.5),
+          minZ: round2(Math.max(left.bounds.minZ, right.bounds.minZ)),
+          maxZ: round2(Math.min(left.bounds.maxZ, right.bounds.maxZ)),
+        });
+      }
+    }
+  };
+  addRowInterWalkways(zones.filter((z) => z.openingDirection === 'south'));
+  addRowInterWalkways(zones.filter((z) => z.openingDirection === 'north'));
+
   const radius = round2(Math.hypot(halfHallWidth, halfHallDepth));
   const cameraOverviewBounds = {
     centerX: 0,
     centerZ: 0,
     radius,
-    recommendedHeight: round2(Math.max(30, radius * 0.78)),
-    recommendedDistance: round2(Math.max(38, radius * 1.05)),
+    recommendedHeight: round2(Math.max(26, radius * 0.78)),
+    recommendedDistance: round2(Math.max(34, radius * 1.05)),
   };
 
   const eaveHeight = hallWidth > 160 ? 16.0 : hallWidth > 100 ? 13.0 : 10.5;
@@ -754,6 +854,7 @@ export function generateDynamicExhibitionLayout(
       mainAvenueWidth,
       aisleWidth,
       perimeterWidth,
+      boothGap,
       layoutSeed,
       categoryZones,
       reservedAreas,
@@ -762,6 +863,7 @@ export function generateDynamicExhibitionLayout(
     hallDepth: totalDepth,
     hallBounds,
     walkableBounds,
+    walkableRegions,
     centralAvenueBounds,
     welcomeAreaBounds,
     spawnPoint,
