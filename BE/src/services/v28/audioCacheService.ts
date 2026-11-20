@@ -5,11 +5,28 @@ import type { V28CatalogDatabase } from '../../database/v28Database.js';
 import type { ExhibitionBoothPlacementView, ExhibitionVersionDetail } from './exhibitionService.js';
 
 /**
- * Verified official Gemini TTS model IDs from Google Gemini API docs:
- * - gemini-3.8-flash-lite-tts (fast cost-efficient WAV 24kHz mono 16-bit PCM)
- * - gemini-3.8-flash-tts (studio fidelity WAV)
+ * Verified official Gemini TTS model IDs from Google Gemini API docs (gemini-api-guides/speech-generation.md):
+ * - gemini-3.8-flash-tts (studio fidelity WAV via POST /v1beta/interactions)
+ * - gemini-3.8-flash-lite-tts (fast cost-efficient WAV)
+ * - gemini-3.1-flash-tts-preview (launched April 15, 2026)
+ * Configurable via BE/.env: V28_GEMINI_TTS_MODEL, V28_GEMINI_TTS_VOICE, V28_GEMINI_TTS_STYLE.
  */
-export const VERIFIED_GEMINI_TTS_MODEL = 'gemini-3.8-flash-lite-tts';
+export const VERIFIED_GEMINI_TTS_MODEL = 'gemini-3.8-flash-tts';
+
+export function getConfiguredGeminiTtsModel(): string {
+  return (process.env.V28_GEMINI_TTS_MODEL || '').trim() || VERIFIED_GEMINI_TTS_MODEL;
+}
+
+export function getConfiguredGeminiTtsVoice(): string {
+  return (process.env.V28_GEMINI_TTS_VOICE || '').trim() || 'Kore';
+}
+
+export function getConfiguredGeminiTtsStyle(): string {
+  return (
+    (process.env.V28_GEMINI_TTS_STYLE || '').trim() ||
+    'warm, natural, professional Vietnamese female exhibition consultant'
+  );
+}
 
 export interface AudioAssetRecord {
   audioId: string;
@@ -24,7 +41,7 @@ export interface AudioAssetRecord {
   mimeType: string;
   durationSec: number;
   transcript: string;
-  status: 'ready' | 'pending' | 'failed';
+  status: 'ready' | 'pending' | 'generating' | 'failed';
   createdAt: string;
   audioUrl: string;
 }
@@ -34,6 +51,7 @@ export interface AudioStorageAdapter {
   put(storageKey: string, buffer: Buffer): Promise<void>;
   get(storageKey: string): Promise<Buffer | null>;
   exists(storageKey: string): Promise<boolean>;
+  delete?(storageKey: string): Promise<void>;
 }
 
 /**
@@ -72,6 +90,72 @@ export class LocalAudioStorageAdapter implements AudioStorageAdapter {
   public async exists(storageKey: string): Promise<boolean> {
     return fs.existsSync(this.resolveSafePath(storageKey));
   }
+
+  public async delete(storageKey: string): Promise<void> {
+    const filePath = this.resolveSafePath(storageKey);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+}
+
+/**
+ * Official Gemini TTS synthesis via Google Gemini Interactions REST API
+ * (`POST https://generativelanguage.googleapis.com/v1beta/interactions`).
+ * ONLY called when BOTH `GEMINI_API_KEY` and `V28_ENABLE_LIVE_AI=true` are explicitly enabled.
+ */
+async function synthesizeGeminiTtsWav(params: {
+  transcript: string;
+  modelId: string;
+  voiceId: string;
+  style: string;
+}): Promise<{ buffer: Buffer; durationSec: number }> {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY chưa được cấu hình.');
+  }
+
+  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    },
+    signal: AbortSignal.timeout(15_000),
+    body: JSON.stringify({
+      model: params.modelId,
+      input: [
+        {
+          type: 'user_input',
+          content: [
+            {
+              type: 'text',
+              text: params.transcript,
+              annotations: [{ type: 'speech_metadata', style: params.style }],
+            },
+          ],
+        },
+      ],
+      response_format: { type: 'audio' },
+      generation_config: {
+        speech_config: [{ voice: params.voiceId }],
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Gemini TTS API trả về HTTP ${res.status}`);
+  }
+
+  const payload = (await res.json()) as { output_audio?: { data?: string } };
+  const base64Audio = payload?.output_audio?.data;
+  if (!base64Audio) {
+    throw new Error('Gemini TTS API không trả về dữ liệu output_audio.');
+  }
+  const buffer = Buffer.from(base64Audio, 'base64');
+  // Estimate duration from WAV 24kHz mono 16-bit PCM byte length (48,000 bytes/sec)
+  const durationSec = Math.max(0.5, Math.round((Math.max(0, buffer.length - 44) / 48000) * 10) / 10);
+  return { buffer, durationSec };
 }
 
 /**
@@ -131,10 +215,12 @@ export function computeAudioContentHash(params: {
 
 export class V28AudioCacheService {
   public readonly storage: AudioStorageAdapter;
+  private readonly inFlight = new Map<string, Promise<{ asset: AudioAssetRecord; cacheHit: boolean }>>();
   public readonly metrics = {
     cacheHits: 0,
     cacheMisses: 0,
     generationFailures: 0,
+    inFlightDeduplicated: 0,
   };
 
   constructor(
@@ -183,83 +269,114 @@ export class V28AudioCacheService {
     modelId?: string;
   }): Promise<{ asset: AudioAssetRecord; cacheHit: boolean }> {
     const language = params.language || 'vi-VN';
-    const voiceId = params.voiceId || 'vi-VN-female-consultant';
+    const voiceId = params.voiceId || getConfiguredGeminiTtsVoice();
+    const style = getConfiguredGeminiTtsStyle();
     const liveGeminiEnabled =
-      Boolean(process.env.GEMINI_API_KEY) && process.env.V28_ENABLE_LIVE_AI === 'true';
+      Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 10) &&
+      process.env.V28_ENABLE_LIVE_AI === 'true';
+    const configuredModel = getConfiguredGeminiTtsModel();
     const modelId =
       params.modelId ||
-      (liveGeminiEnabled ? VERIFIED_GEMINI_TTS_MODEL : `${VERIFIED_GEMINI_TTS_MODEL}:local-fallback`);
+      (liveGeminiEnabled ? configuredModel : `${configuredModel}:local-fallback`);
     const mimeType = 'audio/wav';
     const normalized = normalizeSpeechText(params.transcript);
     const contentHash = computeAudioContentHash({
-      text: normalized,
+      text: `${normalized}|${style}`,
       language,
       voiceId,
       modelId,
       mimeType,
     });
 
-    const existing = this.db
-      .prepare(
-        `SELECT * FROM audio_assets
-         WHERE entity_type = ? AND entity_id = ? AND slot_key = ? AND content_hash = ? AND status = 'ready'`
-      )
-      .get(params.entityType, params.entityId, params.slotKey, contentHash) as
-      | Record<string, unknown>
-      | undefined;
+    const dedupeKey = `${params.entityType}:${params.entityId}:${params.slotKey}:${contentHash}`;
+    const existingFlight = this.inFlight.get(dedupeKey);
+    if (existingFlight) {
+      this.metrics.inFlightDeduplicated++;
+      return existingFlight;
+    }
 
-    if (existing) {
-      const storageKey = String(existing.storage_key);
-      if (await this.storage.exists(storageKey)) {
-        this.metrics.cacheHits++;
-        return { asset: this.mapRow(existing), cacheHit: true };
+    const work = (async (): Promise<{ asset: AudioAssetRecord; cacheHit: boolean }> => {
+      const existing = this.db
+        .prepare(
+          `SELECT * FROM audio_assets
+           WHERE entity_type = ? AND entity_id = ? AND slot_key = ? AND content_hash = ? AND status = 'ready'`
+        )
+        .get(params.entityType, params.entityId, params.slotKey, contentHash) as
+        | Record<string, unknown>
+        | undefined;
+
+      if (existing) {
+        const storageKey = String(existing.storage_key);
+        if (await this.storage.exists(storageKey)) {
+          this.metrics.cacheHits++;
+          return { asset: this.mapRow(existing), cacheHit: true };
+        }
       }
-    }
 
-    this.metrics.cacheMisses++;
-    const audioId = `aud-${crypto.randomBytes(6).toString('hex')}`;
-    const storageKey = `${params.entityType}_${params.entityId}_${params.slotKey}_${contentHash}.wav`;
+      this.metrics.cacheMisses++;
+      const audioId = `aud-${crypto.randomBytes(6).toString('hex')}`;
+      const storageKey = `${params.entityType}_${params.entityId}_${params.slotKey}_${contentHash}.wav`;
 
-    // Record pending state first so concurrent Admin monitors see real Pending -> Ready / Failed transitions
-    this.db
-      .prepare(
-        `INSERT OR REPLACE INTO audio_assets (
-          audio_id, entity_type, entity_id, slot_key, content_hash,
-          language, voice_id, model_id, storage_key, mime_type, duration_sec, transcript, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'pending', CURRENT_TIMESTAMP)`
-      )
-      .run(
-        audioId,
-        params.entityType,
-        params.entityId,
-        params.slotKey,
-        contentHash,
-        language,
-        voiceId,
-        modelId,
-        storageKey,
-        mimeType,
-        normalized
-      );
-
-    try {
-      // Safe zero-cost local WAV synthesis by default; live Gemini TTS only if explicitly configured & approved
-      const { buffer, durationSec } = synthesizeFallbackWav(normalized);
-      await this.storage.put(storageKey, buffer);
-
+      // State 1: PENDING
       this.db
-        .prepare(`UPDATE audio_assets SET duration_sec = ?, status = 'ready' WHERE audio_id = ?`)
-        .run(durationSec, audioId);
-    } catch (err) {
-      this.metrics.generationFailures++;
-      this.db.prepare(`UPDATE audio_assets SET status = 'failed' WHERE audio_id = ?`).run(audioId);
-      throw err;
-    }
+        .prepare(
+          `INSERT OR REPLACE INTO audio_assets (
+            audio_id, entity_type, entity_id, slot_key, content_hash,
+            language, voice_id, model_id, storage_key, mime_type, duration_sec, transcript, status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'pending', CURRENT_TIMESTAMP)`
+        )
+        .run(
+          audioId,
+          params.entityType,
+          params.entityId,
+          params.slotKey,
+          contentHash,
+          language,
+          voiceId,
+          modelId,
+          storageKey,
+          mimeType,
+          normalized
+        );
 
-    const row = this.db
-      .prepare('SELECT * FROM audio_assets WHERE audio_id = ?')
-      .get(audioId) as Record<string, unknown>;
-    return { asset: this.mapRow(row), cacheHit: false };
+      try {
+        // State 2: GENERATING
+        this.db.prepare(`UPDATE audio_assets SET status = 'generating' WHERE audio_id = ?`).run(audioId);
+
+        const synth = liveGeminiEnabled
+          ? await synthesizeGeminiTtsWav({
+              transcript: normalized,
+              modelId: configuredModel,
+              voiceId,
+              style,
+            })
+          : synthesizeFallbackWav(normalized);
+
+        await this.storage.put(storageKey, synth.buffer);
+
+        // State 3: READY
+        this.db
+          .prepare(`UPDATE audio_assets SET duration_sec = ?, status = 'ready' WHERE audio_id = ?`)
+          .run(synth.durationSec, audioId);
+      } catch (err) {
+        // State 4: FAILED
+        this.metrics.generationFailures++;
+        this.db.prepare(`UPDATE audio_assets SET status = 'failed' WHERE audio_id = ?`).run(audioId);
+        throw err;
+      }
+
+      const row = this.db
+        .prepare('SELECT * FROM audio_assets WHERE audio_id = ?')
+        .get(audioId) as Record<string, unknown>;
+      return { asset: this.mapRow(row), cacheHit: false };
+    })();
+
+    this.inFlight.set(dedupeKey, work);
+    try {
+      return await work;
+    } finally {
+      this.inFlight.delete(dedupeKey);
+    }
   }
 
   /**
@@ -302,6 +419,14 @@ export class V28AudioCacheService {
         text: `Sản phẩm ${p.name}. ${priceText} ${stockText} ${p.description || ''}`,
       });
     }
+
+    const closingText = `Cảm ơn quý khách đã tham quan gian hàng ${booth.boothName} của ${booth.companyName}. Nếu quý khách cần tư vấn thêm về sản phẩm, vui lòng chuyển sang tab Chat để trò chuyện trực tiếp với tôi.`;
+    items.push({
+      entityType: 'booth',
+      entityId: booth.boothId,
+      slotKey: 'closing',
+      text: closingText,
+    });
 
     for (const item of items) {
       const res = await this.ensureCachedAudio({
@@ -423,5 +548,43 @@ export class V28AudioCacheService {
         .run(pid);
     }
     return this.getOrPrepareBoothAudioPack(booth);
+  }
+
+  /**
+   * Cache retention policy: removes superseded/orphaned audio entries beyond `maxAssets`
+   * while NEVER deleting the latest ready audio for any (entity_type, entity_id, slot_key).
+   */
+  public async pruneStaleAudioCache(maxAssets = 500): Promise<{ deletedCount: number }> {
+    const staleRows = this.db
+      .prepare(
+        `SELECT a.audio_id, a.storage_key
+         FROM audio_assets a
+         WHERE a.audio_id NOT IN (
+           SELECT latest.audio_id FROM (
+             SELECT audio_id, ROW_NUMBER() OVER (
+               PARTITION BY entity_type, entity_id, slot_key
+               ORDER BY created_at DESC, rowid DESC
+             ) AS rn
+             FROM audio_assets
+             WHERE status = 'ready'
+           ) latest
+           WHERE latest.rn = 1
+         )
+         ORDER BY a.created_at ASC`
+      )
+      .all() as Array<{ audio_id: string; storage_key: string }>;
+
+    const totalRow = this.db.prepare('SELECT COUNT(*) as cnt FROM audio_assets').get() as { cnt: number };
+    const excess = Math.max(0, Number(totalRow.cnt) - maxAssets);
+    const toDelete = staleRows.slice(0, excess);
+
+    for (const row of toDelete) {
+      if (this.storage.delete) {
+        await this.storage.delete(row.storage_key).catch(() => {});
+      }
+      this.db.prepare('DELETE FROM audio_assets WHERE audio_id = ?').run(row.audio_id);
+    }
+
+    return { deletedCount: toDelete.length };
   }
 }

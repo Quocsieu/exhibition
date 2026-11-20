@@ -1,11 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   v28Api,
+  type V28AiStatusResponse,
   type V28AudioClip,
   type V28BoothAudioPack,
   type V28BoothPlacementView,
-  type V28VoiceSessionInfo,
+  type V28Product,
 } from '../../services/v28Api';
+import { getNpcAssistantProfile } from '../../services/npcPresentationService';
+import { formatCurrency } from '../ProductPanel';
 import type { V28NpcAnimState } from '../../scene/v28/DynamicBoothNpc3D';
 
 export interface V28NpcConsultantPanelProps {
@@ -13,6 +16,20 @@ export interface V28NpcConsultantPanelProps {
   isMobilePortrait: boolean;
   onAnimStateChange: (state: V28NpcAnimState) => void;
   onClose: () => void;
+  onInspectProduct?: (product: V28Product, slotId: string) => void;
+}
+
+type PresentationStatus = 'GREETING' | 'PRESENTING' | 'PAUSED' | 'COMPLETED' | 'CANCELLED' | 'ERROR';
+
+interface PresentationStep {
+  stepIndex: number;
+  type: 'GREETING' | 'PRODUCT' | 'CLOSING';
+  slotKey: string;
+  slotLabel: string | null;
+  product: V28Product | null;
+  productIndex: number | null;
+  totalProducts: number;
+  fallbackText: string;
 }
 
 interface ChatMessage {
@@ -28,28 +45,92 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
   isMobilePortrait,
   onAnimStateChange,
   onClose,
+  onInspectProduct,
 }) => {
-  const [tab, setTab] = useState<'audio' | 'chat' | 'voice'>('audio');
-  const [audioPack, setAudioPack] = useState<V28BoothAudioPack | null>(null);
-  const [loadingAudio, setLoadingAudio] = useState<boolean>(false);
-  const [playingClipId, setPlayingClipId] = useState<string | null>(null);
-  const [activeSubtitle, setActiveSubtitle] = useState<string>('');
-  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const [activeTab, setActiveTab] = useState<'intro' | 'chat'>('intro');
 
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      role: 'npc',
-      text: `Xin chào quý khách! Tôi là Trợ lý AI tư vấn của gian hàng ${booth.boothName} (${booth.companyName}). Quý khách cần tìm hiểu sản phẩm nào?`,
-    },
-  ]);
+  // Authentic V27.5 NPC Persona (same name & role title as the 3D SalesAssistantNpc standing at this booth!)
+  const profile = useMemo(
+    () =>
+      getNpcAssistantProfile({
+        id: booth.boothId,
+        name: booth.boothName,
+        category: booth.category,
+        color: booth.color,
+      }),
+    [booth.boothId, booth.boothName, booth.category, booth.color]
+  );
+
+  // Build V27.5-compatible step sequence: Greeting -> Product 1..N -> Closing
+  const steps = useMemo<PresentationStep[]>(() => {
+    const validSlots = booth.slots.filter((s) => Boolean(s.product));
+    const totalProducts = validSlots.length;
+    const list: PresentationStep[] = [
+      {
+        stepIndex: 0,
+        type: 'GREETING',
+        slotKey: 'welcome',
+        slotLabel: null,
+        product: null,
+        productIndex: null,
+        totalProducts,
+        fallbackText: `Xin chào quý khách đến với gian hàng ${booth.boothName} của ${booth.companyName} tại ${booth.zoneName}. Tôi là ${profile.assistantName}, rất hân hạnh được giới thiệu các sản phẩm trưng bày tới quý khách.`,
+      },
+    ];
+
+    validSlots.forEach((s, idx) => {
+      const p = s.product!;
+      const priceStr =
+        p.price > 0
+          ? `Giá niêm yết ${formatCurrency(p.price, p.currency)}.`
+          : 'Quý khách vui lòng liên hệ gian hàng để nhận báo giá chi tiết.';
+      list.push({
+        stepIndex: list.length,
+        type: 'PRODUCT',
+        slotKey: s.slotId,
+        slotLabel: `Kệ trưng bày #${idx + 1}`,
+        product: p,
+        productIndex: idx + 1,
+        totalProducts,
+        fallbackText: `Sản phẩm ${p.name}. ${priceStr} ${p.description || ''}`.trim(),
+      });
+    });
+
+    list.push({
+      stepIndex: list.length,
+      type: 'CLOSING',
+      slotKey: 'closing',
+      slotLabel: null,
+      product: null,
+      productIndex: null,
+      totalProducts,
+      fallbackText: `Cảm ơn quý khách đã tham quan gian hàng ${booth.boothName} của ${booth.companyName}. Nếu quý khách cần tư vấn thêm, vui lòng chuyển sang tab Chat để trò chuyện trực tiếp với tôi.`,
+    });
+
+    return list;
+  }, [booth, profile.assistantName]);
+
+  // Presentation & Pre-generated Cached Audio Player State
+  const [audioPack, setAudioPack] = useState<V28BoothAudioPack | null>(null);
+  const [loadingAudio, setLoadingAudio] = useState<boolean>(true);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
+  const [status, setStatus] = useState<PresentationStatus>('GREETING');
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false);
+
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const activeClipKeyRef = useRef<string | null>(null);
+  const isMutedRef = useRef<boolean>(isMuted);
+  isMutedRef.current = isMuted;
+
+  // Chat State (preserved when switching tabs within the same booth consultation session!)
+  const [aiStatus, setAiStatus] = useState<V28AiStatusResponse | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState<string>('');
   const [chatLoading, setChatLoading] = useState<boolean>(false);
-
-  const [voiceSession, setVoiceSession] = useState<V28VoiceSessionInfo | null>(null);
-  const [voiceRemainingSec, setVoiceRemainingSec] = useState<number>(0);
-  const [voiceTranscriptInput, setVoiceTranscriptInput] = useState<string>('');
-  const [voiceStatus, setVoiceStatus] = useState<string>('');
-  const [voiceError, setVoiceError] = useState<string>('');
+  const [chatError, setChatError] = useState<string>('');
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   const visitorIdRef = useRef<string>(
     sessionStorage.getItem('v28_visitor_uid') ||
@@ -60,87 +141,226 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
       })()
   );
 
-  // Stop audio & end active voice session automatically whenever leaving booth or unmounting!
-  const stopAudio = () => {
+  // Helper: map step -> pre-generated cached clip
+  const getClipForStep = useCallback(
+    (step: PresentationStep | undefined): V28AudioClip | null => {
+      if (!audioPack || !step) return null;
+      return audioPack.clips.find((c) => c.slotKey === step.slotKey) || null;
+    },
+    [audioPack]
+  );
+
+  const stopAudioElement = useCallback(() => {
     if (audioElRef.current) {
+      audioElRef.current.onended = null;
+      audioElRef.current.onerror = null;
       audioElRef.current.pause();
       audioElRef.current.currentTime = 0;
       audioElRef.current = null;
     }
-    setPlayingClipId(null);
-    onAnimStateChange('idle');
-  };
+    activeClipKeyRef.current = null;
+    setIsAudioPlaying(false);
+  }, []);
 
+  const playStepAudio = useCallback(
+    (stepIdx: number, packOverride?: V28BoothAudioPack | null) => {
+      const step = steps[stepIdx];
+      if (!step) return;
+      const pack = packOverride !== undefined ? packOverride : audioPack;
+      const clip = pack?.clips.find((c) => c.slotKey === step.slotKey) || null;
+
+      stopAudioElement();
+      setAudioError(null);
+      setStatus(step.type === 'GREETING' ? 'GREETING' : 'PRESENTING');
+      onAnimStateChange(
+        step.type === 'GREETING' ? 'greet' : step.type === 'PRODUCT' ? 'point' : 'talk'
+      );
+
+      if (isMutedRef.current || !clip || clip.status !== 'ready') {
+        setIsAudioPlaying(false);
+        return;
+      }
+
+      const audio = new Audio(`${API_BASE}${clip.audioUrl}`);
+      audio.muted = isMutedRef.current;
+      audioElRef.current = audio;
+      activeClipKeyRef.current = `${booth.boothId}:${step.slotKey}:${clip.audioId}`;
+
+      audio.onplay = () => setIsAudioPlaying(true);
+      audio.onpause = () => setIsAudioPlaying(false);
+      audio.onended = () => {
+        setIsAudioPlaying(false);
+        if (stepIdx < steps.length - 1) {
+          const nextIdx = stepIdx + 1;
+          setCurrentStepIndex(nextIdx);
+          playStepAudio(nextIdx, pack);
+        } else {
+          setStatus('COMPLETED');
+          onAnimStateChange('idle');
+        }
+      };
+      audio.onerror = () => {
+        setIsAudioPlaying(false);
+        setAudioError('Không thể tải tệp âm thanh đã lưu. Hệ thống đang hiển thị phụ đề tiếng Việt.');
+        onAnimStateChange('idle');
+      };
+
+      audio.play().catch(() => {
+        // Browser autoplay policy blocked before user gesture -> keep subtitle visible cleanly
+        setIsAudioPlaying(false);
+      });
+    },
+    [audioPack, booth.boothId, onAnimStateChange, steps, stopAudioElement]
+  );
+
+  // Initialize booth consultation when booth changes
   useEffect(() => {
-    onAnimStateChange('greet');
+    stopAudioElement();
+    setActiveTab('intro');
+    setCurrentStepIndex(0);
+    setStatus('GREETING');
+    setAudioError(null);
     setLoadingAudio(true);
+    setChatError('');
+    setChatMessages([
+      {
+        role: 'npc',
+        text: `Xin chào quý khách! Tôi là ${profile.assistantName} (${profile.roleTitle}) của gian hàng ${booth.boothName} (${booth.companyName}). Quý khách cần tìm hiểu thông tin sản phẩm nào?`,
+      },
+    ]);
+
+    let cancelled = false;
     v28Api
       .getBoothAudio(booth.boothId)
-      .then((pack) => setAudioPack(pack))
-      .catch(() => setAudioPack(null))
-      .finally(() => setLoadingAudio(false));
+      .then((pack) => {
+        if (cancelled) return;
+        setAudioPack(pack);
+        setLoadingAudio(false);
+        playStepAudio(0, pack);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAudioPack(null);
+        setLoadingAudio(false);
+        setAudioError('Tạm thời chưa tải được tệp audio cache. Quý khách vẫn có thể đọc phụ đề giới thiệu.');
+      });
+
+    v28Api
+      .getAiStatus()
+      .then((st) => {
+        if (!cancelled) setAiStatus(st);
+      })
+      .catch(() => {});
 
     return () => {
-      stopAudio();
+      cancelled = true;
+      stopAudioElement();
+      onAnimStateChange('idle');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booth.boothId]);
 
+  // Auto-scroll chat history
   useEffect(() => {
-    if (!voiceSession) return;
-    setVoiceRemainingSec(voiceSession.maxDurationSec);
-    const interval = window.setInterval(() => {
-      setVoiceRemainingSec((prev) => {
-        if (prev <= 1) {
-          window.clearInterval(interval);
-          v28Api.endVoiceSession(voiceSession.sessionId).catch(() => {});
-          setVoiceSession(null);
-          setVoiceStatus('Phiên Voice đã tự động kết thúc (hết thời lượng 90 giây).');
-          onAnimStateChange('farewell');
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => {
-      window.clearInterval(interval);
-      v28Api.endVoiceSession(voiceSession.sessionId).catch(() => {});
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voiceSession?.sessionId]);
-
-  const handlePlayClip = (clip: V28AudioClip) => {
-    // Single-audio mutex: stop any currently playing clip first
-    if (playingClipId === clip.audioId) {
-      stopAudio();
-      return;
+    if (activeTab === 'chat' && chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-    stopAudio();
-    setActiveSubtitle(clip.transcript);
-    const audio = new Audio(`${API_BASE}${clip.audioUrl}`);
-    audioElRef.current = audio;
-    setPlayingClipId(clip.audioId);
-    onAnimStateChange(clip.entityType === 'product' ? 'point' : 'talk');
-    audio.onended = () => {
-      setPlayingClipId(null);
-      onAnimStateChange('idle');
-    };
-    audio.onerror = () => {
-      setPlayingClipId(null);
-      onAnimStateChange('idle');
-    };
-    audio.play().catch(() => {
-      // Autoplay/playback blocked fallback: keep readable subtitle visible
-      setPlayingClipId(null);
-      onAnimStateChange('idle');
-    });
+  }, [activeTab, chatMessages]);
+
+  // Playback Controls (Exact V27.5 behavior)
+  const handlePause = () => {
+    if (audioElRef.current && !audioElRef.current.paused) {
+      audioElRef.current.pause();
+    }
+    setIsAudioPlaying(false);
+    setStatus('PAUSED');
+    onAnimStateChange('idle');
   };
 
-  const handleSendChat = async (textOverride?: string) => {
-    const msg = (textOverride ?? chatInput).trim();
+  const handleResume = () => {
+    const step = steps[currentStepIndex];
+    if (!step) return;
+    setStatus(step.type === 'GREETING' ? 'GREETING' : 'PRESENTING');
+    onAnimStateChange(step.type === 'PRODUCT' ? 'point' : 'talk');
+    if (audioElRef.current && !isMuted) {
+      audioElRef.current.play().catch(() => {
+        playStepAudio(currentStepIndex);
+      });
+    } else {
+      playStepAudio(currentStepIndex);
+    }
+  };
+
+  const handlePrevious = () => {
+    if (currentStepIndex <= 0) return;
+    const prevIdx = currentStepIndex - 1;
+    setCurrentStepIndex(prevIdx);
+    playStepAudio(prevIdx);
+  };
+
+  const handleNext = () => {
+    if (currentStepIndex >= steps.length - 1) return;
+    const nextIdx = currentStepIndex + 1;
+    setCurrentStepIndex(nextIdx);
+    playStepAudio(nextIdx);
+  };
+
+  const handleStop = () => {
+    stopAudioElement();
+    setStatus('CANCELLED');
+    onAnimStateChange('idle');
+  };
+
+  const handleRestart = () => {
+    setCurrentStepIndex(0);
+    playStepAudio(0);
+  };
+
+  const handleToggleMute = () => {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    isMutedRef.current = nextMuted;
+    if (audioElRef.current) {
+      audioElRef.current.muted = nextMuted;
+      if (nextMuted) {
+        audioElRef.current.pause();
+        setIsAudioPlaying(false);
+      } else if (status === 'GREETING' || status === 'PRESENTING') {
+        audioElRef.current.play().catch(() => {});
+      }
+    } else if (!nextMuted && (status === 'GREETING' || status === 'PRESENTING')) {
+      playStepAudio(currentStepIndex);
+    }
+  };
+
+  // Switching Tabs: Pause audio cleanly when entering Chat, keep position & history!
+  const handleSwitchTab = (nextTab: 'intro' | 'chat') => {
+    if (nextTab === activeTab) return;
+    if (nextTab === 'chat' && (status === 'GREETING' || status === 'PRESENTING')) {
+      if (audioElRef.current && !audioElRef.current.paused) {
+        audioElRef.current.pause();
+      }
+      setIsAudioPlaying(false);
+      setStatus('PAUSED');
+      onAnimStateChange('idle');
+    }
+    setActiveTab(nextTab);
+  };
+
+  const handleClosePanel = () => {
+    stopAudioElement();
+    onAnimStateChange('idle');
+    onClose();
+  };
+
+  // Grounded AI Chat Handler
+  const handleSendChat = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const msg = chatInput.trim();
     if (!msg || chatLoading) return;
     setChatMessages((prev) => [...prev, { role: 'user', text: msg }]);
     setChatInput('');
+    setChatError('');
     setChatLoading(true);
     onAnimStateChange('listen');
     try {
@@ -154,336 +374,452 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
         {
           role: 'npc',
           text: res.reply,
-          meta: `${res.modelId} · ${res.liveGeminiVerified ? 'Live Gemini' : 'Grounded Mock'}`,
+          meta: res.liveGeminiVerified
+            ? `Gemini Live (${res.modelId})`
+            : `Grounded Mock (${res.modelId} · LIVE GEMINI NOT VERIFIED)`,
         },
       ]);
       onAnimStateChange('talk');
-      window.setTimeout(() => onAnimStateChange('idle'), 2200);
     } catch (err) {
-      setChatMessages((prev) => [
-        ...prev,
-        { role: 'npc', text: `⚠️ ${(err as Error).message}` },
-      ]);
+      const errMsg = (err as Error).message || 'Không thể kết nối trợ lý tư vấn.';
+      setChatError(errMsg);
       onAnimStateChange('idle');
     } finally {
       setChatLoading(false);
     }
   };
 
-  const handleStartVoice = async () => {
-    setVoiceError('');
-    setVoiceStatus('Đang khởi tạo phiên Voice...');
-    try {
-      const { session } = await v28Api.startVoiceSession({
-        boothId: booth.boothId,
-        userId: visitorIdRef.current,
-      });
-      setVoiceSession(session);
-      setVoiceStatus(
-        `Đã kết nối (${session.pipelineMode}) · Còn ${session.remainingSessionsThisHour} phiên/giờ`
-      );
-      onAnimStateChange('listen');
-    } catch (err) {
-      setVoiceError((err as Error).message);
-      setVoiceStatus('');
-    }
-  };
+  const currentStep = steps[Math.min(Math.max(0, currentStepIndex), steps.length - 1)];
+  const currentClip = getClipForStep(currentStep);
+  const activeProduct = currentStep?.product ?? null;
+  const totalProducts = currentStep?.totalProducts ?? 0;
 
-  const handleEndVoice = async () => {
-    if (!voiceSession) return;
-    await v28Api.endVoiceSession(voiceSession.sessionId).catch(() => {});
-    setVoiceSession(null);
-    setVoiceStatus('Đã kết thúc phiên Voice.');
-    onAnimStateChange('farewell');
-  };
+  const isSessionRunning = status === 'GREETING' || status === 'PRESENTING';
+  const isPaused = status === 'PAUSED';
+  const isFinishedOrStopped = status === 'COMPLETED' || status === 'CANCELLED';
+  const canGoPrevious = currentStepIndex > 0;
+  const canGoNext = currentStepIndex < steps.length - 1;
 
-  const handleVoiceTurn = async () => {
-    if (!voiceSession || !voiceTranscriptInput.trim()) return;
-    const text = voiceTranscriptInput.trim();
-    setVoiceTranscriptInput('');
-    setVoiceError('');
-    onAnimStateChange('listen');
-    try {
-      const res = await v28Api.sendVoiceTurn(voiceSession.sessionId, text);
-      setChatMessages((prev) => [
-        ...prev,
-        { role: 'user', text: `🎙️ ${text}` },
-        { role: 'npc', text: res.reply, meta: `Voice (${res.pipelineMode})` },
-      ]);
-      setActiveSubtitle(res.reply);
-      onAnimStateChange('talk');
-      window.setTimeout(() => onAnimStateChange('listen'), 2000);
-    } catch (err) {
-      setVoiceError((err as Error).message);
+  const statusLabel = (() => {
+    if (loadingAudio) return '⏳ Đang tải audio đã lưu...';
+    if (status === 'PAUSED') return '⏸️ Đang tạm dừng thuyết minh';
+    if (status === 'COMPLETED') return '✅ Đã hoàn tất giới thiệu gian hàng';
+    if (status === 'CANCELLED') return '⏹️ Đã dừng thuyết minh';
+    if (currentStep?.type === 'GREETING') {
+      return isAudioPlaying ? '🔊 Đang phát lời chào mừng' : '👋 Chào mừng khách tham quan (Phụ đề)';
     }
-  };
+    if (currentStep?.type === 'PRODUCT' && currentStep.productIndex) {
+      return isAudioPlaying
+        ? `🔊 Đang thuyết minh SP ${currentStep.productIndex}/${totalProducts}`
+        : `📝 Giới thiệu sản phẩm ${currentStep.productIndex}/${totalProducts} (Phụ đề)`;
+    }
+    return isAudioPlaying ? '🔊 Lời cảm ơn & kết thúc' : '✨ Lời cảm ơn & kết thúc (Phụ đề)';
+  })();
+
+  const productCounterBadge =
+    currentStep?.type === 'PRODUCT' && currentStep.productIndex
+      ? `Sản phẩm ${currentStep.productIndex}/${totalProducts}`
+      : totalProducts > 0
+        ? `${totalProducts} sản phẩm trưng bày`
+        : 'Chưa có sản phẩm';
 
   return (
-    <div
+    <aside
+      className="npc-assistant-panel"
       style={{
+        '--npc-accent': booth.color || '#0ea5e9',
+        position: 'relative',
+        bottom: 'auto',
+        left: 'auto',
+        transform: 'none',
+        width: isMobilePortrait ? '100%' : 'min(450px, 92vw)',
+        maxWidth: '100%',
         pointerEvents: 'auto',
-        width: isMobilePortrait ? '100%' : 430,
-        maxHeight: isMobilePortrait ? '56dvh' : '68vh',
-        background: 'rgba(255, 255, 255, 0.98)',
-        backdropFilter: 'blur(12px)',
-        borderRadius: 16,
-        boxShadow: '0 16px 40px rgba(15,23,42,0.32)',
-        border: '1px solid #cbd5e1',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
+      } as React.CSSProperties}
+      aria-label={`Trợ lý ảo giới thiệu gian hàng ${booth.boothName}`}
     >
-      {/* Header + AI Disclosure */}
-      <div style={{ padding: '12px 14px', background: '#0f172a', color: '#fff' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontSize: 11, color: '#38bdf8', fontWeight: 700 }}>
-              🤖 TRỢ LÝ AI TƯ VẤN GIAN HÀNG · {booth.companyName}
-            </div>
-            <strong style={{ fontSize: 15 }}>{booth.boothName}</strong>
+      {/* Top Accent Strip (Exact V27.5) */}
+      <div className="npc-assistant-panel__strip" />
+
+      {/* Header: Avatar, Name, Role Badge, Company Name & Close Button (Exact V27.5 — preserved across tabs!) */}
+      <header className="npc-assistant-panel__header">
+        <div className="npc-assistant-panel__persona">
+          <div
+            className={`npc-assistant-panel__avatar ${
+              isAudioPlaying ? 'npc-assistant-panel__avatar--speaking' : ''
+            }`}
+            aria-hidden="true"
+          >
+            👩‍💼
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              stopAudio();
-              handleEndVoice();
-              onClose();
-            }}
-            style={{ minWidth: 36, minHeight: 36, borderRadius: 8, border: 'none', background: 'rgba(255,255,255,0.16)', color: '#fff', cursor: 'pointer' }}
-          >
-            ✕
-          </button>
-        </div>
-        <div style={{ fontSize: 11, color: '#cbd5e1', marginTop: 4 }}>
-          Bạn đang tương tác với AI (dữ liệu từ hồ sơ gian hàng). Trạng thái: <strong>LIVE GEMINI NOT VERIFIED</strong> (Chế độ an toàn không phát sinh chi phí).
-        </div>
-      </div>
-
-      {/* Mode Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
-        {[
-          { id: 'audio', label: '🔊 Audio Giới thiệu' },
-          { id: 'chat', label: '💬 AI Chat' },
-          { id: 'voice', label: '🎙️ AI Voice' },
-        ].map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id as typeof tab)}
-            style={{
-              flex: 1,
-              minHeight: 42,
-              border: 'none',
-              borderBottom: tab === t.id ? '3px solid #0284c7' : '3px solid transparent',
-              background: 'transparent',
-              fontWeight: tab === t.id ? 700 : 500,
-              color: tab === t.id ? '#0284c7' : '#475569',
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Body */}
-      <div style={{ padding: 12, overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {tab === 'audio' && (
-          <>
-            <div style={{ fontSize: 12, color: '#475569' }}>
-              Bấm để nghe audio tạo sẵn (có cache theo content hash, không tự phát gây phiền):
+          <div className="npc-assistant-panel__persona-info">
+            <div className="npc-assistant-panel__name-row">
+              <strong className="npc-assistant-panel__name">{profile.assistantName}</strong>
+              <span className="npc-assistant-panel__role-badge">{profile.roleTitle}</span>
             </div>
-            {loadingAudio ? (
-              <div style={{ fontSize: 13, color: '#64748b' }}>Đang tải danh sách audio...</div>
-            ) : audioPack ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {audioPack.clips.map((clip) => {
-                  const isPlaying = playingClipId === clip.audioId;
-                  const label =
-                    clip.slotKey === 'welcome'
-                      ? '👋 Lời chào mừng gian hàng'
-                      : clip.slotKey === 'company_intro'
-                      ? '🏢 Giới thiệu Doanh nghiệp'
-                      : `📦 Giới thiệu sản phẩm (${clip.slotKey})`;
-                  return (
-                    <div
-                      key={clip.audioId}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '8px 10px',
-                        borderRadius: 10,
-                        border: '1px solid #e2e8f0',
-                        background: isPlaying ? '#e0f2fe' : '#fff',
-                      }}
-                    >
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>{label}</div>
-                      <button
-                        type="button"
-                        onClick={() => handlePlayClip(clip)}
-                        style={{
-                          minHeight: 36,
-                          padding: '0 12px',
-                          borderRadius: 8,
-                          border: 'none',
-                          background: isPlaying ? '#ef4444' : '#0284c7',
-                          color: '#fff',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          fontSize: 12,
-                        }}
-                      >
-                        {isPlaying ? '⏹ Dừng' : '▶ Nghe'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div style={{ fontSize: 13, color: '#b91c1c' }}>Không tải được audio cache — hiển thị phụ đề dự phòng.</div>
-            )}
+            <div className="npc-assistant-panel__booth-name">
+              📍 {booth.companyName || booth.boothName}
+            </div>
+          </div>
+        </div>
 
-            {activeSubtitle && (
-              <div style={{ padding: 10, borderRadius: 10, background: '#f1f5f9', fontSize: 13, color: '#0f172a', lineHeight: 1.45 }}>
-                <strong>Phụ đề:</strong> {activeSubtitle}
-              </div>
-            )}
-          </>
-        )}
+        <button
+          type="button"
+          className="npc-assistant-panel__close-btn"
+          onClick={handleClosePanel}
+          aria-label="Đóng bảng giới thiệu của trợ lý ảo"
+          title="Đóng (Dừng thuyết minh)"
+        >
+          ✕
+        </button>
+      </header>
 
-        {tab === 'chat' && (
-          <>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {['Giá sản phẩm?', 'So sánh sản phẩm', 'Có bảo hành không?'].map((q) => (
+      {/* Compact Tab Bar matching existing panel style: Giới thiệu | Chat */}
+      <div
+        role="tablist"
+        aria-label="Chế độ tư vấn NPC"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 6,
+          padding: '6px 14px 4px',
+        }}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'intro'}
+          onClick={() => handleSwitchTab('intro')}
+          style={{
+            padding: '7px 10px',
+            borderRadius: 10,
+            border: activeTab === 'intro' ? '1px solid var(--npc-accent, #0ea5e9)' : '1px solid rgba(148,163,184,0.35)',
+            background: activeTab === 'intro' ? 'var(--npc-accent, #0ea5e9)' : 'rgba(255,255,255,0.65)',
+            color: activeTab === 'intro' ? '#fff' : '#334155',
+            fontWeight: 700,
+            fontSize: 12.5,
+            cursor: 'pointer',
+          }}
+        >
+          🎙️ Giới thiệu
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'chat'}
+          onClick={() => handleSwitchTab('chat')}
+          style={{
+            padding: '7px 10px',
+            borderRadius: 10,
+            border: activeTab === 'chat' ? '1px solid var(--npc-accent, #0ea5e9)' : '1px solid rgba(148,163,184,0.35)',
+            background: activeTab === 'chat' ? 'var(--npc-accent, #0ea5e9)' : 'rgba(255,255,255,0.65)',
+            color: activeTab === 'chat' ? '#fff' : '#334155',
+            fontWeight: 700,
+            fontSize: 12.5,
+            cursor: 'pointer',
+          }}
+        >
+          💬 Chat
+        </button>
+      </div>
+
+      {/* TAB 1: GIỚI THIỆU (100% V27.5 UX & Controls + Pre-generated Cached Audio) */}
+      {activeTab === 'intro' && (
+        <>
+          <div className="npc-assistant-panel__status-bar">
+            <span
+              className={`npc-status-pill ${
+                isSessionRunning
+                  ? 'npc-status-pill--active'
+                  : isPaused
+                    ? 'npc-status-pill--paused'
+                    : 'npc-status-pill--idle'
+              }`}
+            >
+              {statusLabel}
+            </span>
+            <span className="npc-counter-pill">{productCounterBadge}</span>
+          </div>
+
+          {audioError && !isMuted && (
+            <div className="npc-assistant-panel__audio-warning" role="alert">
+              <strong>⚠️ Chế độ phụ đề tiếng Việt</strong>
+              <span>{audioError}</span>
+              <div>
                 <button
-                  key={q}
                   type="button"
-                  onClick={() => handleSendChat(q)}
-                  style={{
-                    padding: '5px 10px',
-                    borderRadius: 999,
-                    border: '1px solid #cbd5e1',
-                    background: '#f8fafc',
-                    fontSize: 12,
-                    cursor: 'pointer',
-                  }}
+                  className="npc-ctrl-btn"
+                  style={{ marginTop: 4, flex: 'none', padding: '4px 10px', fontSize: '0.74rem' }}
+                  onClick={() => playStepAudio(currentStepIndex)}
                 >
-                  {q}
+                  🔄 Thử lại âm thanh
                 </button>
-              ))}
+              </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-              {chatMessages.map((m, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                    maxWidth: '88%',
-                    padding: '8px 11px',
-                    borderRadius: 12,
-                    background: m.role === 'user' ? '#0284c7' : '#f1f5f9',
-                    color: m.role === 'user' ? '#fff' : '#0f172a',
-                    fontSize: 13,
-                    whiteSpace: 'pre-line',
-                  }}
-                >
-                  {m.text}
-                  {m.meta && <div style={{ fontSize: 10, opacity: 0.7, marginTop: 4 }}>{m.meta}</div>}
-                </div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <input
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSendChat()}
-                placeholder="Hỏi về sản phẩm, giá, liên hệ..."
-                style={{ flex: 1, minHeight: 40, padding: '6px 10px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 13 }}
-              />
-              <button
-                type="button"
-                disabled={chatLoading}
-                onClick={() => handleSendChat()}
-                style={{ minHeight: 40, padding: '0 14px', borderRadius: 10, border: 'none', background: '#0f172a', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
-              >
-                Gửi
-              </button>
-            </div>
-          </>
-        )}
+          )}
 
-        {tab === 'voice' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 12, color: '#475569', background: '#fef3c7', padding: 10, borderRadius: 10 }}>
-              Chế độ thử nghiệm: tối đa <strong>90 giây/phiên</strong>, <strong>3 phiên/giờ</strong>. Khi chưa cấu hình <code>GEMINI_API_KEY</code>, hệ thống sử dụng luồng dự phòng <strong>FALLBACK_STT_CHAT_TTS</strong>.
-            </div>
-            {voiceError && (
-              <div style={{ fontSize: 12, color: '#b91c1c', background: '#fef2f2', padding: 8, borderRadius: 8 }}>
-                ⚠️ {voiceError}
+          <div className="npc-assistant-panel__subtitle-box" role="status" aria-live="polite">
+            <p className="npc-assistant-panel__subtitle-text">
+              “{currentClip?.transcript || currentStep?.fallbackText || ''}”
+            </p>
+            {audioPack && !audioPack.liveGeminiTtsEnabled && (
+              <div style={{ marginTop: 4, fontSize: 10.5, color: '#64748b' }}>
+                Audio Cache: Local Fallback WAV (LIVE GEMINI TTS NOT VERIFIED · {audioPack.cacheHits} cache hit)
               </div>
             )}
-            {voiceStatus && <div style={{ fontSize: 12, color: '#047857' }}>{voiceStatus}</div>}
+          </div>
 
-            {!voiceSession ? (
-              <button
-                type="button"
-                onClick={handleStartVoice}
-                style={{
-                  minHeight: 46,
-                  borderRadius: 12,
-                  border: 'none',
-                  background: '#0284c7',
-                  color: '#fff',
-                  fontWeight: 700,
-                  fontSize: 14,
-                  cursor: 'pointer',
-                }}
-              >
-                🎙️ Trò chuyện bằng giọng nói
-              </button>
-            ) : (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#047857' }}>
-                    🔴 Đang mở phiên · Còn {voiceRemainingSec}s
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleEndVoice}
-                    style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: '#ef4444', color: '#fff', fontWeight: 600, cursor: 'pointer', fontSize: 12 }}
-                  >
-                    Kết thúc
-                  </button>
+          {activeProduct && (
+            <div className="npc-assistant-panel__product-card">
+              {activeProduct.images?.[0] ? (
+                <img
+                  src={activeProduct.images[0]}
+                  alt={activeProduct.name}
+                  className="npc-assistant-panel__product-img"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              ) : (
+                <div className="npc-assistant-panel__product-placeholder">📦</div>
+              )}
+
+              <div className="npc-assistant-panel__product-info">
+                <div className="npc-assistant-panel__product-slot">
+                  {currentStep?.slotKey.toUpperCase()} · {currentStep?.slotLabel}
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <input
-                    value={voiceTranscriptInput}
-                    onChange={(e) => setVoiceTranscriptInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleVoiceTurn()}
-                    placeholder="Nhập hoặc nói nội dung câu hỏi..."
-                    style={{ flex: 1, minHeight: 40, padding: '6px 10px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 13 }}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleVoiceTurn}
-                    style={{ minHeight: 40, padding: '0 14px', borderRadius: 10, border: 'none', background: '#0f172a', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    Nói
-                  </button>
-                </div>
-                {activeSubtitle && (
-                  <div style={{ padding: 10, borderRadius: 10, background: '#f1f5f9', fontSize: 13, whiteSpace: 'pre-line' }}>
-                    <strong>NPC trả lời:</strong> {activeSubtitle}
+                <strong className="npc-assistant-panel__product-title">{activeProduct.name}</strong>
+                {activeProduct.price > 0 && (
+                  <div className="npc-assistant-panel__product-price">
+                    {formatCurrency(activeProduct.price, activeProduct.currency)}
                   </div>
                 )}
-              </>
+              </div>
+
+              {onInspectProduct && (
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm npc-assistant-panel__inspect-btn"
+                  onClick={() => onInspectProduct(activeProduct, currentStep.slotKey)}
+                  title="Mở hộp thoại thông tin chi tiết của sản phẩm này"
+                >
+                  🔍 Chi tiết
+                </button>
+              )}
+            </div>
+          )}
+
+          {steps.length > 1 && (
+            <div className="npc-assistant-panel__progress" aria-label="Tiến độ thuyết minh">
+              {steps.map((s) => {
+                const isCurrent = s.stepIndex === currentStepIndex;
+                const isDone = s.stepIndex < currentStepIndex;
+                return (
+                  <span
+                    key={s.stepIndex}
+                    className={`npc-progress-dot ${
+                      isCurrent ? 'npc-progress-dot--current' : isDone ? 'npc-progress-dot--done' : ''
+                    }`}
+                    title={
+                      s.type === 'GREETING'
+                        ? 'Chào mừng'
+                        : s.type === 'CLOSING'
+                          ? 'Kết thúc'
+                          : `Sản phẩm ${s.productIndex}: ${s.product?.name || ''}`
+                    }
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          <div
+            className="npc-assistant-panel__controls"
+            role="group"
+            aria-label="Điều khiển thuyết minh sản phẩm"
+          >
+            <button
+              type="button"
+              className="npc-ctrl-btn"
+              onClick={handlePrevious}
+              disabled={!canGoPrevious}
+              title="Quay lại bước / sản phẩm trước"
+              aria-label="Trước"
+            >
+              ⏮ Trước
+            </button>
+
+            {isPaused ? (
+              <button
+                type="button"
+                className="npc-ctrl-btn npc-ctrl-btn--primary"
+                onClick={handleResume}
+                title="Tiếp tục thuyết minh"
+                aria-label="Tiếp tục"
+              >
+                ▶ Tiếp tục
+              </button>
+            ) : isFinishedOrStopped ? (
+              <button
+                type="button"
+                className="npc-ctrl-btn npc-ctrl-btn--primary"
+                onClick={handleRestart}
+                title="Nghe giới thiệu lại từ đầu"
+                aria-label="Nghe lại"
+              >
+                🔄 Nghe lại
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="npc-ctrl-btn npc-ctrl-btn--primary"
+                onClick={handlePause}
+                title="Tạm dừng thuyết minh"
+                aria-label="Tạm dừng"
+              >
+                ⏸ Tạm dừng
+              </button>
+            )}
+
+            <button
+              type="button"
+              className="npc-ctrl-btn"
+              onClick={handleNext}
+              disabled={!canGoNext}
+              title="Chuyển sang sản phẩm tiếp theo"
+              aria-label="Tiếp"
+            >
+              Tiếp ⏭
+            </button>
+
+            <button
+              type="button"
+              className="npc-ctrl-btn npc-ctrl-btn--danger"
+              onClick={handleStop}
+              disabled={isFinishedOrStopped}
+              title="Dừng hẳn phiên thuyết minh hiện tại"
+              aria-label="Dừng"
+            >
+              ⏹ Dừng
+            </button>
+
+            <button
+              type="button"
+              className={`npc-ctrl-btn ${isMuted ? 'npc-ctrl-btn--muted' : ''}`}
+              onClick={handleToggleMute}
+              aria-pressed={isMuted}
+              title={isMuted ? 'Bật giọng đọc tiếng Việt' : 'Tắt tiếng (Chỉ hiện phụ đề)'}
+              aria-label={isMuted ? 'Bật tiếng' : 'Tắt tiếng'}
+            >
+              {isMuted ? '🔇 Bật tiếng' : '🔊 Tắt tiếng'}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* TAB 2: CHAT (Grounded Booth & Company Consultant inside same panel frame) */}
+      {activeTab === 'chat' && (
+        <div style={{ padding: '8px 14px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#475569',
+              background: '#f1f5f9',
+              padding: '6px 10px',
+              borderRadius: 8,
+              border: '1px solid #e2e8f0',
+            }}
+          >
+            {aiStatus?.liveGeminiVerified
+              ? `✅ AI Gemini Live đang hoạt động · Chỉ tư vấn dữ liệu thực của ${booth.companyName}`
+              : `ℹ️ Chế độ Grounded Mock (LIVE GEMINI NOT VERIFIED) · Chỉ dùng dữ liệu thật của ${booth.companyName}`}
+          </div>
+
+          <div
+            ref={chatScrollRef}
+            style={{
+              maxHeight: isMobilePortrait ? 200 : 230,
+              minHeight: 150,
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              padding: 8,
+              borderRadius: 10,
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+            }}
+          >
+            {chatMessages.map((m, idx) => (
+              <div
+                key={idx}
+                style={{
+                  alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+                  maxWidth: '88%',
+                  padding: '8px 11px',
+                  borderRadius: 11,
+                  background: m.role === 'user' ? 'var(--npc-accent, #0ea5e9)' : '#fff',
+                  color: m.role === 'user' ? '#fff' : '#0f172a',
+                  border: m.role === 'user' ? 'none' : '1px solid #e2e8f0',
+                  fontSize: 12.5,
+                  lineHeight: 1.45,
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                <div>{m.text}</div>
+                {m.meta && (
+                  <div style={{ fontSize: 10, opacity: 0.7, marginTop: 4 }}>{m.meta}</div>
+                )}
+              </div>
+            ))}
+            {chatLoading && (
+              <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic' }}>
+                ⏳ {profile.assistantName} đang tra cứu hồ sơ gian hàng...
+              </div>
             )}
           </div>
-        )}
-      </div>
-    </div>
+
+          {chatError && (
+            <div style={{ fontSize: 12, color: '#b91c1c', background: '#fef2f2', padding: '6px 10px', borderRadius: 8 }}>
+              ⚠️ {chatError}
+            </div>
+          )}
+
+          <form onSubmit={handleSendChat} style={{ display: 'flex', gap: 6 }}>
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              maxLength={400}
+              placeholder="Hỏi về sản phẩm, giá, tình trạng hàng..."
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: '8px 11px',
+                borderRadius: 10,
+                border: '1px solid #cbd5e1',
+                fontSize: 13,
+              }}
+            />
+            <button
+              type="submit"
+              disabled={chatLoading || !chatInput.trim()}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 10,
+                border: 'none',
+                background: 'var(--npc-accent, #0ea5e9)',
+                color: '#fff',
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontSize: 13,
+              }}
+            >
+              Gửi
+            </button>
+          </form>
+        </div>
+      )}
+    </aside>
   );
 };

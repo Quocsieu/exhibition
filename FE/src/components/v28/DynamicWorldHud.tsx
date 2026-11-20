@@ -530,6 +530,10 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               isMobilePortrait={isMobilePortrait}
               onAnimStateChange={onNpcAnimStateChange}
               onClose={onCloseNpcPanel}
+              onInspectProduct={(product, slotId) => {
+                onCloseNpcPanel();
+                onSelectProduct(focusedBooth, product, slotId);
+              }}
             />
           </div>
         ) : (selectedProduct || focusedBooth) && (
