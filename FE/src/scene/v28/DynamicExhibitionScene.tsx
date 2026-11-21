@@ -36,10 +36,15 @@ import {
   DRAG_PITCH_SENSITIVITY,
   TOUCH_YAW_SENSITIVITY,
   TOUCH_PITCH_SENSITIVITY,
-  CAMERA_DRAG_THRESHOLD_PX,
   MIN_CAMERA_PITCH,
   MAX_CAMERA_PITCH,
 } from '../ExhibitionScene';
+import {
+  resolveV28GraphicsProfile,
+  V28MultiTouchGestureController,
+  type FloatingJoystickVisualState,
+  type V28GraphicsQualityMode,
+} from './v28MobileControls';
 
 function toV27NpcAnim(state: V28NpcAnimState): NpcAnimationClipName {
   if (state === 'greet' || state === 'farewell') return 'WAVE';
@@ -94,8 +99,11 @@ export interface DynamicExhibitionSceneProps {
   teleportNonce: number;
   teleportPos: { x: number; z: number; rotationY: number } | null;
   joystickVector: { x: number; y: number };
+  joystickVectorRef?: React.MutableRefObject<{ x: number; y: number }>;
   zoomRequest?: { delta: number; nonce: number };
   isMobilePortrait: boolean;
+  isMobileViewport?: boolean;
+  graphicsQuality?: V28GraphicsQualityMode;
   boothLodMap?: Record<string, 0 | 1 | 2>;
   remoteAvatars?: V28RemoteAvatarView[];
   npcAnimState?: V28NpcAnimState;
@@ -107,6 +115,7 @@ export interface DynamicExhibitionSceneProps {
   onSelectProduct: (booth: V28BoothPlacementView, product: V28Product, slotId: string) => void;
   onClickNpc?: (booth: V28BoothPlacementView) => void;
   onOpenDirectoryMap?: () => void;
+  onFloatingJoystickVisual?: (state: FloatingJoystickVisualState) => void;
   renderRoof?: (props: { cameraMode: V28CameraMode; isMobilePortrait: boolean }) => React.ReactNode;
   renderFarProxies?: () => React.ReactNode;
 }
@@ -177,8 +186,11 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   teleportNonce,
   teleportPos,
   joystickVector,
+  joystickVectorRef,
   zoomRequest,
   isMobilePortrait,
+  isMobileViewport = false,
+  graphicsQuality = 'auto',
   boothLodMap,
   remoteAvatars = [],
   npcAnimState = 'idle',
@@ -190,10 +202,20 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   onSelectProduct,
   onClickNpc,
   onOpenDirectoryMap,
+  onFloatingJoystickVisual,
   renderRoof,
   renderFarProxies,
 }) => {
   const { camera, gl, size } = useThree();
+  const graphicsProfile = useMemo(
+    () => resolveV28GraphicsProfile(graphicsQuality, isMobileViewport || isMobilePortrait),
+    [graphicsQuality, isMobileViewport, isMobilePortrait]
+  );
+  const internalJoystickRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const activeJoystickRef = joystickVectorRef ?? internalJoystickRef;
+  const onFloatingJoystickVisualRef = useRef(onFloatingJoystickVisual);
+  onFloatingJoystickVisualRef.current = onFloatingJoystickVisual;
+  const gestureControllerRef = useRef<V28MultiTouchGestureController | null>(null);
   const avatarRef = useRef<THREE.Group>(null);
   const playerPosRef = useRef<V28PlayerState & { state: 'idle' | 'walk' }>({
     x: world.spawnPoint.x,
@@ -239,33 +261,26 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       : new THREE.Vector3(0, 0, 0)
   );
   const hasInitializedCamRef = useRef<boolean>(false);
-  const dragStateRef = useRef<{
-    active: boolean;
-    pointerId: number;
-    startX: number;
-    startY: number;
-    lastX: number;
-    lastY: number;
-    dragged: boolean;
-  }>({
-    active: false,
-    pointerId: -1,
-    startX: 0,
-    startY: 0,
-    lastX: 0,
-    lastY: 0,
-    dragged: false,
-  });
   const suppressClickUntilRef = useRef<number>(0);
   const terrazzoTex = useV27TerrazzoFloorTexture(world.hallWidth, world.hallDepth);
-  const fpsAccumRef = useRef<{ frames: number; lastTime: number; fps: number }>({
+  const fpsAccumRef = useRef<{ frames: number; lastTime: number; fps: number; frameTimeMs: number }>({
     frames: 0,
     lastTime: performance.now(),
     fps: 60,
+    frameTimeMs: 16.7,
   });
 
   const shouldSuppressInteractionClick = () =>
-    dragStateRef.current.dragged || performance.now() < suppressClickUntilRef.current;
+    Boolean(gestureControllerRef.current?.isJoystickActive()) ||
+    Boolean(gestureControllerRef.current?.isOrbitDragging()) ||
+    performance.now() < suppressClickUntilRef.current;
+
+  // Reset active touch gestures whenever entering Focus mode so joystick never stays stuck
+  useEffect(() => {
+    if (cameraMode === 'focus') {
+      gestureControllerRef.current?.resetAll();
+    }
+  }, [cameraMode]);
 
   // Apply HUD Zoom + / - button requests within safe camera zoomScale bounds (locked during Focus like V27.5)
   useEffect(() => {
@@ -334,7 +349,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teleportNonce]);
 
-  // Desktop WASD (using e.code so Vietnamese Telex IME NEVER breaks W->ư, V28-AUDIT-027) + V27.5-parity Drag-to-Rotate & Wheel Zoom
+  // Desktop WASD + Mouse Drag-to-Rotate + Mobile Floating Joystick 360° & 2nd-Finger Multi-Touch Camera Orbit
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
       if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
@@ -343,67 +358,111 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
     const onUp = (e: KeyboardEvent) => {
       keysRef.current[e.code] = false;
     };
+
     const canvasEl = gl.domElement;
-    const finishDrag = () => {
-      if (dragStateRef.current.dragged) {
-        suppressClickUntilRef.current = performance.now() + 240;
-      }
-      dragStateRef.current.active = false;
-      dragStateRef.current.pointerId = -1;
-      dragStateRef.current.dragged = false;
-      camOrbitRef.current.isDragging = false;
-    };
+    const prevTouchAction = canvasEl.style.touchAction;
+    canvasEl.style.touchAction = 'none';
+
+    const controller = new V28MultiTouchGestureController({
+      getCameraMode: () => cameraModeRef.current,
+      getViewportSize: () => ({
+        width: canvasEl.clientWidth || window.innerWidth,
+        height: canvasEl.clientHeight || window.innerHeight,
+      }),
+      onJoystickVector: (vec) => {
+        activeJoystickRef.current.x = vec.x;
+        activeJoystickRef.current.y = vec.y;
+      },
+      onJoystickVisual: (visual) => {
+        onFloatingJoystickVisualRef.current?.(visual);
+      },
+      onCameraOrbitDelta: (dx, dy, pointerType) => {
+        camOrbitRef.current.isDragging = true;
+        camOrbitRef.current.lastManualOrbitAt = performance.now();
+        const yawSens = pointerType === 'touch' ? TOUCH_YAW_SENSITIVITY : DRAG_YAW_SENSITIVITY;
+        const pitchSens = pointerType === 'touch' ? TOUCH_PITCH_SENSITIVITY : DRAG_PITCH_SENSITIVITY;
+        const safeDx = THREE.MathUtils.clamp(dx, -140, 140);
+        const safeDy = THREE.MathUtils.clamp(dy, -140, 140);
+
+        if (cameraModeRef.current === 'explore') {
+          camOrbitRef.current.exploreYaw -= safeDx * yawSens;
+          camOrbitRef.current.explorePitch = THREE.MathUtils.clamp(
+            camOrbitRef.current.explorePitch - safeDy * pitchSens,
+            MIN_CAMERA_PITCH,
+            MAX_CAMERA_PITCH
+          );
+        } else if (cameraModeRef.current === 'overview') {
+          camOrbitRef.current.overviewYaw -= safeDx * yawSens;
+        }
+      },
+      onCameraOrbitEnd: () => {
+        camOrbitRef.current.isDragging = false;
+      },
+      onSuppressClickUntil: (ts) => {
+        suppressClickUntilRef.current = Math.max(suppressClickUntilRef.current, ts);
+      },
+    });
+    gestureControllerRef.current = controller;
+
     const onPtrDown = (e: PointerEvent) => {
-      if (cameraModeRef.current === 'focus') return;
-      if (e.button !== 0 && e.pointerType === 'mouse') return;
-      dragStateRef.current = {
-        active: true,
+      const role = controller.handlePointerDown({
         pointerId: e.pointerId,
-        startX: e.clientX,
-        startY: e.clientY,
-        lastX: e.clientX,
-        lastY: e.clientY,
-        dragged: false,
-      };
+        pointerType: e.pointerType,
+        button: e.button,
+        clientX: e.clientX,
+        clientY: e.clientY,
+      });
+      if (role !== 'ignored' && typeof canvasEl.setPointerCapture === 'function') {
+        try {
+          canvasEl.setPointerCapture(e.pointerId);
+        } catch {
+          // ignore pointer capture failures on synthetic/unsupported events
+        }
+      }
     };
     const onPtrMove = (e: PointerEvent) => {
-      const ds = dragStateRef.current;
-      if (cameraModeRef.current === 'focus' || !ds.active || ds.pointerId !== e.pointerId) return;
-      const dx = e.clientX - ds.lastX;
-      const dy = e.clientY - ds.lastY;
-      const totalDisp = Math.hypot(e.clientX - ds.startX, e.clientY - ds.startY);
-      const threshold = e.pointerType === 'touch' ? 8 : CAMERA_DRAG_THRESHOLD_PX;
-      if (!ds.dragged && totalDisp <= threshold) return;
-      ds.dragged = true;
-      ds.lastX = e.clientX;
-      ds.lastY = e.clientY;
-      camOrbitRef.current.isDragging = true;
-      camOrbitRef.current.lastManualOrbitAt = performance.now();
-
-      const yawSens = e.pointerType === 'touch' ? TOUCH_YAW_SENSITIVITY : DRAG_YAW_SENSITIVITY;
-      const pitchSens = e.pointerType === 'touch' ? TOUCH_PITCH_SENSITIVITY : DRAG_PITCH_SENSITIVITY;
-      const safeDx = THREE.MathUtils.clamp(dx, -140, 140);
-      const safeDy = THREE.MathUtils.clamp(dy, -140, 140);
-
-      if (cameraModeRef.current === 'explore') {
-        camOrbitRef.current.exploreYaw -= safeDx * yawSens;
-        camOrbitRef.current.explorePitch = THREE.MathUtils.clamp(
-          camOrbitRef.current.explorePitch - safeDy * pitchSens,
-          MIN_CAMERA_PITCH,
-          MAX_CAMERA_PITCH
-        );
-      } else if (cameraModeRef.current === 'overview') {
-        camOrbitRef.current.overviewYaw -= safeDx * yawSens;
-      }
+      controller.handlePointerMove({
+        pointerId: e.pointerId,
+        pointerType: e.pointerType,
+        button: e.button,
+        clientX: e.clientX,
+        clientY: e.clientY,
+      });
     };
     const onPtrUpOrCancel = (e: PointerEvent) => {
-      if (dragStateRef.current.active && dragStateRef.current.pointerId === e.pointerId) {
-        finishDrag();
+      controller.handlePointerEnd(e.pointerId);
+      if (typeof canvasEl.hasPointerCapture === 'function' && canvasEl.hasPointerCapture(e.pointerId)) {
+        try {
+          canvasEl.releasePointerCapture(e.pointerId);
+        } catch {
+          // ignore
+        }
       }
+    };
+    const onLostCapture = (e: PointerEvent) => {
+      controller.handlePointerEnd(e.pointerId);
     };
     const onBlur = () => {
       keysRef.current = {};
-      if (dragStateRef.current.active) finishDrag();
+      controller.resetAll();
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        keysRef.current = {};
+        controller.resetAll();
+      }
+    };
+    let lastIsPortrait = (canvasEl.clientHeight || window.innerHeight) >= (canvasEl.clientWidth || window.innerWidth);
+    const onOrientationChange = () => {
+      controller.resetAll();
+      lastIsPortrait = (canvasEl.clientHeight || window.innerHeight) >= (canvasEl.clientWidth || window.innerWidth);
+    };
+    const onResize = () => {
+      const nextIsPortrait = (canvasEl.clientHeight || window.innerHeight) >= (canvasEl.clientWidth || window.innerWidth);
+      if (nextIsPortrait !== lastIsPortrait) {
+        lastIsPortrait = nextIsPortrait;
+        controller.resetAll();
+      }
     };
     const onWheel = (e: WheelEvent) => {
       if (cameraModeRef.current === 'focus') return;
@@ -413,25 +472,38 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
         1.75
       );
     };
+
     window.addEventListener('keydown', onDown);
     window.addEventListener('keyup', onUp);
     window.addEventListener('blur', onBlur);
+    window.addEventListener('orientationchange', onOrientationChange);
+    window.addEventListener('resize', onResize);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     canvasEl.addEventListener('pointerdown', onPtrDown);
+    canvasEl.addEventListener('lostpointercapture', onLostCapture);
     window.addEventListener('pointermove', onPtrMove);
     window.addEventListener('pointerup', onPtrUpOrCancel);
     window.addEventListener('pointercancel', onPtrUpOrCancel);
     canvasEl.addEventListener('wheel', onWheel, { passive: true });
+
     return () => {
+      controller.resetAll();
+      gestureControllerRef.current = null;
+      canvasEl.style.touchAction = prevTouchAction;
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
       window.removeEventListener('blur', onBlur);
+      window.removeEventListener('orientationchange', onOrientationChange);
+      window.removeEventListener('resize', onResize);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       canvasEl.removeEventListener('pointerdown', onPtrDown);
+      canvasEl.removeEventListener('lostpointercapture', onLostCapture);
       window.removeEventListener('pointermove', onPtrMove);
       window.removeEventListener('pointerup', onPtrUpOrCancel);
       window.removeEventListener('pointercancel', onPtrUpOrCancel);
       canvasEl.removeEventListener('wheel', onWheel);
     };
-  }, [gl.domElement]);
+  }, [gl.domElement, activeJoystickRef]);
 
   const lookTargetVec = useMemo(() => new THREE.Vector3(), []);
   const desiredCamPos = useMemo(() => new THREE.Vector3(), []);
@@ -450,9 +522,11 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       if (k['KeyS'] || k['ArrowDown']) inputZ += 1;
       if (k['KeyA'] || k['ArrowLeft']) inputX -= 1;
       if (k['KeyD'] || k['ArrowRight']) inputX += 1;
-      if (Math.abs(joystickVector.x) > 0.08 || Math.abs(joystickVector.y) > 0.08) {
-        inputX += joystickVector.x;
-        inputZ += joystickVector.y;
+      const joyX = Math.abs(activeJoystickRef.current.x) > 0.01 ? activeJoystickRef.current.x : joystickVector.x;
+      const joyY = Math.abs(activeJoystickRef.current.y) > 0.01 ? activeJoystickRef.current.y : joystickVector.y;
+      if (Math.abs(joyX) > 0.01 || Math.abs(joyY) > 0.01) {
+        inputX += joyX;
+        inputZ += joyY;
       }
     }
 
@@ -649,9 +723,9 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
     const now = performance.now();
     fpsAccumRef.current.frames++;
     if (now - fpsAccumRef.current.lastTime >= 500) {
-      fpsAccumRef.current.fps = Math.round(
-        (fpsAccumRef.current.frames * 1000) / (now - fpsAccumRef.current.lastTime)
-      );
+      const elapsed = now - fpsAccumRef.current.lastTime;
+      fpsAccumRef.current.fps = Math.round((fpsAccumRef.current.frames * 1000) / elapsed);
+      fpsAccumRef.current.frameTimeMs = Math.round((elapsed / Math.max(1, fpsAccumRef.current.frames)) * 10) / 10;
       fpsAccumRef.current.frames = 0;
       fpsAccumRef.current.lastTime = now;
     }
@@ -661,7 +735,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       onPlayerMove?.({ ...p });
     }
 
-    // Read-only telemetry for QA & Phase 3/4 profiling
+    // Read-only telemetry for QA & Phase 3/4/6 profiling
     const lodCounts = { near: 0, mid: 0, far: 0 };
     if (boothLodMap) {
       for (const b of world.booths) {
@@ -674,6 +748,9 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       lodCounts.near = world.booths.length;
     }
 
+    const perfMem = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
+    const jsHeapMB = perfMem ? Math.round((perfMem.usedJSHeapSize / (1024 * 1024)) * 10) / 10 : null;
+
     (window as unknown as Record<string, unknown>).__V28_DEBUG__ = {
       versionId: world.versionId,
       boothCount: world.booths.length,
@@ -682,6 +759,11 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       cameraMode,
       roofCutawayActive: cameraMode === 'overview',
       fps: fpsAccumRef.current.fps,
+      frameTimeMs: fpsAccumRef.current.frameTimeMs,
+      jsHeapMB,
+      graphicsQuality: graphicsProfile.mode,
+      graphicsTier: graphicsProfile.resolvedTier,
+      dpr: gl.getPixelRatio(),
       drawCalls: gl.info.render.calls,
       triangles: gl.info.render.triangles,
       geometries: gl.info.memory.geometries,
@@ -710,9 +792,9 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
         position={[world.hallWidth * 0.35, 48, world.hallDepth * 0.3]}
         intensity={1.18}
         color="#fffbf0"
-        castShadow
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
+        castShadow={graphicsProfile.shadows}
+        shadow-mapSize-width={graphicsProfile.shadowMapSize}
+        shadow-mapSize-height={graphicsProfile.shadowMapSize}
       />
 
       {/* Dynamic Hall Floor with V27.5 Satin Architectural Terrazzo Texture */}
@@ -810,16 +892,24 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
 };
 
 export const DynamicExhibitionScene: React.FC<DynamicExhibitionSceneProps> = (props) => {
+  const graphicsProfile = useMemo(
+    () =>
+      resolveV28GraphicsProfile(
+        props.graphicsQuality ?? 'auto',
+        Boolean(props.isMobileViewport || props.isMobilePortrait)
+      ),
+    [props.graphicsQuality, props.isMobileViewport, props.isMobilePortrait]
+  );
   const spawnCamX = props.world.spawnPoint.x - Math.sin(props.world.spawnPoint.rotationY) * 6.5;
   const spawnCamZ = props.world.spawnPoint.z - Math.cos(props.world.spawnPoint.rotationY) * 6.5;
   const initialCamPos: [number, number, number] =
     props.cameraMode === 'explore' ? [spawnCamX, 3.2, spawnCamZ] : [0, 32, 48];
   return (
     <Canvas
-      shadows
-      dpr={props.isMobilePortrait ? [1, 1.5] : [1, 2]}
+      shadows={graphicsProfile.shadows}
+      dpr={graphicsProfile.dpr}
       camera={{ fov: 48, near: 0.3, far: Math.max(450, props.world.hallDepth * 3.0), position: initialCamPos }}
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
+      gl={{ antialias: graphicsProfile.antialias, powerPreference: 'high-performance' }}
       onCreated={({ gl }) => {
         const canvas = gl.domElement;
         const onLost = (ev: Event) => {
@@ -831,7 +921,7 @@ export const DynamicExhibitionScene: React.FC<DynamicExhibitionSceneProps> = (pr
         canvas.addEventListener('webglcontextlost', onLost, false);
         canvas.addEventListener('webglcontextrestored', onRestored, false);
       }}
-      style={{ width: '100%', height: '100%', display: 'block' }}
+      style={{ width: '100%', height: '100%', display: 'block', touchAction: 'none' }}
     >
       <InnerDynamicScene {...props} />
     </Canvas>

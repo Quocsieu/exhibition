@@ -12,11 +12,20 @@ import {
 } from '../scene/v28/DynamicExhibitionScene';
 import { DynamicWorldHud } from '../components/v28/DynamicWorldHud';
 import {
+  FloatingJoystickOverlay,
+  type FloatingJoystickOverlayHandle,
+} from '../components/v28/FloatingJoystickOverlay';
+import {
   computeStreamingLodMap,
-  DEFAULT_DESKTOP_STREAMING,
-  DEFAULT_MOBILE_STREAMING,
   type BoothLodTier,
 } from '../scene/v28/spatialStreaming';
+import {
+  classifyV28Viewport,
+  detectTouchCapable,
+  resolveV28GraphicsProfile,
+  type V28GraphicsQualityMode,
+  type V28ViewportInfo,
+} from '../scene/v28/v28MobileControls';
 import { ParametricExpoRoof } from '../scene/v28/ParametricExpoRoof';
 import { useV28SpatialRealtime } from '../hooks/useV28SpatialRealtime';
 import type { V28NpcAnimState } from '../scene/v28/DynamicBoothNpc3D';
@@ -62,18 +71,36 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     pos: { x: number; z: number; rotationY: number } | null;
   }>({ nonce: 0, pos: null });
   const [playerPos, setPlayerPos] = useState<V28PlayerState>({ x: 0, z: 20, rotationY: Math.PI });
-  const [joystickVec, setJoystickVec] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const joystickVecRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const floatingJoystickRef = useRef<FloatingJoystickOverlayHandle | null>(null);
   const [zoomRequest, setZoomRequest] = useState<{ delta: number; nonce: number }>({ delta: 0, nonce: 0 });
-  const [isMobilePortrait, setIsMobilePortrait] = useState<boolean>(
-    () => window.innerWidth <= 640 && window.innerHeight >= window.innerWidth
+  const [viewport, setViewport] = useState<V28ViewportInfo>(() =>
+    classifyV28Viewport(window.innerWidth, window.innerHeight, detectTouchCapable())
   );
+  const isMobilePortrait = viewport.isMobilePortrait;
+  const isMobileViewport = viewport.isMobileViewport;
+  const [graphicsQuality, setGraphicsQuality] = useState<V28GraphicsQualityMode>(() => {
+    const saved = localStorage.getItem('v28_graphics_quality');
+    if (saved === 'performance' || saved === 'quality' || saved === 'auto') return saved;
+    return 'auto';
+  });
   const [boothLodMap, setBoothLodMap] = useState<Record<string, BoothLodTier>>({});
   const lodMapRef = useRef<Record<string, BoothLodTier>>({});
+
+  const handleChangeGraphicsQuality = useCallback((mode: V28GraphicsQualityMode) => {
+    setGraphicsQuality(mode);
+    try {
+      localStorage.setItem('v28_graphics_quality', mode);
+    } catch {
+      // ignore storage error
+    }
+  }, []);
 
   // Recompute 3-Ring Spatial Streaming LOD map with staggered mount queue on movement/camera/focus change
   useEffect(() => {
     if (!world) return;
-    const thresholds = isMobilePortrait ? DEFAULT_MOBILE_STREAMING : DEFAULT_DESKTOP_STREAMING;
+    const profile = resolveV28GraphicsProfile(graphicsQuality, isMobileViewport);
+    const thresholds = profile.streamingThresholds;
     const anchorX = focusedBooth ? focusedBooth.positionX : playerPos.x;
     const anchorZ = focusedBooth ? focusedBooth.positionZ : playerPos.z;
 
@@ -96,17 +123,19 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     // Follow-up tick to drain staggered mount queue smoothly after rapid teleport
     const timer = window.setTimeout(tickStreaming, 180);
     return () => window.clearTimeout(timer);
-  }, [world, playerPos.x, playerPos.z, cameraMode, focusedBooth, isMobilePortrait]);
+  }, [world, playerPos.x, playerPos.z, cameraMode, focusedBooth, isMobileViewport, graphicsQuality]);
 
   const previewVersionId = new URLSearchParams(window.location.search).get('previewVersionId');
 
   useEffect(() => {
     const onResize = () => {
-      setIsMobilePortrait(window.innerWidth <= 640 && window.innerHeight >= window.innerWidth);
+      setViewport(classifyV28Viewport(window.innerWidth, window.innerHeight, detectTouchCapable()));
     };
     window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
     return () => {
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
     };
   }, []);
 
@@ -284,6 +313,26 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [cameraMode, focusedBooth, selectedProduct, npcPanelOpen, handleExitBoothFocus]);
 
+  const handleReturnToCenter = useCallback(() => {
+    if (!world) return;
+    setFocusedBooth(null);
+    setSelectedProduct(null);
+    setNpcPanelOpen(false);
+    setNpcAnimState('idle');
+    setPlayerTarget(null);
+    setCameraMode('explore');
+    previousExteriorModeRef.current = 'explore';
+    setTeleportState((prev) => ({
+      nonce: prev.nonce + 1,
+      pos: {
+        x: world.spawnPoint.x,
+        z: world.spawnPoint.z,
+        rotationY: world.spawnPoint.rotationY,
+      },
+    }));
+    sendTeleport(world.spawnPoint.x, world.spawnPoint.z, world.spawnPoint.rotationY);
+  }, [world, sendTeleport]);
+
   const handleFloorClick = useCallback((x: number, z: number) => {
     if (cameraMode === 'focus') {
       handleExitBoothFocus(true);
@@ -353,9 +402,12 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         playerTarget={playerTarget}
         teleportNonce={teleportState.nonce}
         teleportPos={teleportState.pos}
-        joystickVector={joystickVec}
+        joystickVector={{ x: 0, y: 0 }}
+        joystickVectorRef={joystickVecRef}
         zoomRequest={zoomRequest}
         isMobilePortrait={isMobilePortrait}
+        isMobileViewport={isMobileViewport}
+        graphicsQuality={graphicsQuality}
         boothLodMap={boothLodMap}
         remoteAvatars={remoteAvatars}
         npcAnimState={npcAnimState}
@@ -378,16 +430,26 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
           setCameraMode('focus');
         }}
         onOpenDirectoryMap={() => setDirectoryOpenNonce((n) => n + 1)}
+        onFloatingJoystickVisual={(visual) => {
+          floatingJoystickRef.current?.update(visual);
+        }}
         renderRoof={({ cameraMode: cm, isMobilePortrait: mp }) => (
           <ParametricExpoRoof roofBounds={world.roofBounds} cameraMode={cm} isMobilePortrait={mp} />
         )}
       />
+
+      <FloatingJoystickOverlay ref={floatingJoystickRef} />
 
       <DynamicWorldHud
         world={world}
         isPreviewMode={Boolean(previewVersionId)}
         cameraMode={cameraMode}
         isMobilePortrait={isMobilePortrait}
+        isMobileViewport={isMobileViewport}
+        isMobileLandscape={viewport.isMobileLandscape}
+        graphicsQuality={graphicsQuality}
+        onChangeGraphicsQuality={handleChangeGraphicsQuality}
+        onReturnToCenter={handleReturnToCenter}
         playerPos={playerPos}
         focusedBooth={focusedBooth}
         selectedProduct={selectedProduct}
@@ -424,7 +486,8 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
           if ((Math.abs(vec.x) > 0.08 || Math.abs(vec.y) > 0.08) && cameraMode === 'focus') {
             handleExitBoothFocus(true);
           }
-          setJoystickVec(vec);
+          joystickVecRef.current.x = vec.x;
+          joystickVecRef.current.y = vec.y;
         }}
         onZoomIn={() => setZoomRequest((z) => ({ delta: -0.15, nonce: z.nonce + 1 }))}
         onZoomOut={() => setZoomRequest((z) => ({ delta: 0.15, nonce: z.nonce + 1 }))}
