@@ -245,9 +245,12 @@ export const v28Api = {
   listArchetypes: () => v28Request<{ archetypes: V28ArchetypeSpec[] }>('/archetypes'),
   getDemoConfig: () =>
     v28Request<{ demoEnabled: boolean; label?: string; username?: string; password?: string }>('/auth/demo-config'),
-  getActiveWorld: (previewVersionId?: string | null) => {
+  getActiveWorld: (previewVersionId?: string | null, bypassCache = false) => {
     const qs = previewVersionId ? `?previewVersionId=${encodeURIComponent(previewVersionId)}` : '';
-    return v28Request<{ world: V28ExhibitionVersionDetail }>(`/exhibitions/active${qs}`);
+    return v28Request<{ world: V28ExhibitionVersionDetail }>(
+      `/exhibitions/active${qs}`,
+      bypassCache ? { cache: 'no-store' } : undefined
+    );
   },
   listExhibitions: () => v28Request<{ exhibitions: V28ExhibitionSummary[] }>('/exhibitions'),
   createExhibition: (payload: { name: string; targetBoothCount?: number; preferredZoneCapacity?: number }) =>
@@ -500,6 +503,23 @@ export const v28Api = {
     v28Request<{ ended: boolean; durationSec: number }>(
       `/ai/voice/${encodeURIComponent(sessionId)}/end`,
       { method: 'POST' }
+    ),
+  removeEmptyBooths: (
+    exhibitionId: string,
+    versionId: string,
+    input: { mode: 'single' | 'zone' | 'all'; boothId?: string; zoneId?: string }
+  ) =>
+    v28Request<{
+      version: V28ExhibitionVersionDetail;
+      removedBoothIds: string[];
+      removedCount: number;
+      removedZoneCodes: string[];
+      compacted: boolean;
+      remainingBoothCount: number;
+      remainingZoneCount: number;
+    }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/empty-booths/remove`,
+      { method: 'POST', body: JSON.stringify(input) }
     ),
 };
 
@@ -761,3 +781,355 @@ export interface V28ExhibitionVersionDetail {
     };
   };
 }
+
+export type V28VisitorInteractionType = 'booth_focus' | 'product_inspect' | 'npc_consult';
+
+export interface V28VisitorSessionResponse {
+  visitorToken: string;
+  expiresAt: string;
+  resumed: boolean;
+}
+
+export interface V28VisitorJourneyResponse {
+  exhibitionId: string;
+  versionId: string;
+  totalBooths: number;
+  visitedCount: number;
+  visitedBoothIds: string[];
+  visits: Array<{
+    boothId: string;
+    interactionType: V28VisitorInteractionType;
+    firstVisitedAt: string;
+  }>;
+}
+
+export interface V28RecordBoothVisitResponse extends V28VisitorJourneyResponse {
+  boothId: string;
+  recorded: boolean;
+  duplicate: boolean;
+  firstVisitedAt: string;
+}
+
+export interface V28StartBoothEngagementResponse {
+  engagementToken: string;
+  boothId: string;
+  versionId: string;
+  expiresAt: string;
+  minDwellFocusMs: number;
+  minDwellInteractMs: number;
+  alreadyVisited: boolean;
+}
+
+const VISITOR_TOKEN_STORAGE_KEY = 'v28_visitor_token';
+
+export function getStoredVisitorToken(): string | null {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage.getItem(VISITOR_TOKEN_STORAGE_KEY) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredVisitorToken(): string | null {
+  return getStoredVisitorToken();
+}
+
+function saveStoredVisitorToken(token: string): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(VISITOR_TOKEN_STORAGE_KEY, token);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export const v28VisitorApi = {
+  async ensureSession(): Promise<V28VisitorSessionResponse> {
+    const existing = readStoredVisitorToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (existing) headers['X-Visitor-Token'] = existing;
+    const res = await fetch(`${API_BASE_URL}/api/v28/visitor/session`, {
+      method: 'POST',
+      headers,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((body as { error?: string }).error || `Lỗi phiên khách tham quan (${res.status})`);
+    }
+    const data = body as V28VisitorSessionResponse;
+    saveStoredVisitorToken(data.visitorToken);
+    return data;
+  },
+
+  async getJourney(versionId: string): Promise<V28VisitorJourneyResponse> {
+    let token = readStoredVisitorToken();
+    if (!token) {
+      const s = await v28VisitorApi.ensureSession();
+      token = s.visitorToken;
+    }
+    const qs = versionId ? `?versionId=${encodeURIComponent(versionId)}` : '';
+    let res = await fetch(`${API_BASE_URL}/api/v28/visitor/journey${qs}`, {
+      headers: { 'X-Visitor-Token': token },
+    });
+    if (res.status === 401) {
+      const s = await v28VisitorApi.ensureSession();
+      token = s.visitorToken;
+      res = await fetch(`${API_BASE_URL}/api/v28/visitor/journey${qs}`, {
+        headers: { 'X-Visitor-Token': token },
+      });
+    }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((body as { error?: string }).error || `Không thể tải tiến độ tham quan (${res.status})`);
+    }
+    return body as V28VisitorJourneyResponse;
+  },
+
+  async startVisitEngagement(input: {
+    versionId: string;
+    boothId: string;
+  }): Promise<V28StartBoothEngagementResponse> {
+    let token = readStoredVisitorToken();
+    if (!token) {
+      const s = await v28VisitorApi.ensureSession();
+      token = s.visitorToken;
+    }
+    const res = await fetch(`${API_BASE_URL}/api/v28/visitor/visits/engage`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Visitor-Token': token,
+      },
+      body: JSON.stringify(input),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((body as { error?: string }).error || `Không thể khởi tạo phiên tương tác (${res.status})`);
+    }
+    return body as V28StartBoothEngagementResponse;
+  },
+
+  async recordVisit(input: {
+    versionId: string;
+    boothId: string;
+    interactionType: V28VisitorInteractionType;
+    engagementToken: string;
+  }): Promise<V28RecordBoothVisitResponse> {
+    let token = readStoredVisitorToken();
+    if (!token) {
+      const s = await v28VisitorApi.ensureSession();
+      token = s.visitorToken;
+    }
+    const res = await fetch(`${API_BASE_URL}/api/v28/visitor/visits`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Visitor-Token': token,
+      },
+      body: JSON.stringify(input),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((body as { error?: string }).error || `Không thể ghi nhận lượt tham quan (${res.status})`);
+    }
+    return body as V28RecordBoothVisitResponse;
+  },
+};
+
+export type V28RedemptionStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'FULFILLED';
+export type V28RewardRiskLevel = 'low' | 'medium' | 'high';
+
+export interface V28VisitorRedemptionSummary {
+  id: string;
+  redemptionCode: string;
+  status: V28RedemptionStatus;
+  recipientName: string;
+  maskedContact: string;
+  recordedUniqueBooths: number;
+  requiredUniqueBooths: number;
+  rejectionReason: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+  fulfilledAt: string | null;
+}
+
+export interface V28VisitorRewardStatusResponse {
+  exhibitionId: string;
+  versionId: string;
+  totalBooths: number;
+  recordedUniqueBooths: number;
+  requiredUniqueBooths: number;
+  rewardTitle: string;
+  rewardDescription: string;
+  policyEnabled: boolean;
+  eligibleToSubmit: boolean;
+  redemption: V28VisitorRedemptionSummary | null;
+}
+
+export interface V28AdminRedemptionListItem {
+  id: string;
+  redemptionCode: string;
+  exhibitionId: string;
+  versionId: string;
+  recipientName: string;
+  contactPhone: string | null;
+  contactEmail: string | null;
+  recordedUniqueBooths: number;
+  requiredUniqueBooths: number;
+  status: V28RedemptionStatus;
+  riskLevel: V28RewardRiskLevel;
+  riskFlags: string[];
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+  fulfilledBy: string | null;
+  fulfilledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface V28AdminRedemptionDetail extends V28AdminRedemptionListItem {
+  visitDurationSec: number;
+  visits: Array<{
+    boothId: string;
+    boothNumber: number;
+    zoneCode: string;
+    interactionType: string;
+    firstVisitedAt: string;
+  }>;
+  auditLogs: Array<{
+    id: number;
+    action: string;
+    fromStatus: string | null;
+    toStatus: string;
+    actor: string;
+    note: string;
+    createdAt: string;
+  }>;
+}
+
+export interface V28AdminRewardPolicyResponse {
+  exhibitionId: string;
+  versionId: string;
+  totalActiveBooths: number;
+  policy: {
+    versionId: string;
+    requiredUniqueBooths: number;
+    rewardTitle: string;
+    rewardDescription: string;
+    enabled: boolean;
+  };
+  policyExceedsActiveBooths: boolean;
+}
+
+export const v28RewardApi = {
+  async getVisitorRewardStatus(versionId: string): Promise<V28VisitorRewardStatusResponse> {
+    let token = readStoredVisitorToken();
+    if (!token) {
+      const s = await v28VisitorApi.ensureSession();
+      token = s.visitorToken;
+    }
+    const qs = versionId ? `?versionId=${encodeURIComponent(versionId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/api/v28/visitor/reward-status${qs}`, {
+      headers: { 'X-Visitor-Token': token },
+      cache: 'no-store',
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((body as { error?: string }).error || `Không thể kiểm tra điều kiện nhận quà (${res.status})`);
+    }
+    return body as V28VisitorRewardStatusResponse;
+  },
+
+  getAdminRewardPolicy: (versionId?: string) => {
+    const qs = versionId ? `?versionId=${encodeURIComponent(versionId)}` : '';
+    return v28Request<V28AdminRewardPolicyResponse>(`/admin/reward-policy${qs}`, {
+      cache: 'no-store',
+    });
+  },
+
+  updateAdminRewardPolicy: (input: {
+    versionId?: string;
+    requiredUniqueBooths: number;
+    enabled?: boolean;
+  }) =>
+    v28Request<V28AdminRewardPolicyResponse>('/admin/reward-policy', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+
+  async submitRedemption(input: {
+    versionId: string;
+    recipientName: string;
+    contactPhone?: string;
+    contactEmail?: string;
+    consentAccepted: boolean;
+  }): Promise<V28VisitorRewardStatusResponse> {
+    let token = readStoredVisitorToken();
+    if (!token) {
+      const s = await v28VisitorApi.ensureSession();
+      token = s.visitorToken;
+    }
+    const res = await fetch(`${API_BASE_URL}/api/v28/visitor/redemptions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Visitor-Token': token,
+      },
+      body: JSON.stringify(input),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((body as { error?: string }).error || `Không thể gửi yêu cầu nhận quà (${res.status})`);
+    }
+    return body as V28VisitorRewardStatusResponse;
+  },
+
+  listAdminRedemptions: (params?: { versionId?: string; status?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.versionId) qs.set('versionId', params.versionId);
+    if (params?.status && params.status !== 'ALL') qs.set('status', params.status);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return v28Request<{ redemptions: V28AdminRedemptionListItem[] }>(`/admin/redemptions${suffix}`);
+  },
+
+  getAdminRedemptionDetail: (id: string) =>
+    v28Request<{ redemption: V28AdminRedemptionDetail }>(`/admin/redemptions/${encodeURIComponent(id)}`),
+
+  reviewRedemption: (id: string, input: { decision: 'APPROVED' | 'REJECTED'; rejectionReason?: string }) =>
+    v28Request<{ redemption: V28AdminRedemptionDetail }>(
+      `/admin/redemptions/${encodeURIComponent(id)}/review`,
+      { method: 'POST', body: JSON.stringify(input) }
+    ),
+
+  fulfillRedemption: (id: string, note?: string) =>
+    v28Request<{ redemption: V28AdminRedemptionDetail }>(
+      `/admin/redemptions/${encodeURIComponent(id)}/fulfill`,
+      { method: 'POST', body: JSON.stringify({ note }) }
+    ),
+
+  setBoothVisibility: (exhibitionId: string, versionId: string, boothId: string, hidden: boolean) =>
+    v28Request<{ version: V28ExhibitionVersionDetail; activeBoothCount: number }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/booths/${encodeURIComponent(boothId)}/visibility`,
+      { method: 'PATCH', body: JSON.stringify({ hidden }) }
+    ),
+
+  removeEmptyBooths: (
+    exhibitionId: string,
+    versionId: string,
+    input: { mode: 'single' | 'zone' | 'all'; boothId?: string; zoneId?: string }
+  ) =>
+    v28Request<{
+      version: V28ExhibitionVersionDetail;
+      removedBoothIds: string[];
+      removedCount: number;
+      removedZoneCodes: string[];
+      compacted: boolean;
+      remainingBoothCount: number;
+      remainingZoneCount: number;
+    }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/empty-booths/remove`,
+      { method: 'POST', body: JSON.stringify(input) }
+    ),
+};

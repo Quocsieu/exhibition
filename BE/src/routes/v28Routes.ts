@@ -25,6 +25,8 @@ import { V28ExhibitionService, type ExhibitionVersionDetail } from '../services/
 import { V28CategoryService } from '../services/v28/categoryService.js';
 import { V28AudioCacheService } from '../services/v28/audioCacheService.js';
 import { V28AiConsultantService } from '../services/v28/aiConsultantService.js';
+import { V28VisitorJourneyService } from '../services/v28/visitorJourneyService.js';
+import { V28RewardRedemptionService } from '../services/v28/rewardRedemptionService.js';
 import {
   fetchExternalProductHtml,
   fetchExternalText,
@@ -96,9 +98,15 @@ export function createV28ApiRoutes(
   exhibitionService = new V28ExhibitionService(v28Db),
   onLayoutPublished?: (version: ExhibitionVersionDetail) => void,
   audioCacheService = new V28AudioCacheService(v28Db),
-  aiConsultantService = new V28AiConsultantService(v28Db, exhibitionService)
+  aiConsultantService = new V28AiConsultantService(v28Db, exhibitionService),
+  visitorJourneyService = new V28VisitorJourneyService(v28Db, exhibitionService)
 ): Router {
   const categoryService = new V28CategoryService(v28Db);
+  const rewardRedemptionService = new V28RewardRedemptionService(
+    v28Db,
+    exhibitionService,
+    visitorJourneyService
+  );
   const router = Router();
   // Phase 5 Hardening: Strict 512kb default for V28 routes; 8mb ONLY on /imports/excel/preview
   const excelUploadJsonParser = express.json({ limit: '8mb' });
@@ -1327,6 +1335,82 @@ export function createV28ApiRoutes(
     }
   );
 
+  const BoothVisibilityBodySchema = z.object({
+    hidden: z.boolean(),
+  });
+
+  router.patch(
+    '/exhibitions/:id/versions/:versionId/booths/:boothId/visibility',
+    requireAdminAuth,
+    (req: Request, res: Response) => {
+      const parsed = BoothVisibilityBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Thiếu trạng thái hidden (true/false) hợp lệ.' });
+        return;
+      }
+      try {
+        const result = exhibitionService.setVersionBoothVisibility(
+          getParam(req.params.id),
+          getParam(req.params.versionId),
+          getParam(req.params.boothId),
+          parsed.data.hidden
+        );
+        if (result.isPublishedVersion && result.publicActiveWorld) {
+          invalidatePublishedWorldCache();
+          onLayoutPublished?.(result.publicActiveWorld);
+        }
+        res.json({
+          version: result.adminVersion,
+          activeBoothCount: result.publicActiveWorld
+            ? result.publicActiveWorld.booths.length
+            : result.adminVersion.booths.filter((b) => b.placementStatus !== 'hidden').length,
+        });
+      } catch (err) {
+        res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+      }
+    }
+  );
+
+  const RemoveEmptyBoothsBodySchema = z.object({
+    mode: z.enum(['single', 'zone', 'all']),
+    boothId: z.string().trim().min(1).optional(),
+    zoneId: z.string().trim().min(1).optional(),
+  });
+
+  router.post(
+    '/exhibitions/:id/versions/:versionId/empty-booths/remove',
+    requireAdminAuth,
+    (req: Request, res: Response) => {
+      const parsed = RemoveEmptyBoothsBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Yêu cầu xóa gian trống không hợp lệ.' });
+        return;
+      }
+      try {
+        const result = exhibitionService.removeEmptyBooths(
+          getParam(req.params.id),
+          getParam(req.params.versionId),
+          parsed.data
+        );
+        if (result.isPublishedVersion && result.publicActiveWorld && result.removedCount > 0) {
+          invalidatePublishedWorldCache();
+          onLayoutPublished?.(result.publicActiveWorld);
+        }
+        res.json({
+          version: result.version,
+          removedBoothIds: result.removedBoothIds,
+          removedCount: result.removedCount,
+          removedZoneCodes: result.removedZoneCodes,
+          compacted: result.compacted,
+          remainingBoothCount: result.remainingBoothCount,
+          remainingZoneCount: result.remainingZoneCount,
+        });
+      } catch (err) {
+        res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+      }
+    }
+  );
+
   router.post(
     '/exhibitions/:id/versions/:versionId/publish',
     requireAdminAuth,
@@ -1612,6 +1696,271 @@ export function createV28ApiRoutes(
   router.post('/ai/voice/:sessionId/end', (req: Request, res: Response) => {
     const result = aiConsultantService.endVoiceSession(getParam(req.params.sessionId));
     res.json(result);
+  });
+
+  // ============================================================================
+  // PHASE 4 — SERVER-VERIFIED VISITOR JOURNEY TRACKING (HARDENED)
+  // ============================================================================
+  const StartBoothEngagementBodySchema = z.object({
+    versionId: z.string().trim().min(1).max(120).optional(),
+    boothId: z.string().trim().min(1, 'Thiếu mã gian hàng').max(120),
+  });
+
+  const RecordBoothVisitBodySchema = z.object({
+    versionId: z.string().trim().min(1).max(120).optional(),
+    boothId: z.string().trim().min(1, 'Thiếu mã gian hàng').max(120),
+    interactionType: z.enum(['booth_focus', 'product_inspect', 'npc_consult']),
+    engagementToken: z.string().trim().min(10, 'Thiếu mã phiên tương tác gian hàng').max(120).optional(),
+    avatarX: z.number().finite().optional(),
+    avatarZ: z.number().finite().optional(),
+  });
+
+  router.post('/visitor/session', (req: Request, res: Response) => {
+    try {
+      const existingToken =
+        typeof req.headers['x-visitor-token'] === 'string'
+          ? req.headers['x-visitor-token'].trim()
+          : undefined;
+      const session = visitorJourneyService.ensureSession(existingToken);
+      res.status(session.resumed ? 200 : 201).json(session);
+    } catch (err) {
+      res.status(getHttpStatus(err, 500)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get('/visitor/journey', (req: Request, res: Response) => {
+    try {
+      const token =
+        typeof req.headers['x-visitor-token'] === 'string'
+          ? req.headers['x-visitor-token'].trim()
+          : '';
+      const versionId =
+        typeof req.query.versionId === 'string' && req.query.versionId.trim()
+          ? req.query.versionId.trim()
+          : undefined;
+      const journey = visitorJourneyService.getJourney(token, versionId);
+      res.json(journey);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/visitor/visits/engage', (req: Request, res: Response) => {
+    try {
+      const token =
+        typeof req.headers['x-visitor-token'] === 'string'
+          ? req.headers['x-visitor-token'].trim()
+          : '';
+      const parsed = StartBoothEngagementBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: parsed.error.issues[0]?.message || 'Dữ liệu bắt đầu tương tác gian hàng không hợp lệ.',
+        });
+        return;
+      }
+      const result = visitorJourneyService.startEngagement({
+        visitorToken: token,
+        versionId: parsed.data.versionId,
+        boothId: parsed.data.boothId,
+      });
+      res.status(201).json(result);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/visitor/visits', (req: Request, res: Response) => {
+    try {
+      const token =
+        typeof req.headers['x-visitor-token'] === 'string'
+          ? req.headers['x-visitor-token'].trim()
+          : '';
+      const parsed = RecordBoothVisitBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: parsed.error.issues[0]?.message || 'Dữ liệu ghi nhận tham quan không hợp lệ.',
+        });
+        return;
+      }
+      const result = visitorJourneyService.recordVisit({
+        visitorToken: token,
+        versionId: parsed.data.versionId,
+        boothId: parsed.data.boothId,
+        interactionType: parsed.data.interactionType,
+        engagementToken: parsed.data.engagementToken,
+      });
+      res.status(result.recorded ? 201 : 200).json(result);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  // ============================================================================
+  // PHASE 5 — VISITOR REWARDS REDEMPTION & ADMIN VERIFICATION
+  // ============================================================================
+  const SubmitRedemptionBodySchema = z.object({
+    versionId: z.string().trim().min(1).max(120).optional(),
+    recipientName: z.string().trim().min(2, 'Vui lòng nhập tên người nhận').max(120),
+    contactPhone: z.string().trim().max(30).optional(),
+    contactEmail: z.string().trim().max(150).optional(),
+    consentAccepted: z.boolean(),
+  });
+
+  const ReviewRedemptionBodySchema = z.object({
+    decision: z.enum(['APPROVED', 'REJECTED']),
+    rejectionReason: z.string().trim().max(350).optional(),
+  });
+
+  const FulfillRedemptionBodySchema = z.object({
+    note: z.string().trim().max(350).optional(),
+  });
+
+  router.get('/visitor/reward-status', (req: Request, res: Response) => {
+    try {
+      const token =
+        typeof req.headers['x-visitor-token'] === 'string'
+          ? req.headers['x-visitor-token'].trim()
+          : '';
+      const versionId =
+        typeof req.query.versionId === 'string' && req.query.versionId.trim()
+          ? req.query.versionId.trim()
+          : undefined;
+      const status = rewardRedemptionService.getVisitorRewardStatus(token, versionId);
+      res.json(status);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/visitor/redemptions', (req: Request, res: Response) => {
+    try {
+      const token =
+        typeof req.headers['x-visitor-token'] === 'string'
+          ? req.headers['x-visitor-token'].trim()
+          : '';
+      const parsed = SubmitRedemptionBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: parsed.error.issues[0]?.message || 'Dữ liệu đăng ký nhận quà không hợp lệ.',
+        });
+        return;
+      }
+      const result = rewardRedemptionService.submitRedemption({
+        visitorToken: token,
+        versionId: parsed.data.versionId,
+        recipientName: parsed.data.recipientName,
+        contactPhone: parsed.data.contactPhone,
+        contactEmail: parsed.data.contactEmail,
+        consentAccepted: parsed.data.consentAccepted,
+      });
+      res.status(201).json(result);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get('/admin/reward-policy', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const versionId =
+        typeof req.query.versionId === 'string' && req.query.versionId.trim()
+          ? req.query.versionId.trim()
+          : undefined;
+      const result = rewardRedemptionService.getAdminPolicy(versionId);
+      res.json(result);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.put('/admin/reward-policy', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        versionId?: unknown;
+        requiredUniqueBooths?: unknown;
+        enabled?: unknown;
+      };
+      const versionId =
+        typeof body.versionId === 'string' && body.versionId.trim()
+          ? body.versionId.trim()
+          : undefined;
+      const enabled = typeof body.enabled === 'boolean' ? body.enabled : undefined;
+      const result = rewardRedemptionService.updatePolicy({
+        versionId,
+        requiredUniqueBooths: body.requiredUniqueBooths,
+        enabled,
+      });
+      // Reuse existing Socket.IO layout_changed channel so live Visitors refresh reward policy without polling
+      try {
+        const activeWorld = exhibitionService.getActiveExhibitionWorld();
+        if (activeWorld && activeWorld.versionId === result.versionId) {
+          onLayoutPublished?.(activeWorld);
+        }
+      } catch {
+        // ignore non-blocking broadcast error
+      }
+      res.json(result);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get('/admin/redemptions', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const versionId = typeof req.query.versionId === 'string' ? req.query.versionId : undefined;
+      const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+      const redemptions = rewardRedemptionService.listRedemptionsForAdmin({ versionId, status });
+      res.json({ redemptions });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get('/admin/redemptions/:id', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const detail = rewardRedemptionService.getRedemptionDetailForAdmin(getParam(req.params.id));
+      res.json({ redemption: detail });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/admin/redemptions/:id/review', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const parsed = ReviewRedemptionBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: parsed.error.issues[0]?.message || 'Dữ liệu duyệt yêu cầu không hợp lệ.',
+        });
+        return;
+      }
+      const adminUsername = String(res.locals.adminUsername || 'admin');
+      const updated = rewardRedemptionService.reviewRedemption(getParam(req.params.id), {
+        decision: parsed.data.decision,
+        rejectionReason: parsed.data.rejectionReason,
+        adminUsername,
+      });
+      res.json({ redemption: updated });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/admin/redemptions/:id/fulfill', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const parsed = FulfillRedemptionBodySchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Ghi chú trao quà không hợp lệ.' });
+        return;
+      }
+      const adminUsername = String(res.locals.adminUsername || 'admin');
+      const updated = rewardRedemptionService.fulfillRedemption(getParam(req.params.id), {
+        note: parsed.data.note,
+        adminUsername,
+      });
+      res.json({ redemption: updated });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
   });
 
   return router;

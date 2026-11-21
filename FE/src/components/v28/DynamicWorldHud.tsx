@@ -1,14 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type {
   V28BoothPlacementView,
   V28ExhibitionVersionDetail,
   V28Product,
+  V28VisitorRewardStatusResponse,
 } from '../../services/v28Api';
 import type { V28CameraMode, V28PlayerState } from '../../scene/v28/DynamicExhibitionScene';
 import type { V28NpcAnimState } from '../../scene/v28/DynamicBoothNpc3D';
 import type { V28GraphicsQualityMode } from '../../scene/v28/v28MobileControls';
 import { V28NpcConsultantPanel } from './V28NpcConsultantPanel';
 import { MobileProductBottomSheet } from './MobileProductBottomSheet';
+import { InteractiveMap2D } from './InteractiveMap2D';
+import { NearbyDiscoveryWidget } from './NearbyDiscoveryWidget';
+import { RewardRedemptionModal } from './RewardRedemptionModal';
 
 export interface DynamicWorldHudProps {
   world: V28ExhibitionVersionDetail;
@@ -21,6 +25,10 @@ export interface DynamicWorldHudProps {
   onChangeGraphicsQuality?: (mode: V28GraphicsQualityMode) => void;
   onReturnToCenter?: () => void;
   playerPos: V28PlayerState;
+  visitedBoothIds?: ReadonlySet<string>;
+  journeyStatus?: 'loading' | 'ready' | 'error';
+  rewardStatus?: V28VisitorRewardStatusResponse | null;
+  onRewardStatusUpdated?: (next: V28VisitorRewardStatusResponse) => void;
   focusedBooth: V28BoothPlacementView | null;
   selectedProduct: { booth: V28BoothPlacementView; product: V28Product; slotId: string } | null;
   npcPanelOpen: boolean;
@@ -41,7 +49,7 @@ export interface DynamicWorldHudProps {
   onJoystickChange: (vec: { x: number; y: number }) => void;
   onZoomIn?: () => void;
   onZoomOut?: () => void;
-  onOpenAdmin: () => void;
+  onOpenAdmin?: () => void;
 }
 
 function getSafeWebsiteUrl(raw?: string | null): string | null {
@@ -68,6 +76,10 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   onChangeGraphicsQuality,
   onReturnToCenter,
   playerPos,
+  visitedBoothIds,
+  journeyStatus = 'ready',
+  rewardStatus = null,
+  onRewardStatusUpdated,
   focusedBooth,
   selectedProduct,
   npcPanelOpen,
@@ -87,13 +99,11 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   onNpcAnimStateChange,
   onZoomIn,
   onZoomOut,
-  onOpenAdmin,
 }) => {
   const isMobileUi = isMobileViewport || isMobilePortrait || isMobileLandscape;
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedZoneCode, setSelectedZoneCode] = useState<string>('ALL');
   const [directoryOpen, setDirectoryOpen] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [rewardModalOpen, setRewardModalOpen] = useState<boolean>(false);
   const [controlsGuideOpen, setControlsGuideOpen] = useState<boolean>(false);
   const [showFirstVisitHint, setShowFirstVisitHint] = useState<boolean>(() => {
     try {
@@ -131,20 +141,6 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   const [draftName, setDraftName] = useState<string>(playerName);
   const [draftColor, setDraftColor] = useState<string>(playerColor);
 
-  const filteredBooths = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return world.booths.filter((b) => {
-      if (selectedZoneCode !== 'ALL' && b.zoneCode !== selectedZoneCode) return false;
-      if (!q) return true;
-      return (
-        b.boothName.toLowerCase().includes(q) ||
-        b.companyName.toLowerCase().includes(q) ||
-        b.zoneName.toLowerCase().includes(q) ||
-        b.slots.some((s) => s.product?.name.toLowerCase().includes(q))
-      );
-    });
-  }, [world.booths, searchQuery, selectedZoneCode]);
-
   const isBoothFocusActive = cameraMode === 'focus' && Boolean(focusedBooth);
   const focusedWebsiteUrl = getSafeWebsiteUrl(focusedBooth?.contactUrl);
   const focusedCategoryLabel =
@@ -159,20 +155,9 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
     }
   }, [isBoothFocusActive, selectedProduct]);
 
-  // Dynamically select up to 8 booths on Desktop from Published V28 World
-  const quickBoothChips = useMemo(() => {
-    if (isMobileUi) return [];
-    const sorted = [...world.booths].sort((a, b) => {
-      if (b.assignedSlotCount !== a.assignedSlotCount) {
-        return b.assignedSlotCount - a.assignedSlotCount;
-      }
-      return a.slotIndex - b.slotIndex;
-    });
-    return sorted.slice(0, 8);
-  }, [world.booths, isMobileUi]);
-
   return (
     <div
+      className="v28-world-hud"
       style={{
         position: 'fixed',
         inset: 0,
@@ -195,10 +180,11 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
        * ===================================================================== */}
       {isBoothFocusActive && focusedBooth ? (
         isMobileUi ? (
-          /* Mobile-First Compact Booth Focus Bar — never covers the 3D booth! */
+          /* Mobile-First Compact Booth Focus Bar — single slim row, never covers booth signage or products! */
           <div
             role="toolbar"
             aria-label="Thanh điều khiển gian hàng đang xem"
+            onPointerDown={(e) => e.stopPropagation()}
             style={{
               pointerEvents: 'auto',
               display: 'flex',
@@ -208,13 +194,13 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               width: '100%',
               maxWidth: '100%',
               boxSizing: 'border-box',
-              background: 'rgba(15, 23, 42, 0.86)',
+              background: 'rgba(15, 23, 42, 0.84)',
               backdropFilter: 'blur(10px)',
               WebkitBackdropFilter: 'blur(10px)',
-              borderRadius: 14,
-              padding: '6px 8px',
+              borderRadius: 12,
+              padding: '4px 6px',
               border: '1px solid rgba(148, 163, 184, 0.25)',
-              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.28)',
+              boxShadow: '0 6px 20px rgba(15, 23, 42, 0.24)',
             }}
           >
             <button
@@ -223,23 +209,23 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               aria-label="Quay lại khu triển lãm"
               style={{
                 minWidth: 44,
-                minHeight: 44,
+                minHeight: 40,
                 padding: '0 10px',
-                borderRadius: 10,
+                borderRadius: 9,
                 border: 'none',
                 background: '#f59e0b',
                 color: '#0f172a',
                 fontWeight: 800,
-                fontSize: 13,
+                fontSize: 12.5,
                 cursor: 'pointer',
                 flexShrink: 0,
                 whiteSpace: 'nowrap',
               }}
             >
-              ← Thoát
+              ← Quay lại
             </button>
 
-            <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
+            <div style={{ minWidth: 0, flex: 1, overflow: 'hidden', padding: '0 4px' }}>
               <div
                 style={{
                   fontSize: 13,
@@ -254,14 +240,14 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               </div>
               <div
                 style={{
-                  fontSize: 11,
+                  fontSize: 10.5,
                   color: '#94a3b8',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                 }}
               >
-                {focusedBooth.assignedSlotCount}/6 SP · Chạm sản phẩm để xem
+                {focusedBooth.assignedSlotCount}/6 SP · Chạm sản phẩm hoặc NPC
               </div>
             </div>
 
@@ -273,8 +259,9 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
                 aria-label="Mở website doanh nghiệp"
                 style={{
                   minWidth: 44,
-                  minHeight: 44,
-                  borderRadius: 10,
+                  minHeight: 40,
+                  padding: '0 10px',
+                  borderRadius: 9,
                   border: '1px solid rgba(148, 163, 184, 0.35)',
                   background: 'rgba(255, 255, 255, 0.1)',
                   color: '#fff',
@@ -282,133 +269,98 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: 16,
+                  gap: 4,
+                  fontSize: 12.5,
+                  fontWeight: 700,
                   flexShrink: 0,
+                  whiteSpace: 'nowrap',
                 }}
               >
-                🌐
+                🌐 Web ↗
               </a>
             )}
-
-            <button
-              type="button"
-              onClick={onOpenNpcPanel}
-              aria-label="Nghe tư vấn viên giới thiệu"
-              style={{
-                minWidth: 44,
-                minHeight: 44,
-                padding: '0 11px',
-                borderRadius: 10,
-                border: 'none',
-                background: '#0284c7',
-                color: '#fff',
-                fontWeight: 700,
-                fontSize: 12.5,
-                cursor: 'pointer',
-                flexShrink: 0,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              👩‍💼 Tư vấn
-            </button>
           </div>
         ) : (
-        <div
-          className="shop-showcase-corner-hud"
-          role="toolbar"
-          aria-label="Thanh điều khiển gian hàng đang xem"
-          style={{
-            position: 'static',
-            pointerEvents: 'auto',
-            alignSelf: 'flex-start',
-            maxWidth: '100%',
-            flexWrap: 'wrap',
-            gap: 8,
-          }}
-        >
-          <button
-            type="button"
-            className="shop-showcase-back-btn"
-            onClick={onCloseFocus}
-            title="Thoát gian hàng và quay lại khu triển lãm (Phím Esc)"
-            aria-label="Quay lại khu triển lãm"
-          >
-            ← Quay lại khu triển lãm <kbd>Esc</kbd>
-          </button>
-
+          /* Desktop Compact Single-Row Booth Focus Bar (duplicate NPC button removed — entry point is on 3D NPC) */
           <div
-            className="shop-showcase-booth-banner"
-            title={`${focusedBooth.companyName || focusedBooth.boothName}${
-              focusedBooth.companyName && focusedBooth.companyName !== focusedBooth.boothName
+            className="shop-showcase-corner-hud"
+            role="toolbar"
+            aria-label="Thanh điều khiển gian hàng đang xem"
+            style={{
+              position: 'static',
+              pointerEvents: 'auto',
+              alignSelf: 'flex-start',
+              maxWidth: '100%',
+              flexWrap: 'nowrap',
+              gap: 6,
+              padding: '4px 6px',
+            }}
+          >
+            <button
+              type="button"
+              className="shop-showcase-back-btn"
+              onClick={onCloseFocus}
+              title="Thoát gian hàng và quay lại khu triển lãm (Phím Esc)"
+              aria-label="Quay lại khu triển lãm"
+              style={{ padding: '6px 12px', fontSize: 13, minHeight: 34 }}
+            >
+              ← Quay lại <kbd>Esc</kbd>
+            </button>
+
+            <div
+              className="shop-showcase-booth-banner"
+              title={`${focusedBooth.companyName || focusedBooth.boothName}${focusedBooth.companyName && focusedBooth.companyName !== focusedBooth.boothName
                 ? ` (${focusedBooth.boothName})`
                 : ''
-            } · ${focusedBooth.zoneName} · ${focusedBooth.assignedSlotCount}/6 sản phẩm`}
-            style={{ maxWidth: 460 }}
-          >
-            {focusedBooth.logoUrl && (
-              <img
-                src={focusedBooth.logoUrl}
-                alt={focusedBooth.companyName || focusedBooth.boothName}
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: 6,
-                  objectFit: 'cover',
-                  border: `1.5px solid ${focusedBooth.color || '#0ea5e9'}`,
-                  flexShrink: 0,
-                }}
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = 'none';
-                }}
-              />
-            )}
-            <span
-              className="expo-dialog__badge"
-              style={{ backgroundColor: focusedBooth.color || '#0ea5e9', flexShrink: 0 }}
+                } · ${focusedBooth.zoneName} · ${focusedBooth.assignedSlotCount}/6 sản phẩm`}
+              style={{ maxWidth: 340, padding: '4px 10px', minHeight: 34 }}
             >
-              {focusedCategoryLabel}
-            </span>
-            <strong
-              className="shop-showcase-booth-banner__title"
-              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-            >
-              {focusedBooth.companyName || focusedBooth.boothName}
-            </strong>
-            {focusedBooth.companyName && focusedBooth.companyName !== focusedBooth.boothName && (
+              {focusedBooth.logoUrl && (
+                <img
+                  src={focusedBooth.logoUrl}
+                  alt={focusedBooth.companyName || focusedBooth.boothName}
+                  style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: 5,
+                    objectFit: 'cover',
+                    border: `1.5px solid ${focusedBooth.color || '#0ea5e9'}`,
+                    flexShrink: 0,
+                  }}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              )}
               <span
-                className="shop-showcase-booth-banner__sub"
-                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}
+                className="expo-dialog__badge"
+                style={{ backgroundColor: focusedBooth.color || '#0ea5e9', flexShrink: 0, fontSize: 11, padding: '2px 7px' }}
               >
-                ({focusedBooth.boothName})
+                {focusedCategoryLabel}
               </span>
+              <strong
+                className="shop-showcase-booth-banner__title"
+                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}
+              >
+                {focusedBooth.companyName || focusedBooth.boothName}
+              </strong>
+              <span className="shop-showcase-booth-banner__sub" style={{ flexShrink: 0, fontSize: 12 }}>
+                · {focusedBooth.assignedSlotCount}/6 SP
+              </span>
+            </div>
+
+            {focusedWebsiteUrl && (
+              <a
+                href={focusedWebsiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn--outline btn--sm"
+                style={{ minHeight: 34, padding: '4px 10px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}
+              >
+                🌐 Website ↗
+              </a>
             )}
-            <span className="shop-showcase-booth-banner__sub" style={{ flexShrink: 0 }}>
-              · {focusedBooth.assignedSlotCount}/6 sản phẩm
-            </span>
           </div>
-
-          {focusedWebsiteUrl && (
-            <a
-              href={focusedWebsiteUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn--outline btn--sm"
-              style={{ minHeight: 38, display: 'inline-flex', alignItems: 'center', gap: 5 }}
-            >
-              🌐 Website ↗
-            </a>
-          )}
-
-          <button
-            type="button"
-            className="btn btn--primary btn--sm"
-            onClick={onOpenNpcPanel}
-            title="Nghe tư vấn viên 3D giới thiệu gian hàng và sản phẩm bằng giọng nữ tiếng Việt"
-            style={{ minHeight: 38 }}
-          >
-            👩‍💼 Nghe tư vấn viên giới thiệu
-          </button>
-        </div>
         )
       ) : isMobileUi ? (
         /* Mobile-First Minimal Top Bar — maximizes 3D scene viewport */
@@ -438,7 +390,7 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
                 width: 34,
                 height: 34,
                 borderRadius: 9,
-                background: 'linear-gradient(135deg, #0284c7, #0ea5e9)',
+                background: 'linear-gradient(135deg, var(--v28-youth-blue-deep, #003d82), var(--v28-youth-blue, #0057b8))',
                 color: '#fff',
                 fontWeight: 800,
                 fontSize: 13,
@@ -466,12 +418,46 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#cbd5e1' }}>
                 <span className="status-dot status-dot--online" />
-                <span>{onlineCount} trực tuyến · {world.booths.length} gian</span>
+                <span data-testid="v28-visit-progress-mobile">
+                  {onlineCount} trực tuyến · Đã tham quan:{' '}
+                  {journeyStatus === 'loading'
+                    ? '...'
+                    : `${Math.min(world.booths.length, visitedBoothIds?.size ?? 0)}/${world.booths.length}`}
+                </span>
               </div>
             </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <button
+              type="button"
+              data-testid="v28-reward-trigger-mobile"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                setDirectoryOpen(false);
+                setRewardModalOpen(true);
+              }}
+              aria-label="Mở tiến độ và đăng ký nhận quà"
+              style={{
+                minWidth: 44,
+                minHeight: 44,
+                borderRadius: 10,
+                border: rewardStatus?.eligibleToSubmit
+                  ? '1px solid #34d399'
+                  : '1px solid rgba(148, 163, 184, 0.3)',
+                background: rewardStatus?.eligibleToSubmit
+                  ? 'rgba(16, 185, 129, 0.28)'
+                  : 'rgba(255, 255, 255, 0.1)',
+                color: '#fff',
+                fontSize: 17,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              🎁
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -550,7 +536,22 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               <div className="expo-hud-top__status">
                 <span className="status-dot status-dot--online" />
                 <span>
-                  {onlineCount} khách đang trực tuyến
+                  {onlineCount} khách đang trực tuyến ·{' '}
+                  <strong
+                    data-testid="v28-visit-progress"
+                    title={
+                      journeyStatus === 'error'
+                        ? 'Không thể đồng bộ tiến độ từ máy chủ'
+                        : 'Tiến độ tham quan được xác minh từ máy chủ'
+                    }
+                    style={{ color: journeyStatus === 'error' ? '#fca5a5' : '#38bdf8' }}
+                  >
+                    Đã tham quan:{' '}
+                    {journeyStatus === 'loading'
+                      ? '...'
+                      : `${Math.min(world.booths.length, visitedBoothIds?.size ?? 0)}/${world.booths.length}`}{' '}
+                    gian
+                  </strong>
                   {overflowVisitorCount > 0 ? ` (+${overflowVisitorCount} khu vực)` : ''}
                 </span>
               </div>
@@ -645,16 +646,39 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               </button>
             )}
 
-            {!isMobilePortrait && (
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                onClick={onOpenAdmin}
-                title="Mở trang quản trị triển lãm V28"
-              >
-                ⚙️ Admin
-              </button>
-            )}
+            <button
+              type="button"
+              data-testid="v28-reward-trigger"
+              className="btn btn--secondary btn--sm"
+              onClick={() => {
+                setDirectoryOpen(false);
+                setRewardModalOpen(true);
+              }}
+              title="Mở tiến độ và đăng ký nhận quà"
+              style={
+                rewardStatus?.eligibleToSubmit
+                  ? {
+                      background: '#10b981',
+                      borderColor: '#34d399',
+                      color: '#ffffff',
+                    }
+                  : undefined
+              }
+            >
+              {rewardStatus?.redemption
+                ? rewardStatus.redemption.status === 'PENDING'
+                  ? '🎁 Chờ duyệt'
+                  : rewardStatus.redemption.status === 'APPROVED'
+                    ? '🎁 Đã duyệt'
+                    : rewardStatus.redemption.status === 'FULFILLED'
+                      ? '🎁 Đã trao quà'
+                      : '🎁 Bị từ chối'
+                : rewardStatus?.eligibleToSubmit
+                  ? '🎁 Đăng ký nhận quà'
+                  : rewardStatus
+                    ? `🎁 Quà (${Math.min(rewardStatus.recordedUniqueBooths, rewardStatus.requiredUniqueBooths)}/${rewardStatus.requiredUniqueBooths})`
+                    : '🎁 Quà (...)'}
+            </button>
           </div>
         </header>
       )}
@@ -909,204 +933,55 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
                     {playerName} ✎
                   </span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    onOpenAdmin();
-                  }}
-                  style={{
-                    minHeight: 44,
-                    padding: '0 12px',
-                    borderRadius: 10,
-                    border: '1px solid rgba(148, 163, 184, 0.28)',
-                    background: 'rgba(255, 255, 255, 0.08)',
-                    color: '#e2e8f0',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                  }}
-                >
-                  ⚙️ Admin
-                </button>
               </>
             )}
           </div>
         </nav>
       )}
 
-      {/* DIRECTORY & MINI-MAP DRAWER (Hidden while focused on a booth) */}
+      {/* PHASE 3: CONTEXTUAL NEARBY BOOTH & PRODUCT DISCOVERY (Suppressed during focus, map, menu, NPC, or product modal) */}
+      <NearbyDiscoveryWidget
+        world={world}
+        playerPos={playerPos}
+        isMobileUi={isMobileUi}
+        isMobileLandscape={isMobileLandscape}
+        suppressed={
+          isBoothFocusActive ||
+          directoryOpen ||
+          mobileMenuOpen ||
+          rewardModalOpen ||
+          npcPanelOpen ||
+          Boolean(selectedProduct)
+        }
+        onNavigateToBooth={onTeleportToBooth}
+        onSelectProduct={onSelectProduct}
+      />
+
+      {/* PHASE 5: VISITOR REWARD REDEMPTION MODAL (Opened ONLY on explicit user click; never auto-pops) */}
+      {rewardModalOpen && !isBoothFocusActive && (
+        <RewardRedemptionModal
+          versionId={world.versionId}
+          rewardStatus={rewardStatus}
+          loading={journeyStatus === 'loading'}
+          isMobileUi={isMobileUi}
+          isMobileLandscape={isMobileLandscape}
+          onStatusUpdated={(next) => onRewardStatusUpdated?.(next)}
+          onClose={() => setRewardModalOpen(false)}
+        />
+      )}
+
+      {/* DIRECTORY & 2D INTERACTIVE MAP DRAWER (Hidden while focused on a booth) */}
       {directoryOpen && !isBoothFocusActive && (
-        <div
-          onPointerDown={(e) => e.stopPropagation()}
-          style={{
-            pointerEvents: 'auto',
-            alignSelf: isMobilePortrait ? 'stretch' : 'flex-end',
-            width: isMobilePortrait ? '100%' : isMobileLandscape ? 'min(380px, 72vw)' : 360,
-            maxHeight: isMobileLandscape ? '72dvh' : isMobilePortrait ? '64dvh' : '65vh',
-            background: 'rgba(255, 255, 255, 0.96)',
-            backdropFilter: 'blur(12px)',
-            borderRadius: 16,
-            boxShadow: '0 12px 32px rgba(15,23,42,0.24)',
-            padding: 12,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-            overflow: 'hidden',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <strong style={{ fontSize: 14, color: '#0f172a' }}>
-              Bản đồ &amp; Danh bạ ({filteredBooths.length}/{world.booths.length} gian)
-            </strong>
-            <button
-              type="button"
-              onClick={() => setDirectoryOpen(false)}
-              aria-label="Đóng bản đồ và danh bạ"
-              style={{
-                minWidth: 44,
-                minHeight: 44,
-                borderRadius: 10,
-                border: '1px solid #cbd5e1',
-                background: '#f8fafc',
-                cursor: 'pointer',
-              }}
-            >
-              ✕
-            </button>
-          </div>
-          <input
-            type="search"
-            aria-label="Tìm gian hàng, doanh nghiệp, sản phẩm"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Tìm gian hàng, doanh nghiệp, sản phẩm..."
-            style={{
-              width: '100%',
-              padding: '7px 10px',
-              borderRadius: 8,
-              border: '1px solid #cbd5e1',
-              fontSize: 12.5,
-              boxSizing: 'border-box',
-            }}
-          />
-
-          {/* Interactive 2D Exhibition Map (live layout: U-zones, walkways, booths, player position) */}
-          <svg
-            viewBox={`${world.hallBounds.minX - 2} ${world.hallBounds.minZ - 2} ${world.hallWidth + 4} ${world.hallDepth + 4}`}
-            style={{ width: '100%', height: 175, background: '#f1f5f9', borderRadius: 10, border: '1px solid #cbd5e1', flexShrink: 0 }}
-          >
-            {/* Central Main Avenue */}
-            <rect
-              x={world.centralAvenueBounds.minX}
-              y={world.centralAvenueBounds.minZ}
-              width={world.centralAvenueBounds.maxX - world.centralAvenueBounds.minX}
-              height={world.centralAvenueBounds.maxZ - world.centralAvenueBounds.minZ}
-              fill="#e0f2fe"
-            />
-            {/* Clickable U-Shaped Zones */}
-            {world.zones.map((z) => {
-              const activeZone = selectedZoneCode === z.code;
-              const cx = (z.bounds.minX + z.bounds.maxX) / 2;
-              const cz = (z.bounds.minZ + z.bounds.maxZ) / 2;
-              return (
-                <g
-                  key={z.id}
-                  onClick={() => setSelectedZoneCode(activeZone ? 'ALL' : z.code)}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <rect
-                    x={z.bounds.minX}
-                    y={z.bounds.minZ}
-                    width={z.bounds.maxX - z.bounds.minX}
-                    height={z.bounds.maxZ - z.bounds.minZ}
-                    fill={activeZone ? 'rgba(14,165,233,0.16)' : 'rgba(255,255,255,0.65)'}
-                    stroke={activeZone ? '#0284c7' : '#cbd5e1'}
-                    strokeWidth={activeZone ? 1.8 : 0.8}
-                    rx={2}
-                  />
-                  <text
-                    x={cx}
-                    y={cz}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fontSize={Math.max(4.5, Math.min(8, world.hallWidth * 0.032))}
-                    fontWeight="bold"
-                    fill={activeZone ? '#0369a1' : '#64748b'}
-                  >
-                    {z.code}
-                  </text>
-                </g>
-              );
-            })}
-            {/* Rotated Booth Footprints */}
-            {world.booths.map((b) => {
-              const cos = Math.abs(Math.cos(b.rotationY));
-              const sin = Math.abs(Math.sin(b.rotationY));
-              const rw = b.footprintWidth * cos + b.footprintDepth * sin;
-              const rd = b.footprintWidth * sin + b.footprintDepth * cos;
-              return (
-                <rect
-                  key={b.boothId}
-                  x={b.positionX - rw / 2}
-                  y={b.positionZ - rd / 2}
-                  width={rw}
-                  height={rd}
-                  fill={selectedZoneCode === 'ALL' || b.zoneCode === selectedZoneCode ? b.color : '#cbd5e1'}
-                  onClick={() => {
-                    onTeleportToBooth(b);
-                    setDirectoryOpen(false);
-                  }}
-                  style={{ cursor: 'pointer' }}
-                />
-              );
-            })}
-            {/* Live Player Position Marker */}
-            <circle cx={playerPos.x} cy={playerPos.z} r={Math.max(2.6, world.hallWidth * 0.015)} fill="#ef4444" stroke="#fff" strokeWidth={1.1} />
-          </svg>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#64748b' }}>
-            <span>🔴 Vị trí của bạn · Bấm khu hoặc gian để chọn/đi tới</span>
-            <span>{world.zones.length} khu chữ U</span>
-          </div>
-
-          {/* Booth List with Teleport */}
-          <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {filteredBooths.map((b) => (
-              <button
-                key={b.boothId}
-                type="button"
-                onClick={() => {
-                  onTeleportToBooth(b);
-                  setDirectoryOpen(false);
-                }}
-                style={{
-                  minHeight: 44,
-                  padding: '8px 10px',
-                  borderRadius: 10,
-                  border: '1px solid #e2e8f0',
-                  background: focusedBooth?.boothId === b.boothId ? '#e0f2fe' : '#fff',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 8,
-                }}
-              >
-                <div style={{ overflow: 'hidden' }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {b.boothName}
-                  </div>
-                  <div style={{ fontSize: 11, color: '#64748b' }}>
-                    {b.zoneName} · {b.companyName} · {b.assignedSlotCount}/6 SP
-                  </div>
-                </div>
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#0284c7', flexShrink: 0 }}>Đi tới →</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <InteractiveMap2D
+          world={world}
+          playerPos={playerPos}
+          focusedBooth={focusedBooth}
+          visitedBoothIds={visitedBoothIds}
+          isMobileUi={isMobileUi}
+          isMobileLandscape={isMobileLandscape}
+          onNavigateToBooth={onTeleportToBooth}
+          onClose={() => setDirectoryOpen(false)}
+        />
       )}
 
       {/* Subtle First-Visit Touch Control Hint (auto-hides after 5.5s or first touch; NO split divider line) */}
@@ -1216,92 +1091,58 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               </button>
             </aside>
           ) : (
-          <aside
-            className="expo-hud-dock"
-            aria-label="Điều khiển góc nhìn camera và danh sách gian hàng"
-            style={{
-              position: 'static',
-              pointerEvents: 'auto',
-              maxWidth: '100%',
-            }}
-          >
-            <div className="camera-mode-bar" role="group" aria-label="Chế độ góc nhìn Camera">
-              <button
-                type="button"
-                className={`camera-mode-btn ${cameraMode === 'overview' ? 'camera-mode-btn--active' : ''}`}
-                onClick={() => onChangeCameraMode('overview')}
-                aria-pressed={cameraMode === 'overview'}
-                title="Nhìn tổng thể toàn bộ khu triển lãm V28"
-              >
-                🌐 Toàn cảnh
-              </button>
-
-              <button
-                type="button"
-                className={`camera-mode-btn ${cameraMode === 'explore' ? 'camera-mode-btn--active' : ''}`}
-                onClick={() => onChangeCameraMode('explore')}
-                aria-pressed={cameraMode === 'explore'}
-                title="Camera góc nhìn thứ 3 đi theo sau nhân vật"
-              >
-                🚶 Tham quan
-              </button>
-
-              <div className="zoom-controls">
+            <aside
+              className="expo-hud-dock"
+              aria-label="Điều khiển góc nhìn camera và danh sách gian hàng"
+              style={{
+                position: 'static',
+                pointerEvents: 'auto',
+                maxWidth: '100%',
+              }}
+            >
+              <div className="camera-mode-bar" role="group" aria-label="Chế độ góc nhìn Camera">
                 <button
                   type="button"
-                  className="zoom-btn"
-                  onClick={() => onZoomIn?.()}
-                  title="Phóng to góc nhìn"
-                  aria-label="Phóng to góc nhìn"
+                  className={`camera-mode-btn ${cameraMode === 'overview' ? 'camera-mode-btn--active' : ''}`}
+                  onClick={() => onChangeCameraMode('overview')}
+                  aria-pressed={cameraMode === 'overview'}
+                  title="Nhìn tổng thể toàn bộ khu triển lãm V28"
                 >
-                  ＋
+                  🌐 Toàn cảnh
                 </button>
+
                 <button
                   type="button"
-                  className="zoom-btn"
-                  onClick={() => onZoomOut?.()}
-                  title="Thu nhỏ góc nhìn"
-                  aria-label="Thu nhỏ góc nhìn"
+                  className={`camera-mode-btn ${cameraMode === 'explore' ? 'camera-mode-btn--active' : ''}`}
+                  onClick={() => onChangeCameraMode('explore')}
+                  aria-pressed={cameraMode === 'explore'}
+                  title="Camera góc nhìn thứ 3 đi theo sau nhân vật"
                 >
-                  －
+                  🚶 Tham quan
                 </button>
-              </div>
-            </div>
 
-            {quickBoothChips.length > 0 && (
-              <div className="booth-mini-list">
-                <span className="booth-mini-list__title">
-                  {world.booths.length <= 6
-                    ? 'Gian hàng nổi bật (Bấm để xem cận cảnh)'
-                    : `Gian hàng tiêu biểu (${world.booths.length} gian · Bấm để xem cận cảnh)`}
-                </span>
-                <div className="booth-mini-list__chips">
-                  {quickBoothChips.map((b) => (
-                    <button
-                      key={b.boothId}
-                      type="button"
-                      className="booth-chip"
-                      onClick={() => onTeleportToBooth(b)}
-                      title={`${b.companyName} — ${b.boothName} (${b.zoneName} · ${b.assignedSlotCount}/6 SP)`}
-                    >
-                      <span className="booth-chip__dot" style={{ backgroundColor: b.color || '#0ea5e9' }} />
-                      <span className="booth-chip__name">{b.boothName}</span>
-                    </button>
-                  ))}
-                  {world.booths.length > quickBoothChips.length && (
-                    <button
-                      type="button"
-                      className="booth-chip"
-                      onClick={() => setDirectoryOpen(true)}
-                      title="Mở danh bạ và bản đồ 2D để xem tất cả gian hàng"
-                    >
-                      <span className="booth-chip__name">+ Xem tất cả ({world.booths.length})</span>
-                    </button>
-                  )}
+                <div className="zoom-controls">
+                  <button
+                    type="button"
+                    className="zoom-btn"
+                    onClick={() => onZoomIn?.()}
+                    title="Phóng to góc nhìn"
+                    aria-label="Phóng to góc nhìn"
+                  >
+                    ＋
+                  </button>
+                  <button
+                    type="button"
+                    className="zoom-btn"
+                    onClick={() => onZoomOut?.()}
+                    title="Thu nhỏ góc nhìn"
+                    aria-label="Thu nhỏ góc nhìn"
+                  >
+                    －
+                  </button>
                 </div>
               </div>
-            )}
-          </aside>
+            </aside>
           )
         )}
 
@@ -1330,64 +1171,64 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               onOpenNpc={onOpenNpcPanel}
             />
           ) : (
-          <div
-            style={{
-              pointerEvents: 'auto',
-              marginLeft: 'auto',
-              width: 420,
-              maxHeight: '58vh',
-              overflowY: 'auto',
-              background: 'rgba(255, 255, 255, 0.97)',
-              backdropFilter: 'blur(12px)',
-              borderRadius: 16,
-              padding: 14,
-              boxShadow: '0 14px 36px rgba(15,23,42,0.28)',
-              border: '1px solid #e2e8f0',
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#0284c7' }}>
-                    {selectedProduct.booth.companyName} · {selectedProduct.slotId}
+            <div
+              style={{
+                pointerEvents: 'auto',
+                marginLeft: 'auto',
+                width: 420,
+                maxHeight: '58vh',
+                overflowY: 'auto',
+                background: 'rgba(255, 255, 255, 0.97)',
+                backdropFilter: 'blur(12px)',
+                borderRadius: 16,
+                padding: 14,
+                boxShadow: '0 14px 36px rgba(15,23,42,0.28)',
+                border: '1px solid #e2e8f0',
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#0284c7' }}>
+                      {selectedProduct.booth.companyName} · {selectedProduct.slotId}
+                    </div>
+                    <h4 style={{ margin: '2px 0 0', fontSize: 16, color: '#0f172a' }}>
+                      {selectedProduct.product.name}
+                    </h4>
                   </div>
-                  <h4 style={{ margin: '2px 0 0', fontSize: 16, color: '#0f172a' }}>
-                    {selectedProduct.product.name}
-                  </h4>
+                  <button
+                    type="button"
+                    onClick={onCloseProduct}
+                    style={{ minWidth: 40, minHeight: 40, borderRadius: 10, border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
+                  >
+                    ✕
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={onCloseProduct}
-                  style={{ minWidth: 40, minHeight: 40, borderRadius: 10, border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
-                >
-                  ✕
-                </button>
-              </div>
-              {selectedProduct.product.images?.[0] && (
-                <img
-                  src={selectedProduct.product.images[0]}
-                  alt={selectedProduct.product.name}
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.display = 'none';
-                  }}
-                  style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 10 }}
-                />
-              )}
-              <div style={{ fontSize: 16, fontWeight: 800, color: '#047857' }}>
-                {selectedProduct.product.price > 0
-                  ? `${selectedProduct.product.price.toLocaleString('vi-VN')} ${selectedProduct.product.currency || 'VND'}`
-                  : 'Liên hệ báo giá'}
-                {selectedProduct.product.sku && (
-                  <span style={{ fontSize: 12, fontWeight: 500, color: '#64748b', marginLeft: 8 }}>
-                    SKU: {selectedProduct.product.sku}
-                  </span>
+                {selectedProduct.product.images?.[0] && (
+                  <img
+                    src={selectedProduct.product.images[0]}
+                    alt={selectedProduct.product.name}
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                    }}
+                    style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 10 }}
+                  />
                 )}
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#047857' }}>
+                  {selectedProduct.product.price > 0
+                    ? `${selectedProduct.product.price.toLocaleString('vi-VN')} ${selectedProduct.product.currency || 'VND'}`
+                    : 'Liên hệ báo giá'}
+                  {selectedProduct.product.sku && (
+                    <span style={{ fontSize: 12, fontWeight: 500, color: '#64748b', marginLeft: 8 }}>
+                      SKU: {selectedProduct.product.sku}
+                    </span>
+                  )}
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: '#334155', lineHeight: 1.45 }}>
+                  {selectedProduct.product.description || 'Sản phẩm trưng bày chính thức tại gian hàng.'}
+                </p>
               </div>
-              <p style={{ margin: 0, fontSize: 13, color: '#334155', lineHeight: 1.45 }}>
-                {selectedProduct.product.description || 'Sản phẩm trưng bày chính thức tại gian hàng.'}
-              </p>
             </div>
-          </div>
           )
         )}
       </div>

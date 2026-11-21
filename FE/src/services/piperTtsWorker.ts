@@ -46,6 +46,8 @@ let ortSession: ort.InferenceSession | null = null;
 let modelConfig: PiperModelConfigJson | null = null;
 let piperWasmBuffer: ArrayBuffer | null = null;
 let piperDataBuffer: ArrayBuffer | null = null;
+let cachedPhonemizeMod: { callMain: (args: string[]) => void } | null = null;
+let activePhonemizePrint: ((data: string) => void) | null = null;
 let initInFlight: Promise<{
   downloadMs: number;
   initMs: number;
@@ -245,54 +247,77 @@ function encodePcm16Wav(floatSamples: Float32Array, sampleRate: number): ArrayBu
   return buf;
 }
 
+async function createFreshPhonemizeModule(
+  piperWasmUrl: string,
+  piperDataUrl: string,
+  onPrint: (data: string) => void
+): Promise<{ callMain: (args: string[]) => void }> {
+  return createPiperPhonemize({
+    wasmBinary: piperWasmBuffer ? piperWasmBuffer.slice(0) : undefined,
+    getPreloadedPackage: piperDataBuffer ? () => piperDataBuffer!.slice(0) : undefined,
+    print: (data: string) => onPrint(data),
+    printErr: () => {
+      // Non-fatal espeak stderr messages must never reject or hang synthesis
+    },
+    locateFile: (file: string) => {
+      if (file.endsWith('.wasm')) return piperWasmUrl;
+      if (file.endsWith('.data')) return piperDataUrl;
+      return file;
+    },
+  });
+}
+
 async function phonemizeVietnamese(
   text: string,
   espeakVoice: string,
   piperWasmUrl: string,
   piperDataUrl: string
-): Promise<number[]> {
+): Promise<{ phonemeIds: number[]; reused: boolean }> {
   const input = JSON.stringify([{ text: text.trim() }]);
-  return new Promise<number[]>((resolve, reject) => {
-    let settled = false;
-    createPiperPhonemize({
-      wasmBinary: piperWasmBuffer ? piperWasmBuffer.slice(0) : undefined,
-      getPreloadedPackage: piperDataBuffer ? () => piperDataBuffer!.slice(0) : undefined,
-      print: (data: string) => {
-        if (settled) return;
-        try {
-          const parsed = JSON.parse(data) as { phoneme_ids?: number[] };
-          if (Array.isArray(parsed.phoneme_ids)) {
-            settled = true;
-            resolve(parsed.phoneme_ids);
-          }
-        } catch (err) {
-          settled = true;
-          reject(err instanceof Error ? err : new Error(String(err)));
+
+  const runOnModule = (mod: { callMain: (args: string[]) => void }): number[] | null => {
+    let parsedIds: number[] | null = null;
+    activePhonemizePrint = (data: string) => {
+      if (parsedIds) return;
+      try {
+        const parsed = JSON.parse(data) as { phoneme_ids?: number[] };
+        if (Array.isArray(parsed.phoneme_ids) && parsed.phoneme_ids.length > 0) {
+          parsedIds = parsed.phoneme_ids;
         }
-      },
-      printErr: () => {
-        // Non-fatal espeak stderr messages must never reject or hang synthesis
-      },
-      locateFile: (file: string) => {
-        if (file.endsWith('.wasm')) return piperWasmUrl;
-        if (file.endsWith('.data')) return piperDataUrl;
-        return file;
-      },
-    })
-      .then((mod) => {
-        mod.callMain(['-l', espeakVoice, '--input', input, '--espeak_data', '/espeak-ng-data']);
-        if (!settled) {
-          settled = true;
-          reject(new Error('Bộ chuyển âm vị tiếng Việt không trả về chuỗi phoneme hợp lệ.'));
-        }
-      })
-      .catch((err) => {
-        if (!settled) {
-          settled = true;
-          reject(err instanceof Error ? err : new Error(String(err)));
-        }
-      });
+      } catch {
+        // ignore non-JSON stdout lines
+      }
+    };
+    try {
+      mod.callMain(['-l', espeakVoice, '--input', input, '--espeak_data', '/espeak-ng-data']);
+    } finally {
+      activePhonemizePrint = null;
+    }
+    return parsedIds;
+  };
+
+  // Fast path: reuse persistent Emscripten phonemizer instance (avoids cloning 18.1 MB espeak data per chunk)
+  if (cachedPhonemizeMod) {
+    try {
+      const reusedIds = runOnModule(cachedPhonemizeMod);
+      if (reusedIds && reusedIds.length > 0) {
+        return { phonemeIds: reusedIds, reused: true };
+      }
+    } catch {
+      // Module runtime may have exited; discard and recreate cleanly below
+    }
+    cachedPhonemizeMod = null;
+  }
+
+  const freshMod = await createFreshPhonemizeModule(piperWasmUrl, piperDataUrl, (data) => {
+    activePhonemizePrint?.(data);
   });
+  const ids = runOnModule(freshMod);
+  if (!ids || ids.length === 0) {
+    throw new Error('Bộ chuyển âm vị tiếng Việt không trả về chuỗi phoneme hợp lệ.');
+  }
+  cachedPhonemizeMod = freshMod;
+  return { phonemeIds: ids, reused: false };
 }
 
 async function ensureInitialized(
@@ -437,7 +462,7 @@ async function ensureInitialized(
 
         const session = await ort.InferenceSession.create(modelRes.buffer, {
           executionProviders: ['wasm'],
-          graphOptimizationLevel: 'all',
+          graphOptimizationLevel: 'basic',
         });
 
         modelConfig = parsedCfg;
@@ -512,6 +537,8 @@ self.onmessage = async (ev: MessageEvent) => {
       modelConfig = null;
       piperWasmBuffer = null;
       piperDataBuffer = null;
+      cachedPhonemizeMod = null;
+      activePhonemizePrint = null;
       self.postMessage({ id, type: 'disposed' });
       return;
     }
@@ -546,12 +573,14 @@ self.onmessage = async (ev: MessageEvent) => {
         const cfg = modelConfig!;
         const session = ortSession!;
 
-        const phonemeIds = await phonemizeVietnamese(
+        const tPhon0 = performance.now();
+        const { phonemeIds, reused: phonemizeReused } = await phonemizeVietnamese(
           text,
           cfg.espeak.voice || 'vi',
           piperWasmUrl,
           piperDataUrl
         );
+        const phonemizeMs = Math.round(performance.now() - tPhon0);
         if (!phonemeIds || phonemeIds.length === 0) {
           throw new Error('Không tạo được chuỗi âm vị cho câu tiếng Việt.');
         }
@@ -574,13 +603,15 @@ self.onmessage = async (ev: MessageEvent) => {
           feeds.sid = new ort.Tensor('int64', BigInt64Array.from([BigInt(0)]), [1]);
         }
 
+        const tOnnx0 = performance.now();
         const results = await session.run(feeds);
+        const onnxMs = Math.round(performance.now() - tOnnx0);
         const outputTensor = results.output;
         const pcm = outputTensor.data as Float32Array;
         const sampleRate = cfg.audio.sample_rate || 22050;
         const wavBuffer = encodePcm16Wav(pcm, sampleRate);
         const durationSec = Number((pcm.length / sampleRate).toFixed(2));
-        return { wavBuffer, durationSec, sampleRate };
+        return { wavBuffer, durationSec, sampleRate, phonemizeMs, onnxMs, phonemizeReused };
       })();
 
       const out = await withStepTimeout(synthPromise, SYNTH_TIMEOUT_MS, 'Tổng hợp giọng nói');
@@ -592,6 +623,9 @@ self.onmessage = async (ev: MessageEvent) => {
           type: 'audio',
           wavBuffer: out.wavBuffer,
           synthMs,
+          phonemizeMs: out.phonemizeMs,
+          onnxMs: out.onnxMs,
+          phonemizeReused: out.phonemizeReused,
           durationSec: out.durationSec,
           sampleRate: out.sampleRate,
         },

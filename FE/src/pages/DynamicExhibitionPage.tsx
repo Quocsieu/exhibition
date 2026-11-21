@@ -1,9 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  getStoredVisitorToken,
   v28Api,
+  v28RewardApi,
+  v28VisitorApi,
   type V28BoothPlacementView,
   type V28ExhibitionVersionDetail,
   type V28Product,
+  type V28VisitorInteractionType,
+  type V28VisitorRewardStatusResponse,
 } from '../services/v28Api';
 import {
   DynamicExhibitionScene,
@@ -11,6 +16,7 @@ import {
   type V28PlayerState,
 } from '../scene/v28/DynamicExhibitionScene';
 import { DynamicWorldHud } from '../components/v28/DynamicWorldHud';
+import { setCachedLiveTtsConfigured } from '../components/v28/V28NpcConsultantPanel';
 import {
   FloatingJoystickOverlay,
   type FloatingJoystickOverlayHandle,
@@ -28,6 +34,7 @@ import {
 } from '../scene/v28/v28MobileControls';
 import { ParametricExpoRoof } from '../scene/v28/ParametricExpoRoof';
 import { useV28SpatialRealtime } from '../hooks/useV28SpatialRealtime';
+import { piperBrowserTts, shouldAllowPiperBackgroundPrewarm } from '../services/hybridTtsAdapter';
 import type { V28NpcAnimState } from '../scene/v28/DynamicBoothNpc3D';
 
 export interface DynamicExhibitionPageProps {
@@ -87,6 +94,23 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   const [boothLodMap, setBoothLodMap] = useState<Record<string, BoothLodTier>>({});
   const lodMapRef = useRef<Record<string, BoothLodTier>>({});
 
+  // Phase 4: Server-Verified Visitor Journey Tracking (never fakes visited; server DB is source of truth)
+  const [visitedBoothIds, setVisitedBoothIds] = useState<Set<string>>(() => new Set());
+  const [journeyStatus, setJourneyStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [rewardStatus, setRewardStatus] = useState<V28VisitorRewardStatusResponse | null>(null);
+  const visitedBoothIdsRef = useRef<Set<string>>(new Set());
+  const inFlightVisitBoothsRef = useRef<Set<string>>(new Set());
+  const journeyChannelRef = useRef<BroadcastChannel | null>(null);
+  const activeEngagementRef = useRef<{
+    boothId: string;
+    versionId: string;
+    token: string;
+    startedAt: number;
+    minDwellFocusMs: number;
+    minDwellInteractMs: number;
+  } | null>(null);
+  const [engagementReadyNonce, setEngagementReadyNonce] = useState<number>(0);
+
   const handleChangeGraphicsQuality = useCallback((mode: V28GraphicsQualityMode) => {
     setGraphicsQuality(mode);
     try {
@@ -141,14 +165,14 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
 
   const hasLoadedWorldRef = useRef<boolean>(false);
 
-  const loadActiveWorld = useCallback(async () => {
+  const loadActiveWorld = useCallback(async (bypassCache = false) => {
     // V28-AUDIT-024: Only show full-page loader on initial load so live reload NEVER unmounts WebGL <Canvas>!
     if (!hasLoadedWorldRef.current) {
       setLoading(true);
     }
     setError('');
     try {
-      const { world: loaded } = await v28Api.getActiveWorld(previewVersionId);
+      const { world: loaded } = await v28Api.getActiveWorld(previewVersionId, bypassCache);
       const isInitial = !hasLoadedWorldRef.current;
       hasLoadedWorldRef.current = true;
       setWorld(loaded);
@@ -160,9 +184,16 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         });
       } else {
         // Reconcile focused booth & product against refreshed layout
-        setFocusedBooth((prev) =>
-          prev ? loaded.booths.find((b) => b.boothId === prev.boothId) || null : null
-        );
+        setFocusedBooth((prev) => {
+          if (!prev) return null;
+          const next = loaded.booths.find((b) => b.boothId === prev.boothId) || null;
+          if (!next) {
+            setNpcPanelOpen(false);
+            setNpcAnimState('idle');
+            setCameraMode((cm) => (cm === 'focus' ? 'explore' : cm));
+          }
+          return next;
+        });
         setSelectedProduct((prev) => {
           if (!prev) return null;
           const nextBooth = loaded.booths.find((b) => b.boothId === prev.booth.boothId);
@@ -183,13 +214,169 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     loadActiveWorld();
   }, [loadActiveWorld]);
 
-  // Listen for instant cross-tab V28 Admin sync (Publish / Slot Update)
+  // Controlled cache-only Piper WASM prewarm AFTER World 3D has loaded:
+  // ONLY warms the worker if the model is ALREADY cached in CacheStorage (0 network bytes for non-NPC visitors!)
+  useEffect(() => {
+    if (loading || !world) return;
+    if (!shouldAllowPiperBackgroundPrewarm().allowed) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      void v28Api
+        .getAiStatus()
+        .then((st) => {
+          const liveTts = Boolean((st as { liveTtsConfigured?: boolean }).liveTtsConfigured);
+          setCachedLiveTtsConfigured(liveTts);
+          if (cancelled || liveTts) return;
+          void piperBrowserTts.prewarmInBackground({ cacheOnly: true });
+        })
+        .catch(() => {
+          if (!cancelled) {
+            void piperBrowserTts.prewarmInBackground({ cacheOnly: true });
+          }
+        });
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [loading, world]);
+
+  // Phase 4: Hydrate server-verified visitor journey on world load & sync across browser tabs
+  useEffect(() => {
+    if (!world?.versionId) return;
+    let cancelled = false;
+    setJourneyStatus('loading');
+
+    const loadJourney = async () => {
+      try {
+        const journey = await v28VisitorApi.getJourney(world.versionId);
+        if (cancelled) return;
+        const nextSet = new Set(journey.visitedBoothIds);
+        visitedBoothIdsRef.current = nextSet;
+        setVisitedBoothIds(nextSet);
+        setJourneyStatus('ready');
+        try {
+          const rw = await v28RewardApi.getVisitorRewardStatus(world.versionId);
+          if (!cancelled) setRewardStatus(rw);
+        } catch {
+          // ignore non-blocking reward status error
+        }
+      } catch {
+        if (!cancelled) {
+          setJourneyStatus('error');
+        }
+      }
+    };
+
+    void loadJourney();
+
+    let ch: BroadcastChannel | null = null;
+    try {
+      ch = new BroadcastChannel('v28-visitor-journey');
+      journeyChannelRef.current = ch;
+      ch.onmessage = (ev) => {
+        const msg = ev.data as { versionId?: string; visitedBoothIds?: string[] } | null;
+        if (!msg || msg.versionId !== world.versionId || !Array.isArray(msg.visitedBoothIds)) return;
+        const merged = new Set(msg.visitedBoothIds);
+        visitedBoothIdsRef.current = merged;
+        setVisitedBoothIds(merged);
+        setJourneyStatus('ready');
+      };
+    } catch {
+      // BroadcastChannel not supported
+    }
+
+    return () => {
+      cancelled = true;
+      journeyChannelRef.current = null;
+      try {
+        ch?.close();
+      } catch {
+        // ignore
+      }
+    };
+  }, [world?.versionId]);
+
+  const submitVerifiedVisit = useCallback(
+    async (
+      booth: V28BoothPlacementView,
+      interactionType: V28VisitorInteractionType,
+      engagementToken: string
+    ) => {
+      if (!world?.versionId) return;
+      if (visitedBoothIdsRef.current.has(booth.boothId)) return;
+      if (inFlightVisitBoothsRef.current.has(booth.boothId)) return;
+      if (!engagementToken) return;
+
+      const ap = booth.approachPoint;
+      if (!ap || !Number.isFinite(ap.x) || !Number.isFinite(ap.z)) return;
+      // Client-side pre-filter (server enforces authoritative Socket.IO proximity & dwell independently)
+      const dist = Math.hypot(playerPos.x - ap.x, playerPos.z - ap.z);
+      if (dist > 12.0) return;
+
+      inFlightVisitBoothsRef.current.add(booth.boothId);
+      try {
+        const res = await v28VisitorApi.recordVisit({
+          versionId: world.versionId,
+          boothId: booth.boothId,
+          interactionType,
+          engagementToken,
+        });
+        const nextSet = new Set(res.visitedBoothIds);
+        visitedBoothIdsRef.current = nextSet;
+        setVisitedBoothIds(nextSet);
+        setJourneyStatus('ready');
+        void v28RewardApi
+          .getVisitorRewardStatus(world.versionId)
+          .then((rw) => setRewardStatus(rw))
+          .catch(() => undefined);
+        try {
+          journeyChannelRef.current?.postMessage({
+            versionId: world.versionId,
+            visitedBoothIds: res.visitedBoothIds,
+          });
+        } catch {
+          // ignore
+        }
+      } catch {
+        // Server rejected (e.g. out of range, dwell too short, cooldown/rate-limited, offline): NEVER increment client count!
+      } finally {
+        inFlightVisitBoothsRef.current.delete(booth.boothId);
+      }
+    },
+    [world?.versionId, playerPos.x, playerPos.z]
+  );
+
+  const activeVersionIdRef = useRef<string | null>(null);
+  activeVersionIdRef.current = world?.versionId ?? null;
+
+  const refreshRewardStatusOnly = useCallback(async () => {
+    const vid = activeVersionIdRef.current;
+    if (!vid) return;
+    try {
+      const rw = await v28RewardApi.getVisitorRewardStatus(vid);
+      setRewardStatus(rw);
+    } catch {
+      // ignore non-blocking reward status refresh error
+    }
+  }, []);
+
+  // Listen for instant cross-tab V28 Admin sync (Publish / Slot Update / Empty Booth Removal / Reward Policy)
   useEffect(() => {
     let ch: BroadcastChannel | null = null;
     try {
       ch = new BroadcastChannel('v28-expo-sync');
-      ch.onmessage = () => {
-        loadActiveWorld();
+      ch.onmessage = (ev) => {
+        const msg = ev.data as { reason?: string } | null;
+        if (msg?.reason === 'reward_policy_updated') {
+          void refreshRewardStatusOnly();
+          return;
+        }
+        void loadActiveWorld(true);
+        void refreshRewardStatusOnly();
       };
     } catch {
       // BroadcastChannel not supported
@@ -201,14 +388,122 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         // ignore
       }
     };
-  }, [loadActiveWorld]);
+  }, [loadActiveWorld, refreshRewardStatusOnly]);
 
-  const { remoteAvatars, onlineCount, overflowCount, sendMove, sendTeleport, sendProfile } =
+  const { remoteAvatars, onlineCount, overflowCount, sendMove, sendTeleport, sendProfile, bindVisitorToken } =
     useV28SpatialRealtime({
       versionId: world?.versionId ?? null,
       isMobilePortrait,
-      onLayoutChanged: loadActiveWorld,
+      onLayoutChanged: () => {
+        void loadActiveWorld(true);
+        void refreshRewardStatusOnly();
+      },
     });
+
+  // Phase 4 Security Hardening: Bind authenticated visitorToken to `/v28-dynamic` socket once journey session is ready
+  useEffect(() => {
+    if (journeyStatus !== 'ready') return;
+    const token = getStoredVisitorToken();
+    if (token) {
+      bindVisitorToken(token);
+    }
+  }, [journeyStatus, bindVisitorToken]);
+
+  // Step 1 of Server-Verified Visit Proof: Start server-timed engagement when focusing an unvisited booth
+  useEffect(() => {
+    if (!world?.versionId || cameraMode !== 'focus' || !focusedBooth) {
+      activeEngagementRef.current = null;
+      return;
+    }
+    if (visitedBoothIdsRef.current.has(focusedBooth.boothId)) {
+      activeEngagementRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    const targetVersionId = world.versionId;
+    const targetBoothId = focusedBooth.boothId;
+
+    const beginEngagement = async () => {
+      const tok = getStoredVisitorToken();
+      if (tok) bindVisitorToken(tok);
+      // Small grace delay so in-flight v28:teleport / v28:move reaches server before /engage proximity check
+      await new Promise((r) => window.setTimeout(r, 150));
+      if (cancelled) return;
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const eng = await v28VisitorApi.startVisitEngagement({
+            versionId: targetVersionId,
+            boothId: targetBoothId,
+          });
+          if (cancelled) return;
+          activeEngagementRef.current = {
+            boothId: targetBoothId,
+            versionId: targetVersionId,
+            token: eng.engagementToken,
+            startedAt: Date.now(),
+            minDwellFocusMs: eng.minDwellFocusMs,
+            minDwellInteractMs: eng.minDwellInteractMs,
+          };
+          setEngagementReadyNonce((n) => n + 1);
+          return;
+        } catch {
+          if (cancelled || attempt === 1) return;
+          await new Promise((r) => window.setTimeout(r, 300));
+        }
+      }
+    };
+
+    void beginEngagement();
+    return () => {
+      cancelled = true;
+      if (activeEngagementRef.current?.boothId === targetBoothId) {
+        activeEngagementRef.current = null;
+      }
+    };
+  }, [world?.versionId, cameraMode, focusedBooth?.boothId, bindVisitorToken]);
+
+  // Step 2 of Server-Verified Visit Proof: Complete visit ONLY after server-verified engagement + dwell time
+  useEffect(() => {
+    if (!world || cameraMode !== 'focus' || !focusedBooth) return;
+    if (visitedBoothIdsRef.current.has(focusedBooth.boothId)) return;
+
+    const eng = activeEngagementRef.current;
+    if (!eng || eng.boothId !== focusedBooth.boothId || eng.versionId !== world.versionId) {
+      return;
+    }
+
+    const elapsed = Date.now() - eng.startedAt;
+    if (selectedProduct && selectedProduct.booth.boothId === focusedBooth.boothId) {
+      const waitMs = Math.max(0, eng.minDwellInteractMs + 60 - elapsed);
+      const timer = window.setTimeout(() => {
+        void submitVerifiedVisit(focusedBooth, 'product_inspect', eng.token);
+      }, waitMs);
+      return () => window.clearTimeout(timer);
+    }
+    if (npcPanelOpen) {
+      const waitMs = Math.max(0, eng.minDwellInteractMs + 60 - elapsed);
+      const timer = window.setTimeout(() => {
+        void submitVerifiedVisit(focusedBooth, 'npc_consult', eng.token);
+      }, waitMs);
+      return () => window.clearTimeout(timer);
+    }
+
+    const waitMs = Math.max(0, eng.minDwellFocusMs + 100 - elapsed);
+    const dwellTimer = window.setTimeout(() => {
+      void submitVerifiedVisit(focusedBooth, 'booth_focus', eng.token);
+    }, waitMs);
+    return () => window.clearTimeout(dwellTimer);
+  }, [
+    world,
+    cameraMode,
+    focusedBooth,
+    selectedProduct,
+    npcPanelOpen,
+    engagementReadyNonce,
+    submitVerifiedVisit,
+  ]);
 
   const handleUpdateVisitorProfile = useCallback(
     (nextName: string, nextColor: string) => {
@@ -235,6 +530,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
       nonce: prev.nonce + 1,
       pos: { x: booth.approachPoint.x, z: booth.approachPoint.z, rotationY: lookRot },
     }));
+    setPlayerPos({ x: booth.approachPoint.x, z: booth.approachPoint.z, rotationY: lookRot });
     sendTeleport(booth.approachPoint.x, booth.approachPoint.z, lookRot);
     setFocusedBooth(booth);
     setSelectedProduct(null);
@@ -348,18 +644,27 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   if (loading) {
     return (
       <div
+        role="status"
+        aria-live="polite"
         style={{
           width: '100vw',
           height: '100dvh',
           display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
           alignItems: 'center',
           justifyContent: 'center',
-          background: '#0f172a',
-          color: '#fff',
+          background: 'linear-gradient(160deg, var(--v28-youth-blue-deep, #003d82) 0%, #0f172a 100%)',
+          color: '#f8fafc',
           fontFamily: 'system-ui, sans-serif',
         }}
       >
-        Đang tải Grand Expo World V28...
+        <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em' }}>
+          Đang tải Grand Expo World V28...
+        </div>
+        <div style={{ fontSize: 13, color: '#bae6fd' }}>
+          Đang chuẩn bị không gian triển lãm 3D 100 gian hàng
+        </div>
       </div>
     );
   }
@@ -384,7 +689,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         <div>⚠️ {error || 'Không có dữ liệu triển lãm V28.'}</div>
         <button
           type="button"
-          onClick={loadActiveWorld}
+          onClick={() => { void loadActiveWorld(true); }}
           style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: '#0ea5e9', color: '#fff', cursor: 'pointer' }}
         >
           Thử lại
@@ -411,6 +716,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         boothLodMap={boothLodMap}
         remoteAvatars={remoteAvatars}
         npcAnimState={npcAnimState}
+        isNpcSpeaking={npcPanelOpen && npcAnimState !== 'idle'}
         playerName={playerName}
         playerColor={playerColor}
         onPlayerMove={(pos) => {
@@ -451,6 +757,10 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         onChangeGraphicsQuality={handleChangeGraphicsQuality}
         onReturnToCenter={handleReturnToCenter}
         playerPos={playerPos}
+        visitedBoothIds={visitedBoothIds}
+        journeyStatus={journeyStatus}
+        rewardStatus={rewardStatus}
+        onRewardStatusUpdated={setRewardStatus}
         focusedBooth={focusedBooth}
         selectedProduct={selectedProduct}
         npcPanelOpen={npcPanelOpen}

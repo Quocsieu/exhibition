@@ -622,6 +622,87 @@ export class V28CatalogDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_evbm_version ON exhibition_version_booth_meta(version_id);
       CREATE INDEX IF NOT EXISTS idx_evbs_version ON exhibition_version_booth_slots(version_id, booth_id);
+
+      -- Phase 4: Server-Verified Visitor Journey Tracking (additive, idempotent, zero PII)
+      CREATE TABLE IF NOT EXISTS visitor_sessions (
+        visitor_id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS visitor_booth_visits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        visitor_id TEXT NOT NULL,
+        exhibition_id TEXT NOT NULL,
+        version_id TEXT NOT NULL,
+        booth_id TEXT NOT NULL,
+        interaction_type TEXT NOT NULL DEFAULT 'booth_focus',
+        first_visited_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (visitor_id, version_id, booth_id),
+        FOREIGN KEY (visitor_id) REFERENCES visitor_sessions(visitor_id) ON DELETE CASCADE,
+        FOREIGN KEY (version_id) REFERENCES exhibition_versions(id) ON DELETE CASCADE,
+        FOREIGN KEY (booth_id) REFERENCES booths(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vbv_visitor_version
+        ON visitor_booth_visits(visitor_id, version_id);
+
+      -- Phase 5: Visitor Rewards Redemption & Admin Verification (additive, idempotent)
+      CREATE TABLE IF NOT EXISTS reward_policies (
+        version_id TEXT PRIMARY KEY,
+        required_unique_booths INTEGER NOT NULL DEFAULT 30,
+        reward_title TEXT NOT NULL DEFAULT 'Quà tặng tham quan Grand Expo V28',
+        reward_description TEXT NOT NULL DEFAULT 'Đăng ký xác minh nhận quà sau khi tham quan đủ số gian hàng quy định.',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (version_id) REFERENCES exhibition_versions(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS reward_redemptions (
+        id TEXT PRIMARY KEY,
+        redemption_code TEXT NOT NULL UNIQUE,
+        visitor_id TEXT NOT NULL,
+        exhibition_id TEXT NOT NULL,
+        version_id TEXT NOT NULL,
+        recipient_name TEXT NOT NULL,
+        contact_phone TEXT NULL,
+        contact_email TEXT NULL,
+        consent_accepted INTEGER NOT NULL DEFAULT 1,
+        recorded_unique_booths INTEGER NOT NULL,
+        required_unique_booths INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        risk_flags_json TEXT NOT NULL DEFAULT '[]',
+        risk_level TEXT NOT NULL DEFAULT 'low',
+        reviewed_by TEXT NULL,
+        reviewed_at TEXT NULL,
+        rejection_reason TEXT NULL,
+        fulfilled_by TEXT NULL,
+        fulfilled_at TEXT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (visitor_id, version_id),
+        FOREIGN KEY (visitor_id) REFERENCES visitor_sessions(visitor_id) ON DELETE CASCADE,
+        FOREIGN KEY (version_id) REFERENCES exhibition_versions(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS reward_redemption_audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        redemption_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        from_status TEXT NULL,
+        to_status TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (redemption_id) REFERENCES reward_redemptions(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_rr_version_status
+        ON reward_redemptions(version_id, status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_rral_redemption
+        ON reward_redemption_audit_logs(redemption_id, created_at);
     `);
 
     const fkRows = this.db.prepare('PRAGMA foreign_key_check').all();

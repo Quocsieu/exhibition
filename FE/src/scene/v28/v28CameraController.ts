@@ -3,6 +3,7 @@ import type { V28BoothPlacementView, V28RectBounds } from '../../services/v28Api
 import { isPointInRect, type RotatedCollider } from './v28NavigationBounds';
 
 export const V28_FOCUS_FOV = 38;
+export const V28_PORTRAIT_FOCUS_FOV = 42;
 export const V28_EXPLORE_FOV = 50;
 export const V28_OVERVIEW_FOV = 46;
 
@@ -90,7 +91,8 @@ export function computeV28BoothFocusCamera(
     1.5
   );
 
-  const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(V28_FOCUS_FOV / 2));
+  const effectiveFocusFov = isPortrait ? V28_PORTRAIT_FOCUS_FOV : V28_FOCUS_FOV;
+  const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(effectiveFocusFov / 2));
   const effectiveWidth = Math.max(booth.footprintWidth || baseGlbWidth, baseGlbWidth * instanceScale);
   const halfDepth = (booth.footprintDepth || 5.0 * instanceScale) / 2;
 
@@ -107,14 +109,18 @@ export function computeV28BoothFocusCamera(
   const distForHeight = halfDepth + verticalHalfSpan / tanHalfFov;
 
   const minSafeDist = halfDepth + 4.4 * instanceScale;
-  const maxSafeDist = isPortrait ? 24.0 : 18.5;
+  const maxSafeDist = isPortrait ? 27.5 : 18.5;
   let localCamZ = THREE.MathUtils.clamp(
     Math.max(distForWidth, distForHeight, 9.2 * instanceScale),
     minSafeDist,
     maxSafeDist
   );
 
-  // Eye-level slightly elevated front view looking gently downward (V27.5 reference framing)
+  // Eye-level slightly elevated front view looking gently downward (V27.5 reference framing).
+  // In narrow Portrait viewports (e.g. 390x844), offset look/cam X slightly toward the right-front NPC
+  // so the full booth signage, 6 products, AND the 3D NPC stay cleanly inside frame (Desktop & Landscape unchanged).
+  const localCamX = isPortrait ? 0.48 * instanceScale : 0;
+  const localLookX = isPortrait ? 0.45 * instanceScale : 0;
   const localCamY = (isPortrait ? 2.75 : isMobileLandscape ? 2.35 : 2.52) * instanceScale;
   const localLookY = (isPortrait ? 2.08 : isMobileLandscape ? 1.88 : 1.98) * instanceScale;
   const localLookZ = -0.32 * instanceScale;
@@ -123,7 +129,7 @@ export function computeV28BoothFocusCamera(
   const otherColliders = boothColliders.filter((c) => c.boothId !== booth.boothId);
   const margin = 1.2;
   const isPoseClear = (distZ: number): boolean => {
-    const pt = boothLocalToWorld(booth, 0, localCamY, distZ);
+    const pt = boothLocalToWorld(booth, localCamX, localCamY, distZ);
     if (hallBounds) {
       if (
         pt.x < hallBounds.minX + margin ||
@@ -155,18 +161,18 @@ export function computeV28BoothFocusCamera(
     }
   }
 
-  const cameraPosition = boothLocalToWorld(booth, 0, localCamY, localCamZ);
-  const lookAtTarget = boothLocalToWorld(booth, 0, localLookY, localLookZ);
+  const cameraPosition = boothLocalToWorld(booth, localCamX, localCamY, localCamZ);
+  const lookAtTarget = boothLocalToWorld(booth, localLookX, localLookY, localLookZ);
   const entryDist = Math.min(localCamZ + 2.1 * instanceScale, maxSafeDist);
   const entryPosition = isPoseClear(entryDist)
-    ? boothLocalToWorld(booth, 0, localCamY + 0.55 * instanceScale, entryDist)
-    : boothLocalToWorld(booth, 0, localCamY + 0.35 * instanceScale, localCamZ);
+    ? boothLocalToWorld(booth, localCamX, localCamY + 0.55 * instanceScale, entryDist)
+    : boothLocalToWorld(booth, localCamX, localCamY + 0.35 * instanceScale, localCamZ);
 
   return {
     cameraPosition,
     lookAtTarget,
     entryPosition,
-    fov: V28_FOCUS_FOV,
+    fov: effectiveFocusFov,
     distance: localCamZ,
     instanceScale,
     forward: getBoothForwardVector(booth.rotationY),

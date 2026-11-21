@@ -8,11 +8,11 @@ import {
   type V28Product,
 } from '../../services/v28Api';
 import { getNpcAssistantProfile } from '../../services/npcPresentationService';
-import { piperBrowserTts, type PiperProgressEvent } from '../../services/hybridTtsAdapter';
 import {
-  chunkNormalizedSpeechForPiper,
-  normalizeVietnameseForPiper,
-} from '../../services/piperSpeechNormalizer';
+  buildPiperStepPlanFromDisplayText,
+  piperBrowserTts,
+  type PiperProgressEvent,
+} from '../../services/hybridTtsAdapter';
 import { formatCurrency } from '../ProductPanel';
 import type { V28NpcAnimState } from '../../scene/v28/DynamicBoothNpc3D';
 import { API_BASE_URL } from '../../config/apiConfig';
@@ -45,6 +45,14 @@ interface ChatMessage {
 }
 
 const API_BASE = API_BASE_URL;
+
+// Module-level cache of backend live Gemini TTS flag (populated by /api/v28/ai/status).
+// When explicitly confirmed `false`, Piper WASM starts immediately without waiting ~0.7–1.4s on GET /booths/:id/audio.
+let cachedLiveTtsConfigured: boolean | null = null;
+
+export function setCachedLiveTtsConfigured(enabled: boolean): void {
+  cachedLiveTtsConfigured = enabled;
+}
 
 export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
   booth,
@@ -299,8 +307,7 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
 
       // Mode 2: Built-in Piper WASM Vietnamese Female Voice (vi_VN-vais1000-medium) — works on ALL browsers without API key!
       if (typeof window !== 'undefined' && typeof Worker !== 'undefined' && speechText) {
-        const normalized = normalizeVietnameseForPiper(speechText);
-        const chunks = chunkNormalizedSpeechForPiper(normalized);
+        const { chunks } = buildPiperStepPlanFromDisplayText(speechText);
         if (chunks.length > 0) {
           const controller = new AbortController();
           ttsAbortControllerRef.current = controller;
@@ -325,21 +332,39 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
                 if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
                 const result = await piperBrowserTts.synthesizeNormalizedChunk({
                   normalizedText: chunks[i],
+                  priority: 'high',
                   signal: controller.signal,
                   onProgress: i === 0 ? handleProgress : undefined,
                 });
                 if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
                 setPiperLoadingText(null);
 
-                // Prefetch next chunk while current chunk plays
-                if (i + 1 < chunks.length) {
-                  void piperBrowserTts
-                    .synthesizeNormalizedChunk({
-                      normalizedText: chunks[i + 1],
-                      signal: controller.signal,
-                    })
-                    .catch(() => {});
-                }
+                const scheduleDeferredPrefetch = () => {
+                  if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
+                  if (i + 1 < chunks.length) {
+                    void piperBrowserTts
+                      .synthesizeNormalizedChunk({
+                        normalizedText: chunks[i + 1],
+                        priority: 'low',
+                        signal: controller.signal,
+                      })
+                      .catch(() => {});
+                  } else if (stepIdx + 1 < steps.length) {
+                    const nextStep = steps[stepIdx + 1];
+                    const nextClip = pack?.clips.find((c) => c.slotKey === nextStep.slotKey) || null;
+                    const nextSpeechText = nextClip?.transcript || nextStep.fallbackText;
+                    const nextFirstChunk = buildPiperStepPlanFromDisplayText(nextSpeechText).chunks[0];
+                    if (nextFirstChunk) {
+                      void piperBrowserTts
+                        .synthesizeNormalizedChunk({
+                          normalizedText: nextFirstChunk,
+                          priority: 'low',
+                          signal: controller.signal,
+                        })
+                        .catch(() => {});
+                    }
+                  }
+                };
 
                 if (activeObjectUrlRef.current) {
                   try {
@@ -365,7 +390,10 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
                   };
 
                   audio.onplay = () => {
-                    if (!controller.signal.aborted) setIsAudioPlaying(true);
+                    if (!controller.signal.aborted) {
+                      setIsAudioPlaying(true);
+                      scheduleDeferredPrefetch();
+                    }
                   };
                   audio.onpause = () => {
                     setIsAudioPlaying(false);
@@ -461,25 +489,38 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
     ]);
 
     let cancelled = false;
-    v28Api
-      .getBoothAudio(booth.boothId)
-      .then((pack) => {
-        if (cancelled) return;
-        setAudioPack(pack);
-        setLoadingAudio(false);
-        playStepAudio(0, pack);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setAudioPack(null);
-        setLoadingAudio(false);
-        setAudioError('Tạm thời chưa tải được tệp audio cache. Quý khách vẫn có thể đọc phụ đề giới thiệu.');
-      });
+    if (cachedLiveTtsConfigured === false) {
+      // Backend live Gemini TTS is confirmed disabled -> start local Piper WASM immediately with live booth props (0ms API wait!)
+      setAudioPack(null);
+      setLoadingAudio(false);
+      playStepAudio(0, null);
+    } else {
+      v28Api
+        .getBoothAudio(booth.boothId)
+        .then((pack) => {
+          if (cancelled) return;
+          cachedLiveTtsConfigured = Boolean(pack.liveGeminiTtsEnabled);
+          setAudioPack(pack);
+          setLoadingAudio(false);
+          playStepAudio(0, pack);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setAudioPack(null);
+          setLoadingAudio(false);
+          // Still play local Piper Vietnamese voice using step.fallbackText even if backend audio metadata is unreachable
+          playStepAudio(0, null);
+        });
+    }
 
     v28Api
       .getAiStatus()
       .then((st) => {
-        if (!cancelled) setAiStatus(st);
+        if (cancelled) return;
+        setAiStatus(st);
+        if (typeof (st as { liveTtsConfigured?: unknown }).liveTtsConfigured === 'boolean') {
+          cachedLiveTtsConfigured = Boolean((st as { liveTtsConfigured?: boolean }).liveTtsConfigured);
+        }
       })
       .catch(() => {});
 
@@ -487,6 +528,7 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
       cancelled = true;
       stopAudioElement();
       onAnimStateChange('idle');
+      piperBrowserTts.scheduleIdleRelease(90_000);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booth.boothId]);

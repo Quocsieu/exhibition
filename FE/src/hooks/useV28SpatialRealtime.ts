@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { V28RemoteAvatarView } from '../scene/v28/DynamicExhibitionScene';
 import { SOCKET_BASE_URL } from '../config/apiConfig';
+import { getStoredVisitorToken } from '../services/v28Api';
 
 const SOCKET_URL = (SOCKET_BASE_URL || '').replace(/\/+$/, '');
 
@@ -34,12 +35,13 @@ export function useV28SpatialRealtime({
 
     const socket = io(`${SOCKET_URL}/v28-dynamic`, {
       transports: ['websocket', 'polling'],
-      // V28-AUDIT-009: Dynamic auth callback sends latest visitor name/color on every reconnect
+      // V28-AUDIT-009 + Phase 4 Hardening: Dynamic auth sends latest visitor name/color & verified visitorToken on every reconnect
       auth: (cb) => {
         cb({
           name: sessionStorage.getItem('expo_visitor_name') || visitorName,
           color: sessionStorage.getItem('expo_visitor_color') || visitorColor,
           deviceTier: isMobilePortrait ? 'mobile' : 'desktop',
+          visitorToken: getStoredVisitorToken() || undefined,
         });
       },
       reconnection: true,
@@ -146,6 +148,12 @@ export function useV28SpatialRealtime({
     s.emit('v28:profile', { name, color });
   }, []);
 
+  const bindVisitorToken = useCallback((visitorToken: string) => {
+    const s = socketRef.current;
+    if (!s || !s.connected || !visitorToken) return;
+    s.emit('v28:auth_visitor', { visitorToken });
+  }, []);
+
   return {
     remoteAvatars,
     onlineCount,
@@ -153,5 +161,6 @@ export function useV28SpatialRealtime({
     sendMove,
     sendTeleport,
     sendProfile,
+    bindVisitorToken,
   };
 }

@@ -7,6 +7,11 @@
   --text-inverse: #f8fafc;
   --accent: #0ea5e9;
   --accent-hover: #0284c7;
+  --v28-youth-blue: #0057b8;
+  --v28-youth-blue-deep: #003d82;
+  --v28-youth-accent: #38bdf8;
+  --v28-youth-surface: #f8fafc;
+  --v28-youth-soft: #e0f2fe;
   --border-light: #cbd5e1;
   --border-strong: #64748b;
   --danger: #e11d48;
@@ -44,6 +49,20 @@ body,
   padding: 0;
   border: 0;
   white-space: nowrap;
+}
+
+/* Phase 7: Scoped V28 World HUD focus-visible & reduced-motion accessibility (zero impact on V27.5) */
+.v28-world-hud :focus-visible {
+  outline: 2px solid var(--v28-youth-accent, #38bdf8);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v28-world-hud *,
+  .v28-admin-shell * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
 
 .expo-viewport {

@@ -20,6 +20,8 @@ export interface SalesAssistantNpcProps {
   activeAnimation: NpcAnimationClipName;
   onActivate: (booth: Booth) => void;
   visible?: boolean;
+  /** Optional single-line action label override (e.g. V28 "🎙 Nghe tư vấn"). Omitted in V27.5 to preserve legacy badge. */
+  actionLabel?: string;
 }
 
 interface CachedNpcMaster {
@@ -796,6 +798,7 @@ function createNpcBadgeTexture(opts: {
   accentColor: string;
   isActive: boolean;
   isHovered: boolean;
+  actionLabel?: string;
 }): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 272;
@@ -806,10 +809,10 @@ function createNpcBadgeTexture(opts: {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const x = 5;
-    const y = 5;
+    const y = opts.actionLabel ? 16 : 5;
     const w = canvas.width - 10;
-    const h = canvas.height - 10;
-    const r = 20;
+    const h = opts.actionLabel ? 60 : canvas.height - 10;
+    const r = opts.actionLabel ? 30 : 20;
 
     ctx.save();
     ctx.beginPath();
@@ -831,23 +834,31 @@ function createNpcBadgeTexture(opts: {
     ctx.strokeStyle = opts.isActive ? '#fbbf24' : opts.accentColor;
     ctx.stroke();
 
-    // Compact status indicator dot on left
-    ctx.beginPath();
-    ctx.arc(28, 32, 7.5, 0, Math.PI * 2);
-    ctx.fillStyle = opts.isActive ? '#fbbf24' : '#10b981';
-    ctx.fill();
+    if (opts.actionLabel) {
+      // Compact single-line floating action pill (V28: "🎙 Nghe tư vấn")
+      ctx.fillStyle = opts.isActive ? '#fde68a' : '#ffffff';
+      ctx.font = '700 24px Inter, Segoe UI, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const label = opts.isActive ? '🔊 Đang tư vấn' : opts.actionLabel;
+      ctx.fillText(label, canvas.width / 2, y + h / 2 + 1, w - 24);
+    } else {
+      // Legacy V27.5 two-line badge (100% preserved)
+      ctx.beginPath();
+      ctx.arc(28, 32, 7.5, 0, Math.PI * 2);
+      ctx.fillStyle = opts.isActive ? '#fbbf24' : '#10b981';
+      ctx.fill();
 
-    // Line 1: Clear NPC Name (dynamic per booth)
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '700 23px Inter, Segoe UI, sans-serif';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(opts.assistantName, 44, 32, w - 52);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 23px Inter, Segoe UI, sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(opts.assistantName, 44, 32, w - 52);
 
-    // Line 2: Concise instruction ("🔊 Bấm để nghe")
-    ctx.fillStyle = opts.isActive ? '#fde68a' : '#bae6fd';
-    ctx.font = '600 17px Inter, Segoe UI, sans-serif';
-    const subText = opts.isActive ? '🔊 Đang tư vấn' : '🔊 Bấm để nghe';
-    ctx.fillText(subText, 22, 64, w - 30);
+      ctx.fillStyle = opts.isActive ? '#fde68a' : '#bae6fd';
+      ctx.font = '600 17px Inter, Segoe UI, sans-serif';
+      const subText = opts.isActive ? '🔊 Đang tư vấn' : '🔊 Bấm để nghe';
+      ctx.fillText(subText, 22, 64, w - 30);
+    }
     ctx.restore();
   }
 
@@ -858,7 +869,7 @@ function createNpcBadgeTexture(opts: {
 }
 
 export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
-  ({ booth, isActiveSession, activeAnimation, onActivate, visible = true }) => {
+  ({ booth, isActiveSession, activeAnimation, onActivate, visible = true, actionLabel }) => {
     const [master, setMaster] = useState<CachedNpcMaster | null>(
       () => cachedMasters[isActiveSession ? 0 : 2] ?? cachedMasters[0] ?? null
     );
@@ -1048,8 +1059,9 @@ export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
           accentColor: booth.color,
           isActive: isActiveSession,
           isHovered: hovered,
+          actionLabel,
         }),
-      [profile.assistantName, booth.color, isActiveSession, hovered]
+      [profile.assistantName, booth.color, isActiveSession, hovered, actionLabel]
     );
 
     useEffect(() => {

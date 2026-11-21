@@ -22,6 +22,7 @@ export interface InMemoryCollisionIndex {
 export interface SpatialVisitorState {
   sessionId: string;
   socketId: string;
+  visitorId: string | null;
   name: string;
   color: string;
   x: number;
@@ -33,11 +34,25 @@ export interface SpatialVisitorState {
   lastSeq: number;
   renderBudget: number;
   lastMoveTs: number;
+  lastTeleportTs: number;
   moveWindowStart: number;
   moveWindowCount: number;
   teleportWindowStart: number;
   teleportWindowCount: number;
   dirty: boolean;
+}
+
+export interface V28SpatialAoiEngineOptions {
+  resolveVisitorId?: (rawToken: string) => string | null;
+}
+
+export interface AuthoritativeVisitorPosition {
+  socketId: string;
+  sessionId: string;
+  x: number;
+  z: number;
+  updatedAt: number;
+  lastTeleportTs: number;
 }
 
 export interface AoiVisitorPayload {
@@ -126,6 +141,7 @@ function cellKey(cx: number, cz: number): string {
 export class V28SpatialAoiEngine {
   private readonly nsp: Namespace;
   private collisionIndex: InMemoryCollisionIndex;
+  private readonly resolveVisitorId?: (rawToken: string) => string | null;
   private readonly visitorsBySocket = new Map<string, SpatialVisitorState>();
   private readonly cells = new Map<string, Set<string>>(); // cellKey -> Set<socketId>
   private readonly lastSentVisibleBySocket = new Map<string, Map<string, number>>(); // socketId -> Map<sessionId, lastSentSeq>
@@ -139,11 +155,41 @@ export class V28SpatialAoiEngine {
     activeVisitors: 0,
   };
 
-  constructor(io: SocketIOServer, initialVersion: ExhibitionVersionDetail) {
+  constructor(
+    io: SocketIOServer,
+    initialVersion: ExhibitionVersionDetail,
+    options: V28SpatialAoiEngineOptions = {}
+  ) {
     this.nsp = io.of(V28_REALTIME_NAMESPACE);
     this.collisionIndex = buildCollisionIndex(initialVersion);
+    this.resolveVisitorId = options.resolveVisitorId;
     this.bindNamespaceEvents();
     this.startTickLoop();
+  }
+
+  /**
+   * Phase 4 Security Hardening: Return server-authoritative live positions for all active
+   * sockets authenticated to `visitorId` on the specified exhibition `versionId`.
+   */
+  public getAuthoritativePositionsForVisitor(
+    visitorId: string,
+    versionId: string
+  ): AuthoritativeVisitorPosition[] {
+    if (!visitorId || !versionId) return [];
+    const results: AuthoritativeVisitorPosition[] = [];
+    for (const v of this.visitorsBySocket.values()) {
+      if (v.visitorId === visitorId && v.versionId === versionId) {
+        results.push({
+          socketId: v.socketId,
+          sessionId: v.sessionId,
+          x: v.x,
+          z: v.z,
+          updatedAt: v.lastMoveTs,
+          lastTeleportTs: v.lastTeleportTs,
+        });
+      }
+    }
+    return results;
   }
 
   public getActiveVersionId(): string {
@@ -259,9 +305,14 @@ export class V28SpatialAoiEngine {
       const now = Date.now();
       const sessionId = `v28s-${crypto.randomBytes(6).toString('hex')}`;
 
+      const rawVisitorToken = typeof auth.visitorToken === 'string' ? auth.visitorToken.trim() : '';
+      const resolvedVisitorId =
+        rawVisitorToken && this.resolveVisitorId ? this.resolveVisitorId(rawVisitorToken) : null;
+
       const state: SpatialVisitorState = {
         sessionId,
         socketId: socket.id,
+        visitorId: resolvedVisitorId,
         name: rawName,
         color: rawColor,
         x: spawn.x,
@@ -273,6 +324,7 @@ export class V28SpatialAoiEngine {
         lastSeq: 0,
         renderBudget,
         lastMoveTs: now,
+        lastTeleportTs: 0,
         moveWindowStart: now,
         moveWindowCount: 0,
         teleportWindowStart: now,
@@ -413,6 +465,7 @@ export class V28SpatialAoiEngine {
         v.z = nz;
         v.rotationY = Number.isFinite(rotY) ? rotY : 0;
         v.lastMoveTs = ts;
+        v.lastTeleportTs = ts;
         v.dirty = true;
 
         const { cellX: ncx, cellZ: ncz } = cellCoordsForPosition(nx, nz);
@@ -424,6 +477,22 @@ export class V28SpatialAoiEngine {
 
       let lastProfileTs = 0;
       let lastVersionAckTs = 0;
+      let lastAuthBindTs = 0;
+
+      // Phase 4 Security Hardening: Bind authenticated visitorToken after session bootstrap
+      socket.on('v28:auth_visitor', (payload: unknown) => {
+        const now = Date.now();
+        if (now - lastAuthBindTs < 500) return;
+        lastAuthBindTs = now;
+        const v = this.visitorsBySocket.get(socket.id);
+        if (!v || !payload || typeof payload !== 'object' || !this.resolveVisitorId) return;
+        const rawToken = (payload as Record<string, unknown>).visitorToken;
+        if (typeof rawToken !== 'string' || !rawToken.trim()) return;
+        const vid = this.resolveVisitorId(rawToken.trim());
+        if (vid) {
+          v.visitorId = vid;
+        }
+      });
 
       // Visitor rename / color profile customization (exact parity with V27.5, rate-limited V28-AUDIT-033)
       socket.on('v28:profile', (payload: unknown) => {

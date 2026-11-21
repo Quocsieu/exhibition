@@ -11,6 +11,7 @@ import { DynamicBooth3D } from './DynamicBooth3D';
 import type { V28NpcAnimState } from './DynamicBoothNpc3D';
 import { getTextureCacheStats } from './v28BoothAssets';
 import { V27VisualKitLayer, useV27TerrazzoFloorTexture } from './V27VisualKit';
+import { YouthEntranceArch3D } from './YouthEntranceArch3D';
 import {
   clampCameraPosition,
   clampPointToWalkable,
@@ -107,6 +108,7 @@ export interface DynamicExhibitionSceneProps {
   boothLodMap?: Record<string, 0 | 1 | 2>;
   remoteAvatars?: V28RemoteAvatarView[];
   npcAnimState?: V28NpcAnimState;
+  isNpcSpeaking?: boolean;
   playerName?: string;
   playerColor?: string;
   onPlayerMove?: (pos: V28PlayerState) => void;
@@ -194,6 +196,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   boothLodMap,
   remoteAvatars = [],
   npcAnimState = 'idle',
+  isNpcSpeaking = false,
   playerName = 'Khách V28',
   playerColor = '#0ea5e9',
   onPlayerMove,
@@ -316,6 +319,22 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
 
   const isWalkable = (x: number, z: number) =>
     isPointWalkable(x, z, walkableRegions, boothColliders);
+
+  // Phase 8 Revision: If realtime zone compaction moves geometry over the avatar's current spot
+  // or shrinks hallBounds around it, safely nudge avatar to nearest valid walkable point (never moves valid users).
+  useEffect(() => {
+    const p = playerPosRef.current;
+    if (!isPointWalkable(p.x, p.z, walkableRegions, boothColliders)) {
+      const safe = clampPointToWalkable(p.x, p.z, walkableRegions, boothColliders, world.spawnPoint);
+      playerPosRef.current = { ...p, x: safe.x, z: safe.z, state: 'idle' };
+      moveTargetRef.current = null;
+      if (avatarRef.current) {
+        avatarRef.current.position.set(safe.x, 0, safe.z);
+      }
+      onPlayerMove?.({ ...playerPosRef.current });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walkableRegions, boothColliders]);
 
   // Apply click/tap target ONLY when inside valid walkable regions
   useEffect(() => {
@@ -588,9 +607,6 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
 
     if (cameraMode === 'focus' && focusedBooth) {
       wasExploreModeRef.current = false;
-      targetFov = V28_FOCUS_FOV;
-      camLerpSpeed = 8.5;
-
       const focusPose = computeV28BoothFocusCamera(
         focusedBooth,
         size.width,
@@ -598,6 +614,8 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
         world.hallBounds,
         boothColliders
       );
+      targetFov = focusPose.fov;
+      camLerpSpeed = 8.5;
 
       // Glide smoothly in from the booth's own front corridor when entering Focus (zero wall/roof sweep)
       if (lastFocusedBoothIdRef.current !== focusedBooth.boothId) {
@@ -828,6 +846,13 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
         onOpenDirectoryMap={onOpenDirectoryMap}
       />
 
+      {/* Phase 6: Youth-Themed 3D Entrance Arch (Positioned from live welcomeAreaBounds & centralAvenueBounds; zero layout mutation) */}
+      <YouthEntranceArch3D
+        world={world}
+        leftLogoUrl="/logos/doan-tncs-hcm.png"
+        rightLogoUrl="/logos/hoi-lhtn-vn.png"
+      />
+
       {/* Zone Overhead Banners */}
       {world.zones.map((z) => (
         <ZoneBanner key={z.id} zone={z} />
@@ -862,8 +887,9 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
           >
             <SalesAssistantNpc
               booth={toLegacyBoothAdapter(booth)}
-              isActiveSession={focusedBooth?.boothId === booth.boothId}
-              activeAnimation={focusedBooth?.boothId === booth.boothId ? toV27NpcAnim(npcAnimState) : 'IDLE'}
+              isActiveSession={Boolean(isNpcSpeaking) && focusedBooth?.boothId === booth.boothId}
+              activeAnimation={Boolean(isNpcSpeaking) && focusedBooth?.boothId === booth.boothId ? toV27NpcAnim(npcAnimState) : 'IDLE'}
+              actionLabel="🎙 Nghe tư vấn"
               onActivate={() => {
                 if (shouldSuppressInteractionClick()) return;
                 onClickNpc?.(booth);

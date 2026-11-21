@@ -7,6 +7,8 @@ import {
 import { ExhibitionConfigurator } from '../components/adminV28/ExhibitionConfigurator';
 import { CompanyManagement } from '../components/adminV28/CompanyManagement';
 import { ProductCatalog } from '../components/adminV28/ProductCatalog';
+import { RewardRedemptionAdmin } from '../components/adminV28/RewardRedemptionAdmin';
+import { EmptyBoothManager } from '../components/adminV28/EmptyBoothManager';
 import './adminV28.css';
 
 export interface AdminV28PageProps {
@@ -28,7 +30,7 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
   });
   const [logoFailed, setLogoFailed] = useState<boolean>(false);
 
-  const [activeSection, setActiveSection] = useState<'overview' | 'wizard' | 'products' | 'company'>('overview');
+  const [activeSection, setActiveSection] = useState<'overview' | 'wizard' | 'products' | 'company' | 'rewards'>('overview');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [activeWorld, setActiveWorld] = useState<V28ExhibitionVersionDetail | null>(null);
   const [worldLoadError, setWorldLoadError] = useState<boolean>(false);
@@ -309,6 +311,18 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
               </button>
               <button
                 type="button"
+                className={`v28-nav-item ${activeSection === 'rewards' ? 'v28-nav-item--active' : ''}`}
+                data-testid="v28-admin-nav-rewards"
+                onClick={() => {
+                  setActiveSection('rewards');
+                  setMobileNavOpen(false);
+                }}
+              >
+                <span>🎁</span>
+                <span>Đổi quà</span>
+              </button>
+              <button
+                type="button"
                 className="v28-nav-item"
                 onClick={() => {
                   setMobileNavOpen(false);
@@ -343,7 +357,9 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
                   ? 'Kho sản phẩm'
                   : activeSection === 'company'
                     ? 'Thông tin doanh nghiệp'
-                    : 'Tổng quan'}
+                    : activeSection === 'rewards'
+                      ? 'Xác minh & Đổi quà'
+                      : 'Tổng quan'}
             </h1>
             <div className="v28-topbar-meta">
               {viewedVersionMeta
@@ -402,7 +418,26 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
               }}
               onManageCompanies={() => setActiveSection('company')}
             />
+
+            {/* Phase 8 Revision: Permanent Empty Booth Management integrated directly into Admin Tổng quan */}
+            {activeSection === 'overview' && (
+              <div style={{ marginTop: 20 }}>
+                <EmptyBoothManager
+                  exhibitionId={activeWorld?.exhibitionId}
+                  versionId={activeWorld?.versionId}
+                  onWorldUpdated={() => {
+                    setRefreshNonce((n) => n + 1);
+                    void refreshActiveSummary();
+                  }}
+                />
+              </div>
+            )}
           </div>
+
+          {/* Phase 5: Admin Reward Redemption Verification Workspace */}
+          {activeSection === 'rewards' && (
+            <RewardRedemptionAdmin activeVersionId={activeWorld?.versionId} />
+          )}
 
           {/* Dedicated In-Page Product Catalog Workspace (Replaces Giant Popup) */}
           {activeSection === 'products' && (

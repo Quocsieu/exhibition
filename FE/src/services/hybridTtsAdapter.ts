@@ -182,11 +182,113 @@ export function checkBrowserPiperCapability(navOverride?: {
   };
 }
 
+const PIPER_CACHE_BUCKET_NAME = 'virtual-expo-piper-tts-v1';
+const PIPER_DEFAULT_ONNX_CACHE_KEY =
+  'https://huggingface.co/rhasspy/piper-voices/resolve/main/vi/vi_VN/vais1000/medium/vi_VN-vais1000-medium.onnx';
+
+/**
+ * Checks browser CacheStorage (0 network requests) to verify whether the Piper ONNX model
+ * is already cached locally from a prior NPC consultation.
+ */
+export async function hasCachedPiperModelInBrowser(onnxUrl = PIPER_DEFAULT_ONNX_CACHE_KEY): Promise<boolean> {
+  if (typeof caches === 'undefined') return false;
+  try {
+    const cache = await caches.open(PIPER_CACHE_BUCKET_NAME);
+    const hit = await cache.match(onnxUrl);
+    return Boolean(hit && hit.ok);
+  } catch {
+    return false;
+  }
+}
+
+export function shouldAllowPiperBackgroundPrewarm(overrides?: {
+  onLine?: boolean;
+  saveData?: boolean;
+  effectiveType?: string;
+  deviceMemory?: number;
+  hasWebAssembly?: boolean;
+  hasWorker?: boolean;
+}): { allowed: boolean; reason: string } {
+  const cap = checkBrowserPiperCapability({
+    deviceMemory: overrides?.deviceMemory,
+    onLine: overrides?.onLine,
+    hasWebAssembly: overrides?.hasWebAssembly,
+    hasWorker: overrides?.hasWorker,
+  });
+  if (!cap.supported) {
+    return { allowed: false, reason: cap.reason || 'unsupported' };
+  }
+  if (cap.lowMemoryDevice) {
+    return { allowed: false, reason: 'low-memory-device' };
+  }
+
+  const isOnline = overrides?.onLine ?? (typeof navigator !== 'undefined' ? navigator.onLine : true);
+  if (isOnline === false) {
+    return { allowed: false, reason: 'offline' };
+  }
+
+  const navConn =
+    typeof navigator !== 'undefined'
+      ? (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection
+      : undefined;
+  const saveData = overrides?.saveData ?? Boolean(navConn?.saveData);
+  if (saveData) {
+    return { allowed: false, reason: 'save-data-enabled' };
+  }
+
+  const effectiveType = (overrides?.effectiveType ?? navConn?.effectiveType ?? '').toLowerCase();
+  if (effectiveType === 'slow-2g' || effectiveType === '2g' || effectiveType === '3g') {
+    return { allowed: false, reason: `slow-connection:${effectiveType}` };
+  }
+
+  return { allowed: true, reason: 'eligible' };
+}
+
 export function computePiperWavCacheKey(
   normalizedSpeechText: string,
   lengthScale = DEFAULT_PIPER_LENGTH_SCALE
 ): string {
   return `piper-v1|vi_VN-vais1000-medium|1.0.0|ls:${lengthScale.toFixed(2)}|${normalizedSpeechText.trim()}`;
+}
+
+/**
+ * Splits only the very first chunk at a natural Vietnamese clause boundary (22–56 chars)
+ * to reduce Time-To-First-Audio (TTFA) without altering, removing, or adding any words.
+ */
+function splitFirstChunkForFastTtfa(chunks: string[]): string[] {
+  if (chunks.length === 0) return chunks;
+  const first = chunks[0];
+  if (first.length <= 58) return chunks;
+
+  const minCut = 20;
+  const maxCut = 56;
+  const windowStr = first.slice(0, maxCut);
+  let cutAt = -1;
+
+  for (const delim of ['. ', '! ', '? ', '; ', ', ']) {
+    const idx = windowStr.indexOf(delim);
+    if (idx >= minCut) {
+      cutAt = idx + 1;
+      break;
+    }
+  }
+
+  if (cutAt === -1) {
+    for (const phrase of [' tại ', ' của ', ' với ', ' để ', ' và ']) {
+      const idx = windowStr.indexOf(phrase);
+      if (idx >= minCut) {
+        cutAt = idx;
+        break;
+      }
+    }
+  }
+
+  if (cutAt === -1) return chunks;
+  const head = first.slice(0, cutAt).replace(/[,;:\s]+$/, '').trim();
+  const tail = first.slice(cutAt).replace(/^[,;:\s]+/, '').trim();
+  if (head.length < 16 || tail.length < 16) return chunks;
+  const headFinal = /[.!?]$/.test(head) ? head : `${head}.`;
+  return [headFinal, tail, ...chunks.slice(1)];
 }
 
 export function buildPiperStepPlanFromDisplayText(displayText: string): {
@@ -195,11 +297,12 @@ export function buildPiperStepPlanFromDisplayText(displayText: string): {
   chunks: string[];
 } {
   const speechText = normalizeVietnameseForPiper(displayText);
-  const chunks = chunkNormalizedSpeechForPiper(speechText, 65, 135);
+  const rawChunks = chunkNormalizedSpeechForPiper(speechText, 65, 135);
+  const baseChunks = rawChunks.length > 0 ? rawChunks : speechText ? [speechText] : [];
   return {
     displayText,
     speechText,
-    chunks: chunks.length > 0 ? chunks : speechText ? [speechText] : [],
+    chunks: splitFirstChunkForFastTtfa(baseChunks),
   };
 }
 
@@ -219,6 +322,7 @@ interface PendingWorkerRequest {
 interface QueuedSynthesisTask {
   normalizedText: string;
   lengthScale: number;
+  priority: 'high' | 'low';
   signal?: AbortSignal;
   onProgress?: (ev: PiperProgressEvent) => void;
   overrides?: PiperAssetUrlOverrides;
@@ -247,10 +351,61 @@ export class PiperBrowserTtsManager {
   private activeJobRunning = false;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private isModelReadyInWorker = false;
+  private prewarmInFlight: Promise<boolean> | null = null;
   private workerFactory: WorkerFactoryFn;
 
   constructor(workerFactory: WorkerFactoryFn = defaultWorkerFactory) {
     this.workerFactory = workerFactory;
+  }
+
+  isModelReady(): boolean {
+    return this.isModelReadyInWorker && this.worker !== null;
+  }
+
+  /**
+   * Controlled, non-blocking background prewarm of the Piper WASM model in its dedicated Worker.
+   * - When `cacheOnly` is true (default), ONLY warms the worker if the model is ALREADY in CacheStorage (0 network bytes!).
+   * - Skips automatically on low-RAM devices, Save-Data mode, offline, or slow 2G/3G connections.
+   */
+  async prewarmInBackground(options?: {
+    cacheOnly?: boolean;
+    overrides?: PiperAssetUrlOverrides;
+    hasCachedModelCheck?: () => Promise<boolean>;
+  }): Promise<boolean> {
+    if (this.isModelReadyInWorker && this.worker) return true;
+    if (this.prewarmInFlight) return this.prewarmInFlight;
+
+    const gate = shouldAllowPiperBackgroundPrewarm();
+    if (!gate.allowed) return false;
+
+    const cacheOnly = options?.cacheOnly ?? true;
+    const checkCached =
+      options?.hasCachedModelCheck ??
+      (() => hasCachedPiperModelInBrowser(options?.overrides?.onnxUrl || PIPER_DEFAULT_ONNX_CACHE_KEY));
+
+    this.prewarmInFlight = (async () => {
+      try {
+        if (cacheOnly) {
+          const isCached = await checkCached();
+          if (!isCached) return false;
+        }
+        await this.ensureWorkerAlive();
+        if (this.isModelReadyInWorker) return true;
+        await this.sendWorkerCommand(
+          { type: 'init', overrides: options?.overrides },
+          WORKER_INIT_TOTAL_TIMEOUT_MS
+        );
+        this.isModelReadyInWorker = true;
+        return true;
+      } catch {
+        // Silent best-effort prewarm: never surface errors until user explicitly requests NPC voice
+        return false;
+      } finally {
+        this.prewarmInFlight = null;
+      }
+    })();
+
+    return this.prewarmInFlight;
   }
 
   getCacheStats(): { entries: number; totalBytes: number; workerAlive: boolean } {
@@ -505,6 +660,7 @@ export class PiperBrowserTtsManager {
   async synthesizeNormalizedChunk(options: {
     normalizedText: string;
     lengthScale?: number;
+    priority?: 'high' | 'low';
     signal?: AbortSignal;
     onProgress?: (ev: PiperProgressEvent) => void;
     overrides?: PiperAssetUrlOverrides;
@@ -557,9 +713,11 @@ export class PiperBrowserTtsManager {
     }
 
     return new Promise<PiperSynthesizedChunkResult>((resolve, reject) => {
+      const priority = options.priority ?? 'high';
       const task: QueuedSynthesisTask = {
         normalizedText: cleanText,
         lengthScale,
+        priority,
         signal: options.signal,
         onProgress: options.onProgress,
         overrides: options.overrides,
@@ -580,7 +738,13 @@ export class PiperBrowserTtsManager {
         options.signal.addEventListener('abort', onAbort, { once: true });
       }
 
-      this.jobQueue.push(task);
+      if (priority === 'high') {
+        const firstLowIdx = this.jobQueue.findIndex((t) => t.priority === 'low');
+        if (firstLowIdx === -1) this.jobQueue.push(task);
+        else this.jobQueue.splice(firstLowIdx, 0, task);
+      } else {
+        this.jobQueue.push(task);
+      }
       this.pumpQueue();
     });
   }

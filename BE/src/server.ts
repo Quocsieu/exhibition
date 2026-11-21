@@ -13,6 +13,7 @@ import { ExpoController, type DataMutationCallback } from './controllers/expoCon
 import { createApiRoutes } from './routes/apiRoutes.js';
 import { createV28ApiRoutes } from './routes/v28Routes.js';
 import { V28ExhibitionService } from './services/v28/exhibitionService.js';
+import { V28VisitorJourneyService } from './services/v28/visitorJourneyService.js';
 import { V28SpatialAoiEngine } from './realtime/v28/spatialAoiEngine.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 import type { ServerToClientEvents, ClientToServerEvents } from './schemas/expoSchemas.js';
@@ -83,7 +84,7 @@ export function createApp(
     cors({
       origin: corsOrigin,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Visitor-Token'],
       exposedHeaders: [
         'X-TTS-Cache',
         'X-TTS-Provider',
@@ -147,13 +148,27 @@ export function createApp(
     app.locals.v28Db = v28Db;
     const v28ExhibitionService = new V28ExhibitionService(v28Db);
     app.locals.v28ExhibitionService = v28ExhibitionService;
+    const v28VisitorJourneyService = new V28VisitorJourneyService(
+      v28Db,
+      v28ExhibitionService,
+      () => app.locals.v28SpatialAoi as V28SpatialAoiEngine | undefined
+    );
+    app.locals.v28VisitorJourneyService = v28VisitorJourneyService;
     app.use(
       '/api/v28',
-      createV28ApiRoutes(v28Db, undefined, v28ExhibitionService, (publishedVersion) => {
-        const aoi = app.locals.v28SpatialAoi as V28SpatialAoiEngine | undefined;
-        aoi?.onLayoutPublished(publishedVersion);
-        cloudSync?.scheduleSync('v28', true);
-      })
+      createV28ApiRoutes(
+        v28Db,
+        undefined,
+        v28ExhibitionService,
+        (publishedVersion) => {
+          const aoi = app.locals.v28SpatialAoi as V28SpatialAoiEngine | undefined;
+          aoi?.onLayoutPublished(publishedVersion);
+          cloudSync?.scheduleSync('v28', true);
+        },
+        undefined,
+        undefined,
+        v28VisitorJourneyService
+      )
     );
   }
 
@@ -224,8 +239,11 @@ if (isMain) {
     app.set('io', io);
 
     const v28ExhService = app.locals.v28ExhibitionService as V28ExhibitionService | undefined;
+    const v28JourneyService = app.locals.v28VisitorJourneyService as V28VisitorJourneyService | undefined;
     const v28SpatialAoi = v28ExhService
-      ? new V28SpatialAoiEngine(io, v28ExhService.getActiveExhibitionWorld())
+      ? new V28SpatialAoiEngine(io, v28ExhService.getActiveExhibitionWorld(), {
+          resolveVisitorId: (rawToken) => v28JourneyService?.tryResolveVisitorId(rawToken) ?? null,
+        })
       : undefined;
     if (v28SpatialAoi) {
       app.locals.v28SpatialAoi = v28SpatialAoi;

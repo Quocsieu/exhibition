@@ -17,6 +17,7 @@ import {
 import { VALID_BOOTH_SLOT_IDS } from '../../schemas/expoSchemas.js';
 import type { ExhibitionVersionStatus, V28Product } from '../../schemas/v28Schemas.js';
 import { V28CategoryService } from './categoryService.js';
+import { computeZoneAwareCompactedLayout } from './zoneCompaction.js';
 
 export interface ExhibitionSummary {
   id: string;
@@ -197,13 +198,22 @@ export class V28ExhibitionService {
     let activeBoothCount = 0;
     if (activeVersionId) {
       activeZoneCount = Number(
-        (this.db.prepare('SELECT COUNT(*) as c FROM zones WHERE version_id = ?').get(activeVersionId) as { c: number })
-          .c
+        (
+          this.db
+            .prepare(
+              `SELECT COUNT(DISTINCT zone_id) as c FROM exhibition_version_booths
+               WHERE version_id = ? AND COALESCE(placement_status, 'placed') NOT IN ('hidden', 'removed')`
+            )
+            .get(activeVersionId) as { c: number }
+        ).c
       );
       activeBoothCount = Number(
         (
           this.db
-            .prepare('SELECT COUNT(*) as c FROM exhibition_version_booths WHERE version_id = ?')
+            .prepare(
+              `SELECT COUNT(*) as c FROM exhibition_version_booths
+               WHERE version_id = ? AND COALESCE(placement_status, 'placed') NOT IN ('hidden', 'removed')`
+            )
             .get(activeVersionId) as { c: number }
         ).c
       );
@@ -676,7 +686,11 @@ export class V28ExhibitionService {
     }
   }
 
-  public getVersionDetail(versionId: string): ExhibitionVersionDetail | null {
+  public getVersionDetail(
+    versionId: string,
+    options?: { includeHidden?: boolean }
+  ): ExhibitionVersionDetail | null {
+    const includeHidden = options?.includeHidden === true;
     const ver = this.db
       .prepare(
         `SELECT v.*, e.name as exhibition_name
@@ -715,6 +729,8 @@ export class V28ExhibitionService {
          LEFT JOIN exhibition_version_booth_meta evbm ON evbm.version_id = evb.version_id AND evbm.booth_id = evb.booth_id
          LEFT JOIN companies c ON c.id = COALESCE(evbm.company_id, b.company_id)
          WHERE evb.version_id = ?
+           AND COALESCE(evb.placement_status, 'placed') != 'removed'
+           ${includeHidden ? '' : "AND COALESCE(evb.placement_status, 'placed') != 'hidden'"}
          ORDER BY evb.slot_index ASC`
       )
       .all(versionId) as Array<Record<string, unknown>>;
@@ -832,7 +848,7 @@ export class V28ExhibitionService {
       boothCountByZone.set(b.zoneId, (boothCountByZone.get(b.zoneId) || 0) + 1);
     }
 
-    const zones: ExhibitionZoneRecord[] = zoneRows.map((z) => ({
+    const rawZones: ExhibitionZoneRecord[] = zoneRows.map((z) => ({
       id: String(z.id),
       versionId,
       code: String(z.code),
@@ -844,15 +860,21 @@ export class V28ExhibitionService {
       boothCount: boothCountByZone.get(String(z.id)) || 0,
     }));
 
-    const clusters: GeneratedClusterSpec[] = Array.isArray(layoutMeta.clusters)
-      ? layoutMeta.clusters
-      : [];
+    const compactedLayout = computeZoneAwareCompactedLayout(
+      layoutMeta,
+      rawZones,
+      booths,
+      roofBounds
+    );
+    const zones = compactedLayout.zones;
+    const clusters = compactedLayout.clusters;
+    const finalBooths = compactedLayout.booths;
 
     const validation = validateExhibitionLayout({
-      hallBounds: layoutMeta.hallBounds,
-      centralAvenueBounds: layoutMeta.centralAvenueBounds,
-      welcomeAreaBounds: layoutMeta.welcomeAreaBounds,
-      walkwayGraph: layoutMeta.walkwayGraph,
+      hallBounds: compactedLayout.hallBounds,
+      centralAvenueBounds: compactedLayout.centralAvenueBounds,
+      welcomeAreaBounds: compactedLayout.welcomeAreaBounds,
+      walkwayGraph: compactedLayout.walkwayGraph,
       clusters,
       zones: zones.map((z) => ({
         code: z.code,
@@ -865,7 +887,7 @@ export class V28ExhibitionService {
         clusterCount: clusters.filter((c) => c.zoneCode === z.code).length || 1,
         openingDirection: clusters.find((c) => c.zoneCode === z.code)?.openingDirection || 'south',
       })),
-      placements: booths.map((b) => ({
+      placements: finalBooths.map((b) => ({
         slotIndex: b.slotIndex,
         clusterId: 'cluster-01',
         clusterIndex: 0,
@@ -888,7 +910,7 @@ export class V28ExhibitionService {
         ? (layoutMeta as { ownerCompanyId: string }).ownerCompanyId
         : null;
     const distinctBoothOwners = Array.from(
-      new Set(booths.map((b) => b.companyId).filter((id): id is string => Boolean(id)))
+      new Set(finalBooths.map((b) => b.companyId).filter((id): id is string => Boolean(id)))
     );
     const resolvedOwnerId = explicitOwnerId || (distinctBoothOwners.length === 1 ? distinctBoothOwners[0] : null);
     const resolvedOwnerRow = resolvedOwnerId ? this.v28Db.getCompanyById(resolvedOwnerId) : null;
@@ -913,28 +935,28 @@ export class V28ExhibitionService {
       ownerCompany,
       createdAt: String(ver.created_at),
       publishedAt: ver.published_at ? String(ver.published_at) : null,
-      hallWidth: Number(layoutMeta.hallWidth || 80),
-      hallDepth: Number(layoutMeta.hallDepth || 80),
-      hallBounds: layoutMeta.hallBounds,
-      walkableBounds: layoutMeta.walkableBounds,
-      walkableRegions: Array.isArray(layoutMeta.walkableRegions) ? layoutMeta.walkableRegions : undefined,
-      centralAvenueBounds: layoutMeta.centralAvenueBounds,
-      welcomeAreaBounds: layoutMeta.welcomeAreaBounds,
-      spawnPoint: layoutMeta.spawnPoint,
-      directoryPoint: layoutMeta.directoryPoint,
-      cameraOverviewBounds: layoutMeta.cameraOverviewBounds,
-      roofBounds,
-      walkwayGraph: layoutMeta.walkwayGraph,
+      hallWidth: compactedLayout.hallWidth,
+      hallDepth: compactedLayout.hallDepth,
+      hallBounds: compactedLayout.hallBounds,
+      walkableBounds: compactedLayout.walkableBounds,
+      walkableRegions: compactedLayout.walkableRegions.length > 0 ? compactedLayout.walkableRegions : undefined,
+      centralAvenueBounds: compactedLayout.centralAvenueBounds,
+      welcomeAreaBounds: compactedLayout.welcomeAreaBounds,
+      spawnPoint: compactedLayout.spawnPoint,
+      directoryPoint: compactedLayout.directoryPoint,
+      cameraOverviewBounds: compactedLayout.cameraOverviewBounds,
+      roofBounds: compactedLayout.roofBounds,
+      walkwayGraph: compactedLayout.walkwayGraph,
       clusters,
       zones,
-      booths,
+      booths: finalBooths,
       validation,
     };
   }
 
   public getActiveExhibitionWorld(previewVersionId?: string): ExhibitionVersionDetail {
     if (previewVersionId) {
-      const preview = this.getVersionDetail(previewVersionId);
+      const preview = this.getVersionDetail(previewVersionId, { includeHidden: false });
       if (!preview) {
         throw httpError(404, 'Không tìm thấy phiên bản xem trước.');
       }
@@ -949,7 +971,7 @@ export class V28ExhibitionService {
       )
       .get() as { id: string; active_version_id: string } | undefined;
     if (latestActiveExh?.active_version_id) {
-      const activeDetail = this.getVersionDetail(latestActiveExh.active_version_id);
+      const activeDetail = this.getVersionDetail(latestActiveExh.active_version_id, { includeHidden: false });
       if (activeDetail) return activeDetail;
     }
 
@@ -958,7 +980,253 @@ export class V28ExhibitionService {
     if (!targetVersionId) {
       throw httpError(404, 'Chưa có phiên bản triển lãm nào.');
     }
-    return this.getVersionDetail(targetVersionId)!;
+    return this.getVersionDetail(targetVersionId, { includeHidden: false })!;
+  }
+
+  /**
+   * Phase 8 — Hide or restore an empty booth in a specific exhibition version.
+   * - Reuses existing `exhibition_version_booths.placement_status` ('placed' | 'hidden').
+   * - Never deletes slot_index, coordinates, or historical visitor/reward records.
+   * - Rejects hiding booths that have assigned products OR a distinct non-owner tenant company.
+   */
+  public setVersionBoothVisibility(
+    exhibitionId: string,
+    versionId: string,
+    boothId: string,
+    hidden: boolean
+  ): {
+    adminVersion: ExhibitionVersionDetail;
+    publicActiveWorld: ExhibitionVersionDetail | null;
+    isPublishedVersion: boolean;
+  } {
+    const verRow = this.db
+      .prepare('SELECT id, exhibition_id, status FROM exhibition_versions WHERE id = ? AND exhibition_id = ?')
+      .get(versionId, exhibitionId) as { id?: string; exhibition_id?: string; status?: string } | undefined;
+    if (!verRow?.id) {
+      throw httpError(404, 'Không tìm thấy phiên bản triển lãm.');
+    }
+
+    const fullBefore = this.getVersionDetail(versionId, { includeHidden: true });
+    if (!fullBefore) {
+      throw httpError(404, 'Không tìm thấy chi tiết phiên bản triển lãm.');
+    }
+
+    const targetBooth = fullBefore.booths.find((b) => b.boothId === boothId);
+    if (!targetBooth) {
+      throw httpError(404, 'Không tìm thấy gian hàng trong phiên bản triển lãm này.');
+    }
+
+    if (hidden) {
+      const hasProducts = targetBooth.assignedSlotCount > 0;
+      const ownerId = fullBefore.ownerCompanyId || null;
+      const hasDistinctTenantBusiness = Boolean(
+        targetBooth.companyId && (!ownerId || targetBooth.companyId !== ownerId)
+      );
+
+      if (hasProducts) {
+        throw httpError(
+          400,
+          `Không thể ẩn gian hàng #${targetBooth.slotIndex + 1} vì đang có ${targetBooth.assignedSlotCount} sản phẩm trưng bày.`
+        );
+      }
+
+      if (hasDistinctTenantBusiness) {
+        throw httpError(
+          400,
+          `Không thể ẩn gian hàng #${targetBooth.slotIndex + 1} vì đang được gán cho doanh nghiệp "${targetBooth.companyName}".`
+        );
+      }
+    }
+
+    const nextStatus = hidden ? 'hidden' : 'placed';
+    this.db
+      .prepare(
+        `UPDATE exhibition_version_booths
+         SET placement_status = ?
+         WHERE version_id = ? AND booth_id = ?`
+      )
+      .run(nextStatus, versionId, boothId);
+
+    const adminVersion = this.getVersionDetail(versionId, { includeHidden: true });
+    if (!adminVersion) {
+      throw httpError(500, 'Không thể tải lại phiên bản triển lãm sau khi cập nhật.');
+    }
+
+    const isPublishedVersion = verRow.status === 'published';
+    const publicActiveWorld = isPublishedVersion
+      ? this.getVersionDetail(versionId, { includeHidden: false })
+      : null;
+
+    return {
+      adminVersion,
+      publicActiveWorld,
+      isPublishedVersion,
+    };
+  }
+
+  /**
+   * Phase 8 Revision — Permanently remove empty booths (single, by zone, or all) in an exhibition version.
+   * - Atomic SQLite transaction (all-or-nothing, zero half-deletes).
+   * - Marks `exhibition_version_booths.placement_status = 'removed'` (tombstone):
+   *   preserves original canonical `slot_index` & coordinates for deterministic zone-aware compaction
+   *   and NEVER cascade-deletes `booths`, `companies`, `products`, `visitor_booth_visits`, or `reward_redemptions`.
+   * - Server independently validates every candidate booth (never trusts FE list).
+   * - Blocks removing booths with assigned products, distinct tenant company, or leaving 0 active booths.
+   */
+  public removeEmptyBooths(
+    exhibitionId: string,
+    versionId: string,
+    input: {
+      mode: 'single' | 'zone' | 'all';
+      boothId?: string;
+      zoneId?: string;
+    }
+  ): {
+    version: ExhibitionVersionDetail;
+    publicActiveWorld: ExhibitionVersionDetail | null;
+    isPublishedVersion: boolean;
+    removedBoothIds: string[];
+    removedCount: number;
+    removedZoneCodes: string[];
+    compacted: boolean;
+    remainingBoothCount: number;
+    remainingZoneCount: number;
+  } {
+    const verRow = this.db
+      .prepare('SELECT id, exhibition_id, status FROM exhibition_versions WHERE id = ? AND exhibition_id = ?')
+      .get(versionId, exhibitionId) as { id?: string; exhibition_id?: string; status?: string } | undefined;
+    if (!verRow?.id) {
+      throw httpError(404, 'Không tìm thấy phiên bản triển lãm.');
+    }
+
+    let removedBoothIds: string[] = [];
+    let zonesBeforeCount = 0;
+    let zoneCodesBefore: string[] = [];
+
+    this.v28Db.runInTransaction(() => {
+      const current = this.getVersionDetail(versionId, { includeHidden: false });
+      if (!current) {
+        throw httpError(404, 'Không tìm thấy chi tiết phiên bản triển lãm.');
+      }
+
+      zonesBeforeCount = current.zones.length;
+      zoneCodesBefore = current.zones.map((z) => z.code);
+      const ownerId = current.ownerCompanyId || null;
+
+      const isBoothEligibleEmpty = (b: ExhibitionBoothPlacementView): { ok: boolean; reason?: string } => {
+        if (b.assignedSlotCount > 0) {
+          return {
+            ok: false,
+            reason: `Không thể xóa gian hàng #${b.slotIndex + 1} vì đang có ${b.assignedSlotCount} sản phẩm trưng bày.`,
+          };
+        }
+        const hasDistinctTenant = Boolean(b.companyId && (!ownerId || b.companyId !== ownerId));
+        if (hasDistinctTenant) {
+          return {
+            ok: false,
+            reason: `Không thể xóa gian hàng #${b.slotIndex + 1} vì đang thuộc doanh nghiệp thuê "${b.companyName}".`,
+          };
+        }
+        return { ok: true };
+      };
+
+      const targetBoothIds: string[] = [];
+
+      if (input.mode === 'single') {
+        const boothId = String(input.boothId || '').trim();
+        if (!boothId) {
+          throw httpError(400, 'Thiếu mã gian hàng cần xóa.');
+        }
+        const rawStatusRow = this.db
+          .prepare('SELECT placement_status FROM exhibition_version_booths WHERE version_id = ? AND booth_id = ?')
+          .get(versionId, boothId) as { placement_status?: string } | undefined;
+        if (!rawStatusRow) {
+          throw httpError(404, 'Không tìm thấy gian hàng trong phiên bản triển lãm này.');
+        }
+        if (rawStatusRow.placement_status === 'removed') {
+          throw httpError(409, 'Gian hàng này đã bị xóa khỏi phiên bản triển lãm trước đó.');
+        }
+
+        const targetBooth = current.booths.find((b) => b.boothId === boothId);
+        if (!targetBooth) {
+          throw httpError(404, 'Không tìm thấy gian hàng đang hoạt động trong phiên bản này.');
+        }
+        const check = isBoothEligibleEmpty(targetBooth);
+        if (!check.ok) {
+          throw httpError(400, check.reason || 'Gian hàng không đủ điều kiện xóa.');
+        }
+        targetBoothIds.push(targetBooth.boothId);
+      } else if (input.mode === 'zone') {
+        const zoneId = String(input.zoneId || '').trim();
+        if (!zoneId) {
+          throw httpError(400, 'Thiếu mã khu cần xóa gian trống.');
+        }
+        const targetZone = current.zones.find((z) => z.id === zoneId);
+        if (!targetZone) {
+          throw httpError(404, 'Không tìm thấy khu đang hoạt động trong phiên bản triển lãm này.');
+        }
+        const zoneBooths = current.booths.filter((b) => b.zoneId === zoneId);
+        for (const b of zoneBooths) {
+          if (isBoothEligibleEmpty(b).ok) {
+            targetBoothIds.push(b.boothId);
+          }
+        }
+      } else if (input.mode === 'all') {
+        for (const b of current.booths) {
+          if (isBoothEligibleEmpty(b).ok) {
+            targetBoothIds.push(b.boothId);
+          }
+        }
+      } else {
+        throw httpError(400, 'Chế độ xóa không hợp lệ.');
+      }
+
+      if (targetBoothIds.length === 0) {
+        removedBoothIds = [];
+        return;
+      }
+
+      if (current.booths.length - targetBoothIds.length < 1) {
+        throw httpError(
+          400,
+          'Không thể xóa toàn bộ gian hàng khiến triển lãm không còn gian nào hoạt động (cần giữ lại ít nhất 1 gian).'
+        );
+      }
+
+      const updateStmt = this.db.prepare(
+        `UPDATE exhibition_version_booths
+         SET placement_status = 'removed'
+         WHERE version_id = ? AND booth_id = ? AND COALESCE(placement_status, 'placed') != 'removed'`
+      );
+      for (const bId of targetBoothIds) {
+        const res = updateStmt.run(versionId, bId);
+        if (Number(res.changes || 0) > 0) {
+          removedBoothIds.push(bId);
+        }
+      }
+    });
+
+    const updatedVersion = this.getVersionDetail(versionId, { includeHidden: false });
+    if (!updatedVersion) {
+      throw httpError(500, 'Không thể tải lại phiên bản triển lãm sau khi xóa gian trống.');
+    }
+
+    const remainingZoneSet = new Set(updatedVersion.zones.map((z) => z.code));
+    const removedZoneCodes = zoneCodesBefore.filter((code) => !remainingZoneSet.has(code));
+    const compacted = updatedVersion.zones.length < zonesBeforeCount;
+    const isPublishedVersion = verRow.status === 'published';
+
+    return {
+      version: updatedVersion,
+      publicActiveWorld: isPublishedVersion ? updatedVersion : null,
+      isPublishedVersion,
+      removedBoothIds,
+      removedCount: removedBoothIds.length,
+      removedZoneCodes,
+      compacted,
+      remainingBoothCount: updatedVersion.booths.length,
+      remainingZoneCount: updatedVersion.zones.length,
+    };
   }
 
   private assertDraftVersion(versionId: string, expectedExhibitionId?: string): { exhibitionId: string } {
