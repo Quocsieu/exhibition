@@ -187,6 +187,8 @@ export const V27_STATIC_OBSTACLES: ObstacleBox[] = [
 
 export function resolveExpoWorldVersion(options?: {
   search?: string;
+  pathname?: string;
+  hash?: string;
   envValue?: string;
 }): ExpoWorldVersion {
   const rawSearch =
@@ -196,12 +198,20 @@ export function resolveExpoWorldVersion(options?: {
     if (param === 'v27_0' || param === 'v27.0') {
       return 'v27_0';
     }
-    if (param === 'v27' || param === 'v27_1' || param === 'v27.1' || param === 'grand' || param === 'grand-expo') {
+    if (param === 'v27' || param === 'v27_1' || param === 'v27.1' || param === 'v27_5' || param === 'grand' || param === 'grand-expo') {
       return 'v27';
     }
     if (param === 'v26' || param === 'legacy' || param === 'park') {
       return 'v26';
     }
+  }
+
+  const rawPath =
+    options?.pathname ?? (typeof window !== 'undefined' ? window.location.pathname : '');
+  const rawHash =
+    options?.hash ?? (typeof window !== 'undefined' ? window.location.hash : '');
+  if (/^\/v27(?:\/|$)/i.test(rawPath) || /^#\/?v27(?:\/|$)/i.test(rawHash)) {
+    return 'v27';
   }
 
   const rawEnv = (
