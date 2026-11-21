@@ -15,6 +15,7 @@ import {
 } from '../../services/hybridTtsAdapter';
 import { resolveNpcTtsMode } from '../../services/npcTtsConfig';
 import { npcHybridTtsEngine } from '../../services/npcHybridTtsEngine';
+import { npcWebAudioPlayer } from '../../services/npcWebAudioPlayer';
 import {
   buildBoothConsultationSteps,
   type BoothConsultationStep,
@@ -146,6 +147,7 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
       ttsAbortControllerRef.current.abort();
       ttsAbortControllerRef.current = null;
     }
+    npcWebAudioPlayer.stop();
     if (audioElRef.current) {
       audioElRef.current.onplay = null;
       audioElRef.current.onpause = null;
@@ -403,31 +405,31 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
                   if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
                   const prefetchNextChunk = async (nextText: string, nextChunkIdx: number | null) => {
                     if (ttsMode === 'hybrid' && (await npcHybridTtsEngine.hasPregenEntry(nextText))) {
-                      // Pre-fetch & pre-decode next HTMLAudioElement in RAM while current chunk plays!
+                      // Pre-fetch & pre-decode next clip off-main-thread while current chunk plays
+                      // (works both within the current step AND across step boundaries!)
                       const nextPregen = await npcHybridTtsEngine
                         .tryFetchPregenAudio(nextText, controller.signal)
                         .catch(() => null);
-                      if (
-                        nextPregen &&
-                        nextChunkIdx !== null &&
-                        !controller.signal.aborted &&
-                        isMountedRef.current
-                      ) {
-                        disposePreparedNext();
-                        const nextUrl = URL.createObjectURL(nextPregen.blob);
-                        const nextAudio = new Audio(nextUrl);
-                        nextAudio.preload = 'auto';
-                        try {
-                          nextAudio.load();
-                        } catch {
-                          // ignore load hint errors
+                      if (nextPregen && !controller.signal.aborted && isMountedRef.current) {
+                        if (npcWebAudioPlayer.isSupported()) {
+                          void npcWebAudioPlayer.predecodeBlob(nextPregen.hash, nextPregen.blob);
+                        } else if (nextChunkIdx !== null) {
+                          disposePreparedNext();
+                          const nextUrl = URL.createObjectURL(nextPregen.blob);
+                          const nextAudio = new Audio(nextUrl);
+                          nextAudio.preload = 'auto';
+                          try {
+                            nextAudio.load();
+                          } catch {
+                            // ignore load hint errors
+                          }
+                          preparedNextBox.current = {
+                            chunkIndex: nextChunkIdx,
+                            hash: nextPregen.hash,
+                            objUrl: nextUrl,
+                            audio: nextAudio,
+                          };
                         }
-                        preparedNextBox.current = {
-                          chunkIndex: nextChunkIdx,
-                          hash: nextPregen.hash,
-                          objUrl: nextUrl,
-                          audio: nextAudio,
-                        };
                       }
                       return;
                     }
@@ -478,6 +480,23 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
                   if (pregen) {
                     setPiperLoadingText(null);
                     try {
+                      // Primary real-time OS audio thread path (immune to Three.js/WebGL main-thread stalls)
+                      if (npcWebAudioPlayer.isSupported()) {
+                        const handled = await npcWebAudioPlayer.playBlob(pregen.hash, pregen.blob, {
+                          signal: controller.signal,
+                          muted: isMutedRef.current,
+                          onStartPlayback: () => {
+                            if (!controller.signal.aborted) {
+                              setIsAudioPlaying(true);
+                              scheduleDeferredPrefetch();
+                            }
+                          },
+                        });
+                        if (handled) {
+                          setIsAudioPlaying(false);
+                          continue;
+                        }
+                      }
                       await playBlobWithGuards(pregen.blob, scheduleDeferredPrefetch);
                       continue;
                     } catch (pregenErr: unknown) {
@@ -621,6 +640,7 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
       ttsAbortControllerRef.current.abort();
       ttsAbortControllerRef.current = null;
     }
+    npcWebAudioPlayer.stop();
     setPiperLoadingText(null);
     if (audioElRef.current && !audioElRef.current.paused) {
       audioElRef.current.pause();
@@ -676,11 +696,13 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
     isMutedRef.current = nextMuted;
+    npcWebAudioPlayer.setMuted(nextMuted);
     if (nextMuted) {
       if (ttsAbortControllerRef.current) {
         ttsAbortControllerRef.current.abort();
         ttsAbortControllerRef.current = null;
       }
+      npcWebAudioPlayer.stop();
       setPiperLoadingText(null);
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         try {
