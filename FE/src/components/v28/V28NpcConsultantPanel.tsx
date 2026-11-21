@@ -13,6 +13,12 @@ import {
   piperBrowserTts,
   type PiperProgressEvent,
 } from '../../services/hybridTtsAdapter';
+import { resolveNpcTtsMode } from '../../services/npcTtsConfig';
+import { npcHybridTtsEngine } from '../../services/npcHybridTtsEngine';
+import {
+  buildBoothConsultationSteps,
+  type BoothConsultationStep,
+} from '../../services/npcConsultationScript';
 import { formatCurrency } from '../ProductPanel';
 import type { V28NpcAnimState } from '../../scene/v28/DynamicBoothNpc3D';
 import { API_BASE_URL } from '../../config/apiConfig';
@@ -54,6 +60,20 @@ export function setCachedLiveTtsConfigured(enabled: boolean): void {
   cachedLiveTtsConfigured = enabled;
 }
 
+/**
+ * P0 Guard: Backend `audioCacheService` generates a 440Hz chime placeholder WAV (`*:local-fallback`)
+ * for unauthenticated visitor GET requests even when `liveGeminiTtsEnabled` is true.
+ * NEVER play `:local-fallback` chime WAVs as NPC speech; always route to Hybrid / Piper Vietnamese voice!
+ */
+export function isRealBackendSpeechClip(clip: Pick<V28AudioClip, 'status' | 'modelId'> | null | undefined): boolean {
+  if (!clip || clip.status !== 'ready') return false;
+  const modelId = String(clip.modelId || '').trim().toLowerCase();
+  if (!modelId || modelId.includes('local-fallback') || modelId.includes('fallback')) {
+    return false;
+  }
+  return true;
+}
+
 export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
   booth,
   isMobilePortrait,
@@ -75,54 +95,8 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
     [booth.boothId, booth.boothName, booth.category, booth.color]
   );
 
-  // Build V27.5-compatible step sequence: Greeting -> Product 1..N -> Closing
-  const steps = useMemo<PresentationStep[]>(() => {
-    const validSlots = booth.slots.filter((s) => Boolean(s.product));
-    const totalProducts = validSlots.length;
-    const list: PresentationStep[] = [
-      {
-        stepIndex: 0,
-        type: 'GREETING',
-        slotKey: 'welcome',
-        slotLabel: null,
-        product: null,
-        productIndex: null,
-        totalProducts,
-        fallbackText: `Xin chào quý khách đến với gian hàng ${booth.boothName} của ${booth.companyName} tại ${booth.zoneName}. Tôi là ${profile.assistantName}, rất hân hạnh được giới thiệu các sản phẩm trưng bày tới quý khách.`,
-      },
-    ];
-
-    validSlots.forEach((s, idx) => {
-      const p = s.product!;
-      const priceStr =
-        p.price > 0
-          ? `Giá niêm yết ${formatCurrency(p.price, p.currency)}.`
-          : 'Quý khách vui lòng liên hệ gian hàng để nhận báo giá chi tiết.';
-      list.push({
-        stepIndex: list.length,
-        type: 'PRODUCT',
-        slotKey: s.slotId,
-        slotLabel: `Kệ trưng bày #${idx + 1}`,
-        product: p,
-        productIndex: idx + 1,
-        totalProducts,
-        fallbackText: `Sản phẩm ${p.name}. ${priceStr} ${p.description || ''}`.trim(),
-      });
-    });
-
-    list.push({
-      stepIndex: list.length,
-      type: 'CLOSING',
-      slotKey: 'closing',
-      slotLabel: null,
-      product: null,
-      productIndex: null,
-      totalProducts,
-      fallbackText: `Cảm ơn quý khách đã tham quan gian hàng ${booth.boothName} của ${booth.companyName}. Nếu quý khách cần tư vấn thêm, vui lòng chuyển sang tab Chat để trò chuyện trực tiếp với tôi.`,
-    });
-
-    return list;
-  }, [booth, profile.assistantName]);
+  // Build V27.5-compatible step sequence via shared script builder (ensures 100% hash parity with Smart Preloader)
+  const steps = useMemo<BoothConsultationStep[]>(() => buildBoothConsultationSteps(booth), [booth]);
 
   // Presentation & Pre-generated Cached Audio Player State
   const [audioPack, setAudioPack] = useState<V28BoothAudioPack | null>(null);
@@ -151,11 +125,11 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
 
   const visitorIdRef = useRef<string>(
     sessionStorage.getItem('v28_visitor_uid') ||
-      (() => {
-        const id = `u-${Math.random().toString(36).slice(2, 10)}`;
-        sessionStorage.setItem('v28_visitor_uid', id);
-        return id;
-      })()
+    (() => {
+      const id = `u-${Math.random().toString(36).slice(2, 10)}`;
+      sessionStorage.setItem('v28_visitor_uid', id);
+      return id;
+    })()
   );
 
   // Helper: map step -> pre-generated cached clip
@@ -232,8 +206,8 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
         }
       };
 
-      // Mode 1: Real pre-generated Gemini TTS WAV cached on backend -> play cached WAV directly (0 Gemini calls!)
-      if (pack?.liveGeminiTtsEnabled && clip && clip.status === 'ready') {
+      // Mode 1: Real pre-generated Gemini TTS WAV cached on backend (STRICTLY excludes `:local-fallback` 440Hz chime WAVs!)
+      if (pack?.liveGeminiTtsEnabled && isRealBackendSpeechClip(clip) && clip) {
         const audio = new Audio(`${API_BASE}${clip.audioUrl}`);
         audio.crossOrigin = 'anonymous';
         audio.preload = 'auto';
@@ -305,13 +279,16 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
         onAnimStateChange('idle');
       };
 
-      // Mode 2: Built-in Piper WASM Vietnamese Female Voice (vi_VN-vais1000-medium) — works on ALL browsers without API key!
+      // Mode 2: Built-in Piper WASM Vietnamese Female Voice (vi_VN-vais1000-medium)
+      // Optional Hybrid tier (when NPC_TTS_MODE='hybrid') checks content-hash verified pre-generated Piper audio first,
+      // and falls back seamlessly to the exact same Piper WASM voice on miss/error (0 paid APIs, instant rollback to 'legacy').
       if (typeof window !== 'undefined' && typeof Worker !== 'undefined' && speechText) {
         const { chunks } = buildPiperStepPlanFromDisplayText(speechText);
         if (chunks.length > 0) {
+          const ttsMode = resolveNpcTtsMode();
           const controller = new AbortController();
           ttsAbortControllerRef.current = controller;
-          const runClipKey = `${booth.boothId}:${step.slotKey}:piper-wasm`;
+          const runClipKey = `${booth.boothId}:${step.slotKey}:${ttsMode === 'hybrid' ? 'hybrid-piper' : 'piper-wasm'}`;
           activeClipKeyRef.current = runClipKey;
 
           const handleProgress = (ev: PiperProgressEvent) => {
@@ -326,108 +303,137 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
             }
           };
 
+          const playBlobWithGuards = (blob: Blob, onStartPlayback: () => void) =>
+            new Promise<void>((resolve, reject) => {
+              if (activeObjectUrlRef.current) {
+                try {
+                  URL.revokeObjectURL(activeObjectUrlRef.current);
+                } catch {
+                  // ignore
+                }
+              }
+              const objUrl = URL.createObjectURL(blob);
+              activeObjectUrlRef.current = objUrl;
+
+              const audio = new Audio(objUrl);
+              audio.preload = 'auto';
+              audio.muted = isMutedRef.current;
+              audioElRef.current = audio;
+
+              const cleanup = () => {
+                audio.onplay = null;
+                audio.onpause = null;
+                audio.onended = null;
+                audio.onerror = null;
+              };
+
+              audio.onplay = () => {
+                if (!controller.signal.aborted) {
+                  setIsAudioPlaying(true);
+                  onStartPlayback();
+                }
+              };
+              audio.onpause = () => {
+                setIsAudioPlaying(false);
+              };
+              audio.onended = () => {
+                cleanup();
+                setIsAudioPlaying(false);
+                resolve();
+              };
+              audio.onerror = () => {
+                cleanup();
+                setIsAudioPlaying(false);
+                reject(new Error('Audio playback error'));
+              };
+
+              controller.signal.addEventListener(
+                'abort',
+                () => {
+                  cleanup();
+                  audio.pause();
+                  resolve();
+                },
+                { once: true }
+              );
+
+              audio.play().catch((err: unknown) => {
+                cleanup();
+                if (controller.signal.aborted || audioElRef.current !== audio) {
+                  resolve();
+                  return;
+                }
+                reject(err);
+              });
+            });
+
           void (async () => {
             try {
               for (let i = 0; i < chunks.length; i += 1) {
                 if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
-                const result = await piperBrowserTts.synthesizeNormalizedChunk({
-                  normalizedText: chunks[i],
-                  priority: 'high',
-                  signal: controller.signal,
-                  onProgress: i === 0 ? handleProgress : undefined,
-                });
-                if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
-                setPiperLoadingText(null);
 
                 const scheduleDeferredPrefetch = () => {
                   if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
-                  if (i + 1 < chunks.length) {
+                  const prefetchNextChunk = async (nextText: string) => {
+                    if (ttsMode === 'hybrid' && (await npcHybridTtsEngine.hasPregenEntry(nextText))) {
+                      // Pre-generated clip exists: avoid unnecessary 63 MB ONNX download!
+                      void npcHybridTtsEngine.tryFetchPregenAudio(nextText, controller.signal).catch(() => { });
+                      return;
+                    }
                     void piperBrowserTts
                       .synthesizeNormalizedChunk({
-                        normalizedText: chunks[i + 1],
+                        normalizedText: nextText,
                         priority: 'low',
                         signal: controller.signal,
                       })
-                      .catch(() => {});
+                      .catch(() => { });
+                  };
+
+                  if (i + 1 < chunks.length) {
+                    void prefetchNextChunk(chunks[i + 1]);
                   } else if (stepIdx + 1 < steps.length) {
                     const nextStep = steps[stepIdx + 1];
                     const nextClip = pack?.clips.find((c) => c.slotKey === nextStep.slotKey) || null;
                     const nextSpeechText = nextClip?.transcript || nextStep.fallbackText;
                     const nextFirstChunk = buildPiperStepPlanFromDisplayText(nextSpeechText).chunks[0];
                     if (nextFirstChunk) {
-                      void piperBrowserTts
-                        .synthesizeNormalizedChunk({
-                          normalizedText: nextFirstChunk,
-                          priority: 'low',
-                          signal: controller.signal,
-                        })
-                        .catch(() => {});
+                      void prefetchNextChunk(nextFirstChunk);
                     }
                   }
                 };
 
-                if (activeObjectUrlRef.current) {
-                  try {
-                    URL.revokeObjectURL(activeObjectUrlRef.current);
-                  } catch {
-                    // ignore
+                // Hybrid fast-path (ONLY active when NPC_TTS_MODE === 'hybrid')
+                if (ttsMode === 'hybrid') {
+                  if (i === 0) setPiperLoadingText('⏳ Đang chuẩn bị giọng đọc...');
+                  const pregen = await npcHybridTtsEngine.tryFetchPregenAudio(chunks[i], controller.signal);
+                  if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
+                  if (pregen) {
+                    setPiperLoadingText(null);
+                    try {
+                      await playBlobWithGuards(pregen.blob, scheduleDeferredPrefetch);
+                      continue;
+                    } catch (pregenErr: unknown) {
+                      if (controller.signal.aborted || !isMountedRef.current) return;
+                      if ((pregenErr as { name?: string })?.name === 'NotAllowedError') {
+                        throw pregenErr;
+                      }
+                      // Corrupt/undecodable pregen clip -> mark failed once & fall back to Piper for THIS chunk only
+                      npcHybridTtsEngine.markHashFailed(pregen.hash);
+                    }
                   }
                 }
-                const objUrl = URL.createObjectURL(result.blob);
-                activeObjectUrlRef.current = objUrl;
 
-                await new Promise<void>((resolve, reject) => {
-                  const audio = new Audio(objUrl);
-                  audio.preload = 'auto';
-                  audio.muted = isMutedRef.current;
-                  audioElRef.current = audio;
-
-                  const cleanup = () => {
-                    audio.onplay = null;
-                    audio.onpause = null;
-                    audio.onended = null;
-                    audio.onerror = null;
-                  };
-
-                  audio.onplay = () => {
-                    if (!controller.signal.aborted) {
-                      setIsAudioPlaying(true);
-                      scheduleDeferredPrefetch();
-                    }
-                  };
-                  audio.onpause = () => {
-                    setIsAudioPlaying(false);
-                  };
-                  audio.onended = () => {
-                    cleanup();
-                    setIsAudioPlaying(false);
-                    resolve();
-                  };
-                  audio.onerror = () => {
-                    cleanup();
-                    setIsAudioPlaying(false);
-                    reject(new Error('Piper audio playback error'));
-                  };
-
-                  controller.signal.addEventListener(
-                    'abort',
-                    () => {
-                      cleanup();
-                      audio.pause();
-                      resolve();
-                    },
-                    { once: true }
-                  );
-
-                  audio.play().catch((err: unknown) => {
-                    cleanup();
-                    if (controller.signal.aborted || audioElRef.current !== audio) {
-                      resolve();
-                      return;
-                    }
-                    reject(err);
-                  });
+                // Legacy Piper WASM path (exact original behavior + Hybrid fallback)
+                const result = await piperBrowserTts.synthesizeNormalizedChunk({
+                  normalizedText: chunks[i],
+                  priority: 'high',
+                  signal: controller.signal,
+                  onProgress: i === 0 || ttsMode === 'hybrid' ? handleProgress : undefined,
                 });
+                if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
+                setPiperLoadingText(null);
+
+                await playBlobWithGuards(result.blob, scheduleDeferredPrefetch);
               }
 
               if (!controller.signal.aborted && isMountedRef.current && activeClipKeyRef.current === runClipKey) {
@@ -489,8 +495,9 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
     ]);
 
     let cancelled = false;
-    if (cachedLiveTtsConfigured === false) {
-      // Backend live Gemini TTS is confirmed disabled -> start local Piper WASM immediately with live booth props (0ms API wait!)
+    const activeTtsMode = resolveNpcTtsMode();
+    if (activeTtsMode === 'hybrid' || cachedLiveTtsConfigured === false) {
+      // Hybrid mode (or confirmed non-live-Gemini backend) starts playback IMMEDIATELY (0ms API wait on GET /booths/:id/audio!)
       setAudioPack(null);
       setLoadingAudio(false);
       playStepAudio(0, null);
@@ -522,7 +529,7 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
           cachedLiveTtsConfigured = Boolean((st as { liveTtsConfigured?: boolean }).liveTtsConfigured);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
 
     return () => {
       cancelled = true;
@@ -551,7 +558,7 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
       audioElRef.current.pause();
     }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try { window.speechSynthesis.cancel(); } catch {}
+      try { window.speechSynthesis.cancel(); } catch { }
     }
     setIsAudioPlaying(false);
     setStatus('PAUSED');
@@ -622,7 +629,7 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
         audioElRef.current.pause();
         setIsAudioPlaying(false);
       } else if (status === 'GREETING' || status === 'PRESENTING') {
-        audioElRef.current.play().catch(() => {});
+        audioElRef.current.play().catch(() => { });
       }
     } else if (!nextMuted && (status === 'GREETING' || status === 'PRESENTING')) {
       playStepAudio(currentStepIndex);
@@ -642,7 +649,7 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
         audioElRef.current.pause();
       }
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try { window.speechSynthesis.cancel(); } catch {}
+        try { window.speechSynthesis.cancel(); } catch { }
       }
       setIsAudioPlaying(false);
       setStatus('PAUSED');
@@ -755,9 +762,8 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
       <header className="npc-assistant-panel__header">
         <div className="npc-assistant-panel__persona">
           <div
-            className={`npc-assistant-panel__avatar ${
-              isAudioPlaying ? 'npc-assistant-panel__avatar--speaking' : ''
-            }`}
+            className={`npc-assistant-panel__avatar ${isAudioPlaying ? 'npc-assistant-panel__avatar--speaking' : ''
+              }`}
             aria-hidden="true"
           >
             👩‍💼
@@ -838,13 +844,12 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
         <>
           <div className="npc-assistant-panel__status-bar">
             <span
-              className={`npc-status-pill ${
-                isSessionRunning
-                  ? 'npc-status-pill--active'
-                  : isPaused
-                    ? 'npc-status-pill--paused'
-                    : 'npc-status-pill--idle'
-              }`}
+              className={`npc-status-pill ${isSessionRunning
+                ? 'npc-status-pill--active'
+                : isPaused
+                  ? 'npc-status-pill--paused'
+                  : 'npc-status-pill--idle'
+                }`}
             >
               {statusLabel}
             </span>
@@ -922,9 +927,8 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
                 return (
                   <span
                     key={s.stepIndex}
-                    className={`npc-progress-dot ${
-                      isCurrent ? 'npc-progress-dot--current' : isDone ? 'npc-progress-dot--done' : ''
-                    }`}
+                    className={`npc-progress-dot ${isCurrent ? 'npc-progress-dot--current' : isDone ? 'npc-progress-dot--done' : ''
+                      }`}
                     title={
                       s.type === 'GREETING'
                         ? 'Chào mừng'

@@ -1,0 +1,196 @@
+{
+  "version": "v1",
+  "voiceId": "vi_VN-vais1000-medium",
+  "generatedAt": "2026-11-21T14:39:13.748Z",
+  "entries": {
+    "c993ac3d2508d92fd25d936e5e463132e25fe6c4c6f1a8cc4ac9fe3e5f79f740": {
+      "file": "/tts/pregen/c993ac3d2508.wav",
+      "mimeType": "audio/wav",
+      "text": "Xin chào quý khách đến.",
+      "durationSec": 1.44,
+      "bytes": 63532
+    },
+    "1fa228174ffad3b296b26cf73c375bc56244177314e525f5ab66c3cb8f05a0e1": {
+      "file": "/tts/pregen/1fa228174ffa.wav",
+      "mimeType": "audio/wav",
+      "text": "Xin chào quý khách đến với gian hàng CELLPHONES.",
+      "durationSec": 2.36,
+      "bytes": 103980
+    },
+    "30bf132c208e82320fa78e08f35f7a3bf29b3f6a357cef052ab4dff2a54adf72": {
+      "file": "/tts/pregen/30bf132c208e.wav",
+      "mimeType": "audio/wav",
+      "text": "Xin chào quý khách đến với gian hàng.",
+      "durationSec": 1.72,
+      "bytes": 75820
+    },
+    "a207eef97ca250ad1c87b68ac7df78e7473f88744797d0fb042f589b525715ba": {
+      "file": "/tts/pregen/a207eef97ca2.wav",
+      "mimeType": "audio/wav",
+      "text": "Cảm ơn quý khách đã tham quan gian hàng.",
+      "durationSec": 1.94,
+      "bytes": 85548
+    },
+    "638ffca478f13b70edcc5805e2c08593c7fc96f4970e49ac49f0c2d4590de3f5": {
+      "file": "/tts/pregen/638ffca478f1.wav",
+      "mimeType": "audio/wav",
+      "text": "Xin chào quý khách đến với gian hàng Ê thơ Tếch Láp.",
+      "durationSec": 2.46,
+      "bytes": 108588
+    },
+    "ef8fc59162667b65863c28c397be71dd1fe74bbee46e41d69a5f5bcf76b40853": {
+      "file": "/tts/pregen/ef8fc5916266.wav",
+      "mimeType": "audio/wav",
+      "text": "của Ê thơ Tếch nô lô di Cóp tại Khu Công nghệ và Điện tử.",
+      "durationSec": 2.83,
+      "bytes": 124972
+    },
+    "2bfb65aa0d4d3ff771fc94dbec3dc9e260a2dc7345a4269664837c65e5a9f44a": {
+      "file": "/tts/pregen/2bfb65aa0d4d.wav",
+      "mimeType": "audio/wav",
+      "text": "Tôi là Ngọc Anh, rất hân hạnh được giới thiệu các sản phẩm trưng bày tới quý khách.",
+      "durationSec": 3.58,
+      "bytes": 157740
+    },
+    "6a3e9cc521c8a8b4d79d56cc9e42323c3cd05528ddf5e3353b90101334c5dc39": {
+      "file": "/tts/pregen/6a3e9cc521c8.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm Trạm Cảm Biến Môi Trường Ê thơ Xen ích một.",
+      "durationSec": 2.81,
+      "bytes": 123948
+    },
+    "8e9b25acf5d39284efc7e3298fc480fcfa0e3754f0e09d4280d1479800851067": {
+      "file": "/tts/pregen/8e9b25acf5d3.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết sáu triệu tám trăm năm mươi nghìn ₫.",
+      "durationSec": 2.3,
+      "bytes": 101420
+    },
+    "1f71addfca08742d272bc47bf539fc984a5b5c6f73f4e2c397b3fe524789f6b8": {
+      "file": "/tts/pregen/1f71addfca08.wav",
+      "mimeType": "audio/wav",
+      "text": "Trạm giám sát chất lượng không khí công nghiệp tám trong một, pi em hai phẩy năm, xê ô hai, ti vi ô xi, Nhiệt độ, Độ ẩm, Áp suất.",
+      "durationSec": 6.84,
+      "bytes": 301612
+    },
+    "e03dfec9a568cf9ad7a00eb072fae2df4f77d1ab67477e4024a984e701965695": {
+      "file": "/tts/pregen/e03dfec9a568.wav",
+      "mimeType": "audio/wav",
+      "text": "kết nối oai phai sáu / mốt bớt ti xi pi và màn hình i inh siêu nét.",
+      "durationSec": 3.34,
+      "bytes": 147500
+    },
+    "42fff0608557e7bd7be3387500c45b5ba2e12b9921761bbceead36cddc0fa17b": {
+      "file": "/tts/pregen/42fff0608557.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm Kính Hỗ Trợ Kỹ Thuật Từ Xa Ê thơ Gờ lát Lai.",
+      "durationSec": 3.18,
+      "bytes": 140332
+    },
+    "2c977809aa04e62415ad61d005b35cbb213948b854bcf239f07ec6d08437751d": {
+      "file": "/tts/pregen/2c977809aa04.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết mười tám triệu chín trăm nghìn ₫.",
+      "durationSec": 2.01,
+      "bytes": 88620
+    },
+    "0d76796cc9d4f83e65b68e6d8267c3f0de0a5ec50b7e0284811448883f2818fa": {
+      "file": "/tts/pregen/0d76796cc9d4.wav",
+      "mimeType": "audio/wav",
+      "text": "Kính thông minh ây a hỗ trợ bảo trì nhà máy từ xa, camera bốn ca chống rung quang học.",
+      "durationSec": 4.4,
+      "bytes": 194092
+    },
+    "ff831f0de5adcf805f97ba1f21594433aaedf09883f3309007a90b497e3e2435": {
+      "file": "/tts/pregen/ff831f0de5ad.wav",
+      "mimeType": "audio/wav",
+      "text": "Mai crô khử ồn công nghiệp chín mươi lăm đê xi ben và thời lượng pin tám giờ liên tục.",
+      "durationSec": 4.71,
+      "bytes": 207916
+    },
+    "7d68204ebeafe1287f300caff6fd6914a82851759615459ff8bbd82527772aef": {
+      "file": "/tts/pregen/7d68204ebeaf.wav",
+      "mimeType": "audio/wav",
+      "text": "Cảm ơn quý khách đã tham quan gian hàng Ê thơ Tếch Láp của Ê thơ Tếch nô lô di Corp..",
+      "durationSec": 4.32,
+      "bytes": 190508
+    },
+    "9a9bfc9c2abba2420d1c3dedd54bb8f32f98f26e2c87e727187272b243aa586b": {
+      "file": "/tts/pregen/9a9bfc9c2abb.wav",
+      "mimeType": "audio/wav",
+      "text": "Nếu quý khách cần tư vấn thêm, vui lòng chuyển sang tab Chat để trò chuyện trực tiếp với tôi.",
+      "durationSec": 4.81,
+      "bytes": 212012
+    },
+    "9a4b66ceb01138063db8fb019b664c736cd89955db701ce46a3258bf78cf2c96": {
+      "file": "/tts/pregen/9a4b66ceb011.wav",
+      "mimeType": "audio/wav",
+      "text": "với gian hàng Ê cô Vi ta Rô xơ ri và Cờ ráp của Ê cô Vi ta Hai lân Rô xơ ri giây ét xi tại Khu Công nghệ và Điện tử.",
+      "durationSec": 6.83,
+      "bytes": 301100
+    },
+    "c1e6aa5d559c75f001828dc22cd23d903065e1e43f89a772a282655265a07e12": {
+      "file": "/tts/pregen/c1e6aa5d559c.wav",
+      "mimeType": "audio/wav",
+      "text": "Tôi là Thảo Vy, rất hân hạnh được giới thiệu các sản phẩm trưng bày tới quý khách.",
+      "durationSec": 3.59,
+      "bytes": 158252
+    },
+    "23e5424abfb292b9951ee245771906010f7abb7efd885944b7692956d703a2e8": {
+      "file": "/tts/pregen/23e5424abfb2.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm Cà Phê Đặc Sản Cầu Đất A ra bi ca Hăn ni Pờ rô xét, một ki lô gam.",
+      "durationSec": 4.39,
+      "bytes": 193580
+    },
+    "d7fadfdfa32754b84bbcab795036ebc61212fe249f99a3935d88f21069406712": {
+      "file": "/tts/pregen/d7fadfdfa327.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết năm trăm chín mươi nghìn ₫.",
+      "durationSec": 1.78,
+      "bytes": 78380
+    },
+    "a6e0dca322a966ea420b4183afec95a79acc88894e18349732d1ab1bd367ee50": {
+      "file": "/tts/pregen/a6e0dca322a9.wav",
+      "mimeType": "audio/wav",
+      "text": "Hạt A ra bi ca Cầu Đất thu hoạch chín một trăm phần trăm ở độ cao một nghìn năm trăm năm mươi mét, sơ chế Hăn ni lên men tự nhiên.",
+      "durationSec": 6.84,
+      "bytes": 301612
+    },
+    "5ffe35d781ba8ace02e3e32521319f27785e6f6db358238dabd0be202372d462": {
+      "file": "/tts/pregen/5ffe35d781ba.wav",
+      "mimeType": "audio/wav",
+      "text": "hương hoa trắng, cam vàng và hậu vị ca ra men ngọt dịu.",
+      "durationSec": 2.91,
+      "bytes": 128556
+    },
+    "2a9e057d98fe23617bd4f3eb8de24b107d76ef20591bb4a2d22794f3ca92775c": {
+      "file": "/tts/pregen/2a9e057d98fe.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm Bộ Quà Tặng Doanh Nghiệp Ê cô Vi ta Xờ pe sô ti Đờ ríp Bóc.",
+      "durationSec": 3.78,
+      "bytes": 166956
+    },
+    "4248f29080b637bb2af7c6ed7627abd9b060999befada133775150b81f2df577": {
+      "file": "/tts/pregen/4248f29080b6.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết chín trăm năm mươi nghìn ₫.",
+      "durationSec": 1.74,
+      "bytes": 76844
+    },
+    "e719e554fb0322574614b9067ba5f1b9253ac0edaa07d9ea10de7cd0ef4ea81a": {
+      "file": "/tts/pregen/e719e554fb03.wav",
+      "mimeType": "audio/wav",
+      "text": "Hộp quà tặng gồm hai mươi túi cà phê phin giấy từ bốn vùng trồng đặc sản Việt Nam kèm bình giữ nhiệt tre tự nhiên khắc tên theo yêu cầu.",
+      "durationSec": 6.99,
+      "bytes": 308268
+    },
+    "275d8d38c42d25d2119c4ad844c066c8e02020c926bfd60bbb420a69253bb3b5": {
+      "file": "/tts/pregen/275d8d38c42d.wav",
+      "mimeType": "audio/wav",
+      "text": "Cảm ơn quý khách đã tham quan gian hàng Ê cô Vi ta Rô xơ ri và Cờ ráp của Ê cô Vi ta Hai lân Rô xơ ri giây ét xi.",
+      "durationSec": 6.84,
+      "bytes": 301612
+    }
+  }
+}

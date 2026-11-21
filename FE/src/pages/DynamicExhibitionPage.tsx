@@ -35,6 +35,9 @@ import {
 import { ParametricExpoRoof } from '../scene/v28/ParametricExpoRoof';
 import { useV28SpatialRealtime } from '../hooks/useV28SpatialRealtime';
 import { piperBrowserTts, shouldAllowPiperBackgroundPrewarm } from '../services/hybridTtsAdapter';
+import { resolveNpcTtsMode } from '../services/npcTtsConfig';
+import { npcHybridTtsEngine, shouldAllowHybridPreload } from '../services/npcHybridTtsEngine';
+import { extractBoothConsultationChunks } from '../services/npcConsultationScript';
 import type { V28NpcAnimState } from '../scene/v28/DynamicBoothNpc3D';
 
 export interface DynamicExhibitionPageProps {
@@ -243,6 +246,38 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
       window.clearTimeout(timer);
     };
   }, [loading, world]);
+
+  // P1 Smart Preloading (ONLY active when NPC_TTS_MODE === 'hybrid'; 0 bytes in 'legacy' mode):
+  // 1) After World 3D finishes loading, warm ONLY the lightweight pregen manifest (~2 KB, 0 MB ONNX).
+  useEffect(() => {
+    if (loading || !world) return;
+    if (resolveNpcTtsMode() !== 'hybrid') return;
+    if (!shouldAllowHybridPreload().allowed) return;
+    const timer = window.setTimeout(() => {
+      void npcHybridTtsEngine.warmManifest();
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [loading, world]);
+
+  // 2) When visitor focuses a booth, selectively preload that booth's pre-generated chunks (max concurrency 2,
+  //    cancellable on booth switch, 0 MB ONNX, 0 auto-play) so clicking "Nghe tư vấn" is instant!
+  useEffect(() => {
+    if (!focusedBooth || cameraMode !== 'focus') return;
+    if (resolveNpcTtsMode() !== 'hybrid') return;
+    if (!shouldAllowHybridPreload().allowed) return;
+
+    const controller = new AbortController();
+    const chunks = extractBoothConsultationChunks(focusedBooth);
+    void npcHybridTtsEngine.preloadChunks(chunks, {
+      signal: controller.signal,
+      maxConcurrency: 2,
+      maxChunks: 16,
+    });
+
+    return () => {
+      controller.abort();
+    };
+  }, [focusedBooth, cameraMode]);
 
   // Phase 4: Hydrate server-verified visitor journey on world load & sync across browser tabs
   useEffect(() => {
