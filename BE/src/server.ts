@@ -7,6 +7,7 @@ import cors from 'cors';
 import type { Server } from 'socket.io';
 import { ExpoDatabase } from './database/db.js';
 import { V28CatalogDatabase } from './database/v28Database.js';
+import { CloudDbSyncManager } from './database/cloudDbSync.js';
 import { ExpoService } from './services/expoService.js';
 import { ExpoController, type DataMutationCallback } from './controllers/expoController.js';
 import { createApiRoutes } from './routes/apiRoutes.js';
@@ -72,7 +73,8 @@ export function createApp(
   db: ExpoDatabase,
   corsOrigin: CorsOriginConfig = '*',
   onMutation?: DataMutationCallback,
-  v28Db?: V28CatalogDatabase
+  v28Db?: V28CatalogDatabase,
+  cloudSync?: CloudDbSyncManager | null
 ): Express {
   const app = express();
   // Phase 3 Hardening: Explicit env-validated trust proxy (defaults safely to false; never hardcoded true)
@@ -101,6 +103,32 @@ export function createApp(
     globalJsonParser(req, res, next);
   });
 
+  if (cloudSync) {
+    // Auto-sync SQLite snapshots to Cloud PostgreSQL after any successful mutating API request
+    app.use((req, res, next) => {
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+        res.on('finish', () => {
+          if (res.statusCode < 200 || res.statusCode >= 300) return;
+          if (req.path.startsWith('/api/v28/')) {
+            if (
+              req.path.includes('/auth/') ||
+              req.path.includes('/ai/chat') ||
+              req.path.includes('/ai/voice')
+            ) {
+              return;
+            }
+            const isPublish = req.path.endsWith('/publish');
+            cloudSync.scheduleSync('v28', isPublish);
+          } else if (req.path.startsWith('/api/')) {
+            if (req.path.includes('/auth/') || req.path.includes('/tts')) return;
+            cloudSync.scheduleSync('v27', false);
+          }
+        });
+      }
+      next();
+    });
+  }
+
   const service = new ExpoService(db);
   app.locals.expoService = service;
   const controller = new ExpoController(service, (payload) => {
@@ -124,6 +152,7 @@ export function createApp(
       createV28ApiRoutes(v28Db, undefined, v28ExhibitionService, (publishedVersion) => {
         const aoi = app.locals.v28SpatialAoi as V28SpatialAoiEngine | undefined;
         aoi?.onLayoutPublished(publishedVersion);
+        cloudSync?.scheduleSync('v28', true);
       })
     );
   }
@@ -136,76 +165,109 @@ const isMain =
   path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
-  const PORT = Number(process.env.PORT || 4000);
-  const CORS_ORIGIN = buildCorsOriginChecker(process.env.CORS_ORIGIN || '*');
-  const rawDbPath = process.env.SQLITE_DB_PATH || './data/expo.db';
-  const dbPath =
-    rawDbPath === ':memory:' || path.isAbsolute(rawDbPath)
-      ? rawDbPath
-      : path.resolve(BE_ROOT_DIR, rawDbPath);
+  void (async () => {
+    const PORT = Number(process.env.PORT || 4000);
+    const CORS_ORIGIN = buildCorsOriginChecker(process.env.CORS_ORIGIN || '*');
+    const rawDbPath = process.env.SQLITE_DB_PATH || './data/expo.db';
+    const dbPath =
+      rawDbPath === ':memory:' || path.isAbsolute(rawDbPath)
+        ? rawDbPath
+        : path.resolve(BE_ROOT_DIR, rawDbPath);
 
-  const rawV28DbPath = process.env.V28_SQLITE_DB_PATH || './data/expo_v28_dev.db';
-  const v28DbPath =
-    rawV28DbPath === ':memory:' || path.isAbsolute(rawV28DbPath)
-      ? rawV28DbPath
-      : path.resolve(BE_ROOT_DIR, rawV28DbPath);
+    const rawV28DbPath = process.env.V28_SQLITE_DB_PATH || './data/expo_v28_dev.db';
+    const v28DbPath =
+      rawV28DbPath === ':memory:' || path.isAbsolute(rawV28DbPath)
+        ? rawV28DbPath
+        : path.resolve(BE_ROOT_DIR, rawV28DbPath);
 
-  const db = new ExpoDatabase(dbPath);
-  const v28Db = new V28CatalogDatabase(v28DbPath);
-  const app = createApp(db, CORS_ORIGIN, undefined, v28Db);
-  const httpServer = http.createServer(app);
-  // Phase 4.2 Hardening: Configurable HTTP timeouts compatible with Nginx/Plesk reverse proxy & long imports
-  httpServer.keepAliveTimeout = Math.max(5000, Number(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 65000));
-  httpServer.headersTimeout = Math.max(
-    httpServer.keepAliveTimeout + 1000,
-    Number(process.env.HTTP_HEADERS_TIMEOUT_MS || 66000)
-  );
-  httpServer.requestTimeout = Math.max(10000, Number(process.env.HTTP_REQUEST_TIMEOUT_MS || 60000));
-
-  const io = attachSocketServer(httpServer, db, CORS_ORIGIN);
-  app.set('io', io);
-
-  const v28ExhService = app.locals.v28ExhibitionService as V28ExhibitionService | undefined;
-  const v28SpatialAoi = v28ExhService
-    ? new V28SpatialAoiEngine(io, v28ExhService.getActiveExhibitionWorld())
-    : undefined;
-  if (v28SpatialAoi) {
-    app.locals.v28SpatialAoi = v28SpatialAoi;
-  }
-
-  httpServer.listen(PORT, () => {
-    console.log(`[Virtual Expo BE] Running on http://localhost:${PORT}`);
-    console.log(`[Virtual Expo BE] Legacy V27.5 DB: ${dbPath}`);
-    console.log(`[Virtual Expo BE] Isolated V28 DB: ${v28DbPath}`);
-    const svc = app.locals.expoService as ExpoService | undefined;
-    svc?.prewarmTtsWorker();
-  });
-
-  const gracefulShutdown = () => {
-    const svc = app.locals.expoService as ExpoService | undefined;
-    // V28-AUDIT-033B: Close Socket.IO & force-exit fallback so active WebSockets never hang shutdown
-    const forceTimer = setTimeout(() => process.exit(0), 3000);
-    forceTimer.unref?.();
-    void (svc ? svc.shutdown() : Promise.resolve()).finally(() => {
+    // Optional Cloud DB Persistence (Neon / Supabase / Render PostgreSQL via DATABASE_URL)
+    const cloudSync = CloudDbSyncManager.fromEnv();
+    if (cloudSync) {
       try {
-        v28SpatialAoi?.dispose();
-        io.close();
-      } catch {
-        // ignore
+        await cloudSync.init();
+        await cloudSync.restoreDatabase('v27', dbPath);
+        await cloudSync.restoreDatabase('v28', v28DbPath);
+        console.log('[Virtual Expo BE] Cloud DB Persistence: ENABLED (PostgreSQL Snapshot Sync)');
+      } catch (err) {
+        console.error('[Virtual Expo BE] Cloud DB restore failed — falling back to local SQLite:', err);
       }
-      httpServer.close(() => {
+    }
+
+    const db = new ExpoDatabase(dbPath);
+    const v28Db = new V28CatalogDatabase(v28DbPath);
+
+    if (cloudSync) {
+      cloudSync.registerDatabase({
+        dbKey: 'v27',
+        filePath: dbPath,
+      });
+      cloudSync.registerDatabase({
+        dbKey: 'v28',
+        filePath: v28DbPath,
+        checkpoint: () => v28Db.getConnection().exec('PRAGMA wal_checkpoint(TRUNCATE);'),
+      });
+      // Seed initial snapshot to cloud if remote DB was empty on first boot
+      void cloudSync.flushAll();
+    }
+
+    const app = createApp(db, CORS_ORIGIN, undefined, v28Db, cloudSync);
+    const httpServer = http.createServer(app);
+    // Phase 4.2 Hardening: Configurable HTTP timeouts compatible with Nginx/Plesk reverse proxy & long imports
+    httpServer.keepAliveTimeout = Math.max(5000, Number(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 65000));
+    httpServer.headersTimeout = Math.max(
+      httpServer.keepAliveTimeout + 1000,
+      Number(process.env.HTTP_HEADERS_TIMEOUT_MS || 66000)
+    );
+    httpServer.requestTimeout = Math.max(10000, Number(process.env.HTTP_REQUEST_TIMEOUT_MS || 60000));
+
+    const io = attachSocketServer(httpServer, db, CORS_ORIGIN);
+    app.set('io', io);
+
+    const v28ExhService = app.locals.v28ExhibitionService as V28ExhibitionService | undefined;
+    const v28SpatialAoi = v28ExhService
+      ? new V28SpatialAoiEngine(io, v28ExhService.getActiveExhibitionWorld())
+      : undefined;
+    if (v28SpatialAoi) {
+      app.locals.v28SpatialAoi = v28SpatialAoi;
+    }
+
+    httpServer.listen(PORT, () => {
+      console.log(`[Virtual Expo BE] Running on http://localhost:${PORT}`);
+      console.log(`[Virtual Expo BE] Legacy V27.5 DB: ${dbPath}`);
+      console.log(`[Virtual Expo BE] Isolated V28 DB: ${v28DbPath}`);
+      const svc = app.locals.expoService as ExpoService | undefined;
+      svc?.prewarmTtsWorker();
+    });
+
+    const gracefulShutdown = () => {
+      const svc = app.locals.expoService as ExpoService | undefined;
+      // V28-AUDIT-033B: Close Socket.IO & force-exit fallback so active WebSockets never hang shutdown
+      const forceTimer = setTimeout(() => process.exit(0), 5000);
+      forceTimer.unref?.();
+      void Promise.allSettled([
+        svc ? svc.shutdown() : Promise.resolve(),
+        cloudSync ? cloudSync.close() : Promise.resolve(),
+      ]).finally(() => {
         try {
-          db.close();
-          v28Db.close();
+          v28SpatialAoi?.dispose();
+          io.close();
         } catch {
           // ignore
         }
-        clearTimeout(forceTimer);
-        process.exit(0);
+        httpServer.close(() => {
+          try {
+            db.close();
+            v28Db.close();
+          } catch {
+            // ignore
+          }
+          clearTimeout(forceTimer);
+          process.exit(0);
+        });
       });
-    });
-  };
+    };
 
-  process.once('SIGINT', gracefulShutdown);
-  process.once('SIGTERM', gracefulShutdown);
+    process.once('SIGINT', gracefulShutdown);
+    process.once('SIGTERM', gracefulShutdown);
+  })();
 }
