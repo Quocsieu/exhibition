@@ -201,7 +201,6 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
   const [selectedBoothId, setSelectedBoothId] = useState<string | null>(focusedBooth?.boothId ?? null);
   const [hoveredBoothId, setHoveredBoothId] = useState<string | null>(null);
   const [navFeedback, setNavFeedback] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'map' | 'list'>('map');
 
   // Zoom & Pan state for reading all 1..100 booth numbers clearly on any screen size
   const [mapZoom, setMapZoom] = useState<number>(1);
@@ -446,7 +445,11 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
     }
   };
 
-  const mapSvgHeight = isMobileLandscape ? 140 : isMobileUi ? 260 : 320;
+  const mapSvgHeight = isMobileLandscape
+    ? 'min(190px, 44dvh)'
+    : isMobileUi
+      ? 'min(430px, 52dvh)'
+      : 'min(420px, 54vh)';
   const visitedCount = Math.min(world.booths.length, visitedSet.size);
 
   return (
@@ -459,7 +462,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
         pointerEvents: 'auto',
         alignSelf: isMobileUi && !isMobileLandscape ? 'stretch' : 'flex-end',
         width: isMobileUi && !isMobileLandscape ? '100%' : isMobileLandscape ? 'min(480px, 84vw)' : 'min(460px, 46vw)',
-        maxHeight: isMobileLandscape ? '84dvh' : isMobileUi ? '78dvh' : '82vh',
+        maxHeight: isMobileLandscape ? '86dvh' : isMobileUi ? '82dvh' : '84vh',
         background: 'rgba(255, 255, 255, 0.97)',
         backdropFilter: 'blur(14px)',
         WebkitBackdropFilter: 'blur(14px)',
@@ -506,7 +509,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
         </button>
       </div>
 
-      {/* Search + Mobile Map/List Tab Switcher */}
+      {/* Search */}
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
         <input
           type="search"
@@ -524,236 +527,195 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
             boxSizing: 'border-box',
           }}
         />
-        {isMobileUi && (
-          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-            <button
-              type="button"
-              onClick={() => setActiveTab('map')}
-              aria-pressed={activeTab === 'map'}
-              style={{
-                minHeight: 36,
-                padding: '0 9px',
-                borderRadius: 8,
-                border: activeTab === 'map' ? '1px solid #0284c7' : '1px solid #cbd5e1',
-                background: activeTab === 'map' ? '#0284c7' : '#f8fafc',
-                color: activeTab === 'map' ? '#fff' : '#334155',
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              Bản đồ
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('list')}
-              aria-pressed={activeTab === 'list'}
-              style={{
-                minHeight: 36,
-                padding: '0 9px',
-                borderRadius: 8,
-                border: activeTab === 'list' ? '1px solid #0284c7' : '1px solid #cbd5e1',
-                background: activeTab === 'list' ? '#0284c7' : '#f8fafc',
-                color: activeTab === 'list' ? '#fff' : '#334155',
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              Danh sách
-            </button>
-          </div>
-        )}
       </div>
 
       {/* MAP VIEW */}
-      {(!isMobileUi || activeTab === 'map') && (
-        <div style={{ position: 'relative', flexShrink: 0 }}>
-          {/* Zoom Controls */}
-          <div
+      <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        {/* Zoom Controls */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            zIndex: 3,
+            display: 'flex',
+            gap: 4,
+            background: 'rgba(15, 23, 42, 0.78)',
+            padding: 3,
+            borderRadius: 9,
+          }}
+        >
+          <button
+            type="button"
+            aria-label="Phóng to bản đồ 2D"
+            onClick={() => handleZoomStep(0.5)}
             style={{
-              position: 'absolute',
-              top: 8,
-              right: 8,
-              zIndex: 3,
-              display: 'flex',
-              gap: 4,
-              background: 'rgba(15, 23, 42, 0.78)',
-              padding: 3,
-              borderRadius: 9,
+              minWidth: 32,
+              minHeight: 32,
+              borderRadius: 6,
+              border: 'none',
+              background: 'rgba(255,255,255,0.14)',
+              color: '#fff',
+              fontWeight: 800,
+              cursor: 'pointer',
             }}
           >
+            +
+          </button>
+          <button
+            type="button"
+            aria-label="Thu nhỏ bản đồ 2D"
+            onClick={() => handleZoomStep(-0.5)}
+            style={{
+              minWidth: 32,
+              minHeight: 32,
+              borderRadius: 6,
+              border: 'none',
+              background: 'rgba(255,255,255,0.14)',
+              color: '#fff',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            −
+          </button>
+          {(mapZoom > 1.01 || selectedZoneCode !== 'ALL') && (
             <button
               type="button"
-              aria-label="Phóng to bản đồ 2D"
-              onClick={() => handleZoomStep(0.5)}
+              aria-label="Đặt lại góc nhìn bản đồ 2D"
+              onClick={handleResetView}
               style={{
-                minWidth: 32,
                 minHeight: 32,
+                padding: '0 7px',
                 borderRadius: 6,
                 border: 'none',
-                background: 'rgba(255,255,255,0.14)',
+                background: '#0284c7',
                 color: '#fff',
-                fontWeight: 800,
+                fontSize: 11,
+                fontWeight: 700,
                 cursor: 'pointer',
               }}
             >
-              +
+              1×
             </button>
-            <button
-              type="button"
-              aria-label="Thu nhỏ bản đồ 2D"
-              onClick={() => handleZoomStep(-0.5)}
-              style={{
-                minWidth: 32,
-                minHeight: 32,
-                borderRadius: 6,
-                border: 'none',
-                background: 'rgba(255,255,255,0.14)',
-                color: '#fff',
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
-            >
-              −
-            </button>
-            {(mapZoom > 1.01 || selectedZoneCode !== 'ALL') && (
-              <button
-                type="button"
-                aria-label="Đặt lại góc nhìn bản đồ 2D"
-                onClick={handleResetView}
-                style={{
-                  minHeight: 32,
-                  padding: '0 7px',
-                  borderRadius: 6,
-                  border: 'none',
-                  background: '#0284c7',
-                  color: '#fff',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  cursor: 'pointer',
+          )}
+        </div>
+
+        <svg
+          data-testid="v28-interactive-map-svg"
+          viewBox={`${vbX.toFixed(2)} ${vbY.toFixed(2)} ${viewW.toFixed(2)} ${viewH.toFixed(2)}`}
+          onWheel={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            handleZoomStep(e.deltaY < 0 ? 0.35 : -0.35);
+          }}
+          onPointerDown={handleSvgPointerDown}
+          onPointerMove={handleSvgPointerMove}
+          onPointerUp={handleSvgPointerEnd}
+          onPointerCancel={handleSvgPointerEnd}
+          style={{
+            width: '100%',
+            height: mapSvgHeight,
+            background: '#0b1220',
+            borderRadius: 10,
+            border: '1px solid #334155',
+            display: 'block',
+            touchAction: 'none',
+            cursor: mapZoom > 1.01 ? 'grab' : 'default',
+            userSelect: 'none',
+          }}
+        >
+          {/* Hall Outer Floor (Dark Navy Map Canvas) */}
+          <rect
+            x={world.hallBounds.minX}
+            y={world.hallBounds.minZ}
+            width={world.hallWidth}
+            height={world.hallDepth}
+            fill="#0f172a"
+            stroke="#334155"
+            strokeWidth={1.2}
+            rx={3}
+          />
+
+          {/* Central Grand Boulevard (preserves exact empty central corridor) */}
+          <rect
+            x={world.centralAvenueBounds.minX}
+            y={world.centralAvenueBounds.minZ}
+            width={world.centralAvenueBounds.maxX - world.centralAvenueBounds.minX}
+            height={world.centralAvenueBounds.maxZ - world.centralAvenueBounds.minZ}
+            fill="#13233f"
+          />
+
+          {/* Welcome / Entrance Area */}
+          {world.welcomeAreaBounds && (
+            <rect
+              x={world.welcomeAreaBounds.minX}
+              y={world.welcomeAreaBounds.minZ}
+              width={world.welcomeAreaBounds.maxX - world.welcomeAreaBounds.minX}
+              height={world.welcomeAreaBounds.maxZ - world.welcomeAreaBounds.minZ}
+              fill="#1e293b"
+              fillOpacity={0.85}
+              stroke="#f59e0b"
+              strokeWidth={0.7}
+              strokeDasharray="2 2"
+              rx={1.5}
+            />
+          )}
+
+          {/* Active U-Shaped Zones (exact World coordinates, auto-synced with Phase 8 compaction) */}
+          {world.zones.map((z) => {
+            const activeZone = selectedZoneCode === z.code;
+            const cx = (z.bounds.minX + z.bounds.maxX) / 2;
+            const cz = (z.bounds.minZ + z.bounds.maxZ) / 2;
+            return (
+              <g
+                key={z.id}
+                data-zone-code={z.code}
+                onClick={() => {
+                  if (panDragRef.current.dragged) return;
+                  setSelectedZoneCode(activeZone ? 'ALL' : z.code);
                 }}
+                style={{ cursor: 'pointer' }}
               >
-                1×
-              </button>
-            )}
-          </div>
-
-          <svg
-            data-testid="v28-interactive-map-svg"
-            viewBox={`${vbX.toFixed(2)} ${vbY.toFixed(2)} ${viewW.toFixed(2)} ${viewH.toFixed(2)}`}
-            onWheel={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              handleZoomStep(e.deltaY < 0 ? 0.35 : -0.35);
-            }}
-            onPointerDown={handleSvgPointerDown}
-            onPointerMove={handleSvgPointerMove}
-            onPointerUp={handleSvgPointerEnd}
-            onPointerCancel={handleSvgPointerEnd}
-            style={{
-              width: '100%',
-              height: mapSvgHeight,
-              background: '#0b1220',
-              borderRadius: 10,
-              border: '1px solid #334155',
-              display: 'block',
-              touchAction: 'none',
-              cursor: mapZoom > 1.01 ? 'grab' : 'default',
-              userSelect: 'none',
-            }}
-          >
-            {/* Hall Outer Floor (Dark Navy Map Canvas) */}
-            <rect
-              x={world.hallBounds.minX}
-              y={world.hallBounds.minZ}
-              width={world.hallWidth}
-              height={world.hallDepth}
-              fill="#0f172a"
-              stroke="#334155"
-              strokeWidth={1.2}
-              rx={3}
-            />
-
-            {/* Central Grand Boulevard (preserves exact empty central corridor) */}
-            <rect
-              x={world.centralAvenueBounds.minX}
-              y={world.centralAvenueBounds.minZ}
-              width={world.centralAvenueBounds.maxX - world.centralAvenueBounds.minX}
-              height={world.centralAvenueBounds.maxZ - world.centralAvenueBounds.minZ}
-              fill="#13233f"
-            />
-
-            {/* Welcome / Entrance Area */}
-            {world.welcomeAreaBounds && (
-              <rect
-                x={world.welcomeAreaBounds.minX}
-                y={world.welcomeAreaBounds.minZ}
-                width={world.welcomeAreaBounds.maxX - world.welcomeAreaBounds.minX}
-                height={world.welcomeAreaBounds.maxZ - world.welcomeAreaBounds.minZ}
-                fill="#1e293b"
-                fillOpacity={0.85}
-                stroke="#f59e0b"
-                strokeWidth={0.7}
-                strokeDasharray="2 2"
-                rx={1.5}
-              />
-            )}
-
-            {/* Active U-Shaped Zones (exact World coordinates, auto-synced with Phase 8 compaction) */}
-            {world.zones.map((z) => {
-              const activeZone = selectedZoneCode === z.code;
-              const cx = (z.bounds.minX + z.bounds.maxX) / 2;
-              const cz = (z.bounds.minZ + z.bounds.maxZ) / 2;
-              return (
-                <g
-                  key={z.id}
-                  data-zone-code={z.code}
-                  onClick={() => {
-                    if (panDragRef.current.dragged) return;
-                    setSelectedZoneCode(activeZone ? 'ALL' : z.code);
-                  }}
-                  style={{ cursor: 'pointer' }}
+                <rect
+                  x={z.bounds.minX}
+                  y={z.bounds.minZ}
+                  width={z.bounds.maxX - z.bounds.minX}
+                  height={z.bounds.maxZ - z.bounds.minZ}
+                  fill={activeZone ? 'rgba(56, 189, 248, 0.14)' : 'rgba(15, 23, 42, 0.65)'}
+                  stroke={activeZone ? '#38bdf8' : '#334155'}
+                  strokeWidth={activeZone ? 1.5 : 0.8}
+                  rx={2}
+                />
+                <text
+                  x={cx}
+                  y={cz}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={Math.max(4.5, Math.min(7.5, world.hallWidth * 0.055))}
+                  fontWeight="800"
+                  fill={activeZone ? '#7dd3fc' : '#64748b'}
+                  pointerEvents="none"
                 >
-                  <rect
-                    x={z.bounds.minX}
-                    y={z.bounds.minZ}
-                    width={z.bounds.maxX - z.bounds.minX}
-                    height={z.bounds.maxZ - z.bounds.minZ}
-                    fill={activeZone ? 'rgba(56, 189, 248, 0.14)' : 'rgba(15, 23, 42, 0.65)'}
-                    stroke={activeZone ? '#38bdf8' : '#334155'}
-                    strokeWidth={activeZone ? 1.5 : 0.8}
-                    rx={2}
-                  />
-                  <text
-                    x={cx}
-                    y={cz}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fontSize={Math.max(4.5, Math.min(7.5, world.hallWidth * 0.055))}
-                    fontWeight="800"
-                    fill={activeZone ? '#7dd3fc' : '#64748b'}
-                    pointerEvents="none"
-                  >
-                    KHU {z.code}
-                  </text>
-                </g>
-              );
-            })}
+                  KHU {z.code}
+                </text>
+              </g>
+            );
+          })}
 
-            {/* Active Booths: Dark unvisited, Bright visited (+ ✓), Direct Click/Enter Navigation */}
-            {orderedBooths.map(({ booth, boothNumber, footprint }) => {
-              const isVisited = visitedSet.has(booth.boothId);
-              const isSelected = selectedBoothId === booth.boothId;
-              const isHovered = hoveredBoothId === booth.boothId;
-              const isFilteredIn = filteredBoothIdSet.has(booth.boothId);
-              const styleSpec = resolveMapBoothVisualStyle({
-                isVisited,
-                isSelected,
-                isHovered,
-                isFilteredIn,
-              });
-              const labelFontSize = Math.max(2.6, Math.min(footprint.width, footprint.height) * 0.46);
+          {/* Active Booths: Dark unvisited, Bright visited (+ ✓), Direct Click/Enter Navigation */}
+          {orderedBooths.map(({ booth, boothNumber, footprint }) => {
+            const isVisited = visitedSet.has(booth.boothId);
+            const isSelected = selectedBoothId === booth.boothId;
+            const isHovered = hoveredBoothId === booth.boothId;
+            const isFilteredIn = filteredBoothIdSet.has(booth.boothId);
+            const styleSpec = resolveMapBoothVisualStyle({
+              isVisited,
+              isSelected,
+              isHovered,
+              isFilteredIn,
+            });
+            const labelFontSize = Math.max(2.6, Math.min(footprint.width, footprint.height) * 0.46);
 
               return (
                 <g
@@ -768,7 +730,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
                   data-selected={isSelected ? 'true' : 'false'}
                   data-map-tone={styleSpec.tone}
                   onMouseEnter={() => {
-                    if (!isMobileUi) setHoveredBoothId(booth.boothId);
+                    if (!isMobileUi && !panDragRef.current.active) setHoveredBoothId(booth.boothId);
                   }}
                   onMouseLeave={() => {
                     if (!isMobileUi) {
@@ -781,68 +743,155 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
                   onBlur={() => {
                     setHoveredBoothId((prev) => (prev === booth.boothId ? null : prev));
                   }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleNavigate(booth, boothNumber);
-                    }
-                  }}
-                  onClick={(e) => {
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
                     e.stopPropagation();
-                    if (panDragRef.current.dragged || pinchStateRef.current.active) return;
                     handleNavigate(booth, boothNumber);
-                  }}
-                  style={{ cursor: 'pointer', outline: 'none' }}
+                  }
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (panDragRef.current.dragged || pinchStateRef.current.active) return;
+                  handleNavigate(booth, boothNumber);
+                }}
+                style={{ cursor: 'pointer', outline: 'none' }}
+              >
+                <rect
+                  x={footprint.x}
+                  y={footprint.y}
+                  width={footprint.width}
+                  height={footprint.height}
+                  rx={0.7}
+                  fill={styleSpec.fill}
+                  fillOpacity={styleSpec.fillOpacity}
+                  stroke={styleSpec.stroke}
+                  strokeWidth={styleSpec.strokeWidth}
+                />
+                <text
+                  x={footprint.cx}
+                  y={footprint.cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={labelFontSize}
+                  fontWeight="800"
+                  fill={styleSpec.textFill}
+                  paintOrder={styleSpec.textStroke === 'none' ? undefined : 'stroke'}
+                  stroke={styleSpec.textStroke === 'none' ? undefined : styleSpec.textStroke}
+                  strokeWidth={styleSpec.textStroke === 'none' ? undefined : labelFontSize * 0.2}
+                  pointerEvents="none"
                 >
-                  <rect
-                    x={footprint.x}
-                    y={footprint.y}
-                    width={footprint.width}
-                    height={footprint.height}
-                    rx={0.7}
-                    fill={styleSpec.fill}
-                    fillOpacity={styleSpec.fillOpacity}
-                    stroke={styleSpec.stroke}
-                    strokeWidth={styleSpec.strokeWidth}
-                  />
-                  <text
-                    x={footprint.cx}
-                    y={footprint.cy}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={labelFontSize}
-                    fontWeight="800"
-                    fill={styleSpec.textFill}
-                    paintOrder={styleSpec.textStroke === 'none' ? undefined : 'stroke'}
-                    stroke={styleSpec.textStroke === 'none' ? undefined : styleSpec.textStroke}
-                    strokeWidth={styleSpec.textStroke === 'none' ? undefined : labelFontSize * 0.2}
-                    pointerEvents="none"
-                  >
-                    {styleSpec.showVisitedCheck ? `✓${boothNumber}` : boothNumber}
-                  </text>
-                </g>
-              );
-            })}
+                  {styleSpec.showVisitedCheck ? `✓${boothNumber}` : boothNumber}
+                </text>
+              </g>
+            );
+          })}
 
-            {/* Live Avatar Position Marker */}
-            <g pointerEvents="none" data-testid="v28-map-player-marker">
-              <circle
-                cx={playerPos.x}
-                cy={playerPos.z}
-                r={Math.max(2.5, world.hallWidth * 0.022)}
-                fill="rgba(239, 68, 68, 0.25)"
-              />
-              <circle
-                cx={playerPos.x}
-                cy={playerPos.z}
-                r={Math.max(1.5, world.hallWidth * 0.013)}
-                fill="#ef4444"
-                stroke="#ffffff"
-                strokeWidth={0.8}
-              />
-            </g>
-          </svg>
+          {/* Live Avatar Position Marker */}
+          <g pointerEvents="none" data-testid="v28-map-player-marker">
+            <circle
+              cx={playerPos.x}
+              cy={playerPos.z}
+              r={Math.max(2.5, world.hallWidth * 0.022)}
+              fill="rgba(239, 68, 68, 0.25)"
+            />
+            <circle
+              cx={playerPos.x}
+              cy={playerPos.z}
+              r={Math.max(1.5, world.hallWidth * 0.013)}
+              fill="#ef4444"
+              stroke="#ffffff"
+              strokeWidth={0.8}
+            />
+          </g>
+        </svg>
+
+          {/* Fixed-Height Dedicated Booth Preview Area (zero layout shift on hover) */}
+          <div
+            data-testid="v28-map-booth-preview"
+            aria-live="polite"
+            style={{
+              height: 48,
+              minHeight: 48,
+              maxHeight: 48,
+              marginTop: 6,
+              padding: '6px 10px',
+              borderRadius: 10,
+              border: activePreviewEntry ? '1px solid #0284c7' : '1px solid #e2e8f0',
+              background: activePreviewEntry ? '#f0f9ff' : '#f8fafc',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              gap: 1,
+              overflow: 'hidden',
+              boxSizing: 'border-box',
+              flexShrink: 0,
+            }}
+          >
+            {activePreviewEntry ? (
+              <>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    minWidth: 0,
+                  }}
+                >
+                  <strong
+                    style={{
+                      fontSize: 12.5,
+                      lineHeight: '16px',
+                      color: '#0f172a',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      minWidth: 0,
+                    }}
+                  >
+                    #{activePreviewEntry.boothNumber} · {activePreviewEntry.booth.companyName || activePreviewEntry.booth.boothName}
+                  </strong>
+                  <span
+                    style={{
+                      fontSize: 10.5,
+                      lineHeight: '14px',
+                      fontWeight: 700,
+                      flexShrink: 0,
+                      color: visitedSet.has(activePreviewEntry.booth.boothId) ? '#0369a1' : '#64748b',
+                    }}
+                  >
+                    {visitedSet.has(activePreviewEntry.booth.boothId) ? '✓ Đã tham quan' : 'Chưa tham quan'}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    lineHeight: '15px',
+                    color: '#475569',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  Khu {activePreviewEntry.booth.zoneCode} · Gian #{activePreviewEntry.boothNumber}
+                </div>
+              </>
+            ) : (
+              <div
+                style={{
+                  fontSize: 11.5,
+                  lineHeight: '16px',
+                  color: '#64748b',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {isMobileUi ? 'Chạm trực tiếp vào ô gian để đi tới ngay' : 'Rê chuột vào gian để xem thông tin'}
+              </div>
+            )}
+          </div>
 
           {/* Compact Legend */}
           <div
@@ -854,6 +903,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
               fontSize: 10.5,
               color: '#475569',
               alignItems: 'center',
+              flexShrink: 0,
             }}
           >
             <span>🔴 Bạn</span>
@@ -869,87 +919,8 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
               <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 2, background: '#1e293b', border: '1.5px solid #f59e0b', marginRight: 3 }} />
               Đang chọn
             </span>
-            <span style={{ color: '#0369a1', fontWeight: 600 }}>· Chạm ô gian để đi tới ngay</span>
           </div>
         </div>
-      )}
-
-      {/* Hover Tooltip (Desktop) / Selected Booth Action Card (Desktop & Mobile) */}
-      {activePreviewEntry && (
-        <div
-          data-testid="v28-map-booth-preview"
-          style={{
-            background: '#f8fafc',
-            border: '1.5px solid #0284c7',
-            borderRadius: 12,
-            padding: '8px 10px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 10,
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span
-                style={{
-                  background: '#0f172a',
-                  color: '#fff',
-                  fontSize: 11,
-                  fontWeight: 800,
-                  padding: '2px 7px',
-                  borderRadius: 6,
-                }}
-              >
-                Gian #{activePreviewEntry.boothNumber}
-              </span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#0369a1' }}>
-                Khu {activePreviewEntry.booth.zoneCode}
-              </span>
-              <span
-                style={{
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  color: visitedSet.has(activePreviewEntry.booth.boothId) ? '#047857' : '#64748b',
-                }}
-              >
-                {visitedSet.has(activePreviewEntry.booth.boothId) ? '✓ Đã tham quan' : 'Chưa tham quan'}
-              </span>
-            </div>
-            <div
-              style={{
-                fontWeight: 700,
-                fontSize: 13,
-                color: '#0f172a',
-                marginTop: 2,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {activePreviewEntry.booth.companyName || activePreviewEntry.booth.boothName}
-            </div>
-            <div
-              style={{
-                fontSize: 11,
-                color: '#475569',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {activePreviewEntry.booth.assignedSlotCount > 0
-                ? `${activePreviewEntry.booth.assignedSlotCount}/6 SP · ${activePreviewEntry.booth.slots
-                    .filter((s) => s.product)
-                    .slice(0, 2)
-                    .map((s) => s.product!.name)
-                    .join(', ')}`
-                : `${activePreviewEntry.booth.zoneName} · Chưa gắn sản phẩm`}
-            </div>
-          </div>
-        </div>
-      )}
 
       {navFeedback && (
         <div
@@ -965,65 +936,6 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
           }}
         >
           ⚠️ {navFeedback}
-        </div>
-      )}
-
-      {/* Scrollable Booth List (always visible on Desktop; tab-switched on Mobile for clean ergonomics) */}
-      {(!isMobileUi || activeTab === 'list') && (
-        <div
-          style={{
-            overflowY: 'auto',
-            WebkitOverflowScrolling: 'touch',
-            overscrollBehavior: 'contain',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 5,
-            flex: 1,
-            minHeight: 80,
-          }}
-        >
-          {filteredBooths.map(({ booth, boothNumber }) => {
-            const isSelected = selectedBoothId === booth.boothId;
-            const isVisited = visitedSet.has(booth.boothId);
-            return (
-              <button
-                key={booth.boothId}
-                type="button"
-                onClick={() => handleNavigate(booth, boothNumber)}
-                style={{
-                  minHeight: 44,
-                  padding: '7px 10px',
-                  borderRadius: 10,
-                  border: isSelected ? '1.5px solid #f59e0b' : '1px solid #e2e8f0',
-                  background: isSelected ? '#fffbeb' : isVisited ? '#ecfdf5' : '#fff',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 8,
-                }}
-              >
-                <div style={{ overflow: 'hidden' }}>
-                  <div
-                    style={{
-                      fontWeight: 700,
-                      fontSize: 12.5,
-                      color: '#0f172a',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    #{boothNumber} · {booth.boothName}
-                  </div>
-                  <div style={{ fontSize: 11, color: '#64748b' }}>
-                    {isVisited ? '✓ Đã tham quan · ' : ''}Khu {booth.zoneCode} · {booth.companyName} · {booth.assignedSlotCount}/6 SP
-                  </div>
-                </div>
-              </button>
-            );
-          })}
         </div>
       )}
     </section>
