@@ -303,20 +303,40 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
             }
           };
 
-          const playBlobWithGuards = (blob: Blob, onStartPlayback: () => void) =>
+          interface PreparedAudioHandle {
+            chunkIndex: number;
+            hash: string;
+            objUrl: string;
+            audio: HTMLAudioElement;
+          }
+          const preparedNextBox: { current: PreparedAudioHandle | null } = { current: null };
+          const disposePreparedNext = () => {
+            const current = preparedNextBox.current;
+            if (!current) return;
+            preparedNextBox.current = null;
+            try {
+              current.audio.pause();
+              URL.revokeObjectURL(current.objUrl);
+            } catch {
+              // ignore
+            }
+          };
+          controller.signal.addEventListener('abort', disposePreparedNext, { once: true });
+
+          const playAudioElementWithGuards = (
+            audio: HTMLAudioElement,
+            objUrl: string,
+            onStartPlayback: () => void
+          ) =>
             new Promise<void>((resolve, reject) => {
-              if (activeObjectUrlRef.current) {
+              if (activeObjectUrlRef.current && activeObjectUrlRef.current !== objUrl) {
                 try {
                   URL.revokeObjectURL(activeObjectUrlRef.current);
                 } catch {
                   // ignore
                 }
               }
-              const objUrl = URL.createObjectURL(blob);
               activeObjectUrlRef.current = objUrl;
-
-              const audio = new Audio(objUrl);
-              audio.preload = 'auto';
               audio.muted = isMutedRef.current;
               audioElRef.current = audio;
 
@@ -367,6 +387,13 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
               });
             });
 
+          const playBlobWithGuards = (blob: Blob, onStartPlayback: () => void) => {
+            const objUrl = URL.createObjectURL(blob);
+            const audio = new Audio(objUrl);
+            audio.preload = 'auto';
+            return playAudioElementWithGuards(audio, objUrl, onStartPlayback);
+          };
+
           void (async () => {
             try {
               for (let i = 0; i < chunks.length; i += 1) {
@@ -374,10 +401,34 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
 
                 const scheduleDeferredPrefetch = () => {
                   if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
-                  const prefetchNextChunk = async (nextText: string) => {
+                  const prefetchNextChunk = async (nextText: string, nextChunkIdx: number | null) => {
                     if (ttsMode === 'hybrid' && (await npcHybridTtsEngine.hasPregenEntry(nextText))) {
-                      // Pre-generated clip exists: avoid unnecessary 63 MB ONNX download!
-                      void npcHybridTtsEngine.tryFetchPregenAudio(nextText, controller.signal).catch(() => { });
+                      // Pre-fetch & pre-decode next HTMLAudioElement in RAM while current chunk plays!
+                      const nextPregen = await npcHybridTtsEngine
+                        .tryFetchPregenAudio(nextText, controller.signal)
+                        .catch(() => null);
+                      if (
+                        nextPregen &&
+                        nextChunkIdx !== null &&
+                        !controller.signal.aborted &&
+                        isMountedRef.current
+                      ) {
+                        disposePreparedNext();
+                        const nextUrl = URL.createObjectURL(nextPregen.blob);
+                        const nextAudio = new Audio(nextUrl);
+                        nextAudio.preload = 'auto';
+                        try {
+                          nextAudio.load();
+                        } catch {
+                          // ignore load hint errors
+                        }
+                        preparedNextBox.current = {
+                          chunkIndex: nextChunkIdx,
+                          hash: nextPregen.hash,
+                          objUrl: nextUrl,
+                          audio: nextAudio,
+                        };
+                      }
                       return;
                     }
                     void piperBrowserTts
@@ -390,20 +441,37 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
                   };
 
                   if (i + 1 < chunks.length) {
-                    void prefetchNextChunk(chunks[i + 1]);
+                    void prefetchNextChunk(chunks[i + 1], i + 1);
                   } else if (stepIdx + 1 < steps.length) {
                     const nextStep = steps[stepIdx + 1];
                     const nextClip = pack?.clips.find((c) => c.slotKey === nextStep.slotKey) || null;
                     const nextSpeechText = nextClip?.transcript || nextStep.fallbackText;
                     const nextFirstChunk = buildPiperStepPlanFromDisplayText(nextSpeechText).chunks[0];
                     if (nextFirstChunk) {
-                      void prefetchNextChunk(nextFirstChunk);
+                      void prefetchNextChunk(nextFirstChunk, null);
                     }
                   }
                 };
 
                 // Hybrid fast-path (ONLY active when NPC_TTS_MODE === 'hybrid')
                 if (ttsMode === 'hybrid') {
+                  // Zero-gap fast-path: play already pre-decoded HTMLAudioElement prepared during chunk i-1!
+                  const ready = preparedNextBox.current;
+                  if (ready && ready.chunkIndex === i) {
+                    preparedNextBox.current = null;
+                    setPiperLoadingText(null);
+                    try {
+                      await playAudioElementWithGuards(ready.audio, ready.objUrl, scheduleDeferredPrefetch);
+                      continue;
+                    } catch (pregenErr: unknown) {
+                      if (controller.signal.aborted || !isMountedRef.current) return;
+                      if ((pregenErr as { name?: string })?.name === 'NotAllowedError') {
+                        throw pregenErr;
+                      }
+                      npcHybridTtsEngine.markHashFailed(ready.hash);
+                    }
+                  }
+
                   if (i === 0) setPiperLoadingText('⏳ Đang chuẩn bị giọng đọc...');
                   const pregen = await npcHybridTtsEngine.tryFetchPregenAudio(chunks[i], controller.signal);
                   if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;

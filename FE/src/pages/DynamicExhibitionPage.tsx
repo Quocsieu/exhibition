@@ -248,19 +248,33 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   }, [loading, world]);
 
   // P1 Smart Preloading (ONLY active when NPC_TTS_MODE === 'hybrid'; 0 bytes in 'legacy' mode):
-  // 1) After World 3D finishes loading, warm ONLY the lightweight pregen manifest (~2 KB, 0 MB ONNX).
+  // 1) After World 3D finishes loading, warm manifest (~5 KB) + 2 tiny shared opening clips (~167 KB, 0 MB ONNX)
+  //    so even an immediate click without waiting for Focus preload starts speech right away.
   useEffect(() => {
     if (loading || !world) return;
     if (resolveNpcTtsMode() !== 'hybrid') return;
     if (!shouldAllowHybridPreload().allowed) return;
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void npcHybridTtsEngine.warmManifest();
-    }, 1500);
-    return () => window.clearTimeout(timer);
+      void npcHybridTtsEngine.warmManifest().then((ok) => {
+        if (!ok || controller.signal.aborted) return;
+        void npcHybridTtsEngine.preloadChunks(
+          [
+            'Xin chào quý khách đến.',
+            'Xin chào quý khách đến với gian hàng CELLPHONES.',
+          ],
+          { signal: controller.signal, maxConcurrency: 2, maxChunks: 2 }
+        );
+      });
+    }, 1200);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
   }, [loading, world]);
 
   // 2) When visitor focuses a booth, selectively preload that booth's pre-generated chunks (max concurrency 2,
-  //    cancellable on booth switch, 0 MB ONNX, 0 auto-play) so clicking "Nghe tư vấn" is instant!
+  //    cancellable on booth switch, 0 MB ONNX, 0 auto-play) so full consultation plays seamlessly without gaps!
   useEffect(() => {
     if (!focusedBooth || cameraMode !== 'focus') return;
     if (resolveNpcTtsMode() !== 'hybrid') return;
@@ -271,7 +285,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     void npcHybridTtsEngine.preloadChunks(chunks, {
       signal: controller.signal,
       maxConcurrency: 2,
-      maxChunks: 16,
+      maxChunks: 40,
     });
 
     return () => {

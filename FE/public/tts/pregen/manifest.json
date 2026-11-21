@@ -1,7 +1,7 @@
 {
   "version": "v1",
   "voiceId": "vi_VN-vais1000-medium",
-  "generatedAt": "2026-11-21T14:39:13.748Z",
+  "generatedAt": "2026-11-21T15:02:38.537Z",
   "entries": {
     "c993ac3d2508d92fd25d936e5e463132e25fe6c4c6f1a8cc4ac9fe3e5f79f740": {
       "file": "/tts/pregen/c993ac3d2508.wav",
@@ -191,6 +191,412 @@
       "text": "Cảm ơn quý khách đã tham quan gian hàng Ê cô Vi ta Rô xơ ri và Cờ ráp của Ê cô Vi ta Hai lân Rô xơ ri giây ét xi.",
       "durationSec": 6.84,
       "bytes": 301612
+    },
+    "26b694f5a2cc6c2d0da597db99505ceba47ecabf57802c749675dbe2e3aa6223": {
+      "file": "/tts/pregen/26b694f5a2cc.wav",
+      "mimeType": "audio/wav",
+      "text": "với gian hàng CELLPHONES · Điện thoại #một của CELLPHONES tại Khu Điện thoại.",
+      "durationSec": 3.54,
+      "bytes": 156204
+    },
+    "bc8a208fa51a7b2c9d296d8e2da0327eb506720cadcefc75978da04496b9d218": {
+      "file": "/tts/pregen/bc8a208fa51a.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm Samsung Galaxy Z Fold tám năm di mười hai GB hai trăm năm mươi sáu GB.",
+      "durationSec": 4.89,
+      "bytes": 215596
+    },
+    "f437712de83ad0c7c9e20308ed33b406763e9a01c07647febeffe861289bd942": {
+      "file": "/tts/pregen/f437712de83a.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết bốn mươi triệu chín trăm chín mươi nghìn ₫.",
+      "durationSec": 2.65,
+      "bytes": 116780
+    },
+    "c8bd05c82c2cdbedeefd667b6cc48f46f4c7ee7f4236b4a44ea2730e9f96f1ac": {
+      "file": "/tts/pregen/c8bd05c82c2c.wav",
+      "mimeType": "audio/wav",
+      "text": "Samsung Galaxy Z Fold tám hai trăm năm mươi sáu GB giá lên đời từ ba mươi tư phẩy năm mươi tám tr, trợ giá đến sáu tr.",
+      "durationSec": 7.36,
+      "bytes": 324652
+    },
+    "dc497d12d290a640315eb26facc46e5cbe5f5e3515b6f916bb71601e7d1d9566": {
+      "file": "/tts/pregen/dc497d12d290.wav",
+      "mimeType": "audio/wav",
+      "text": "giảm ngay sáu tr, tặng hậu mãi Z Care. Mua Z Fold tám tại CellphoneS.",
+      "durationSec": 4.41,
+      "bytes": 194604
+    },
+    "90654004112a69ed124f8721f0c290f358d4c1ee674eebce0e32c4f4301de50f": {
+      "file": "/tts/pregen/90654004112a.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm Samsung Galaxy Z Flip tám năm di mười hai GB hai trăm năm mươi sáu GB.",
+      "durationSec": 4.82,
+      "bytes": 212524
+    },
+    "52ac8d24d864c43ff599f09dcae3ea8b7bb919c79606f919ce0c8486f52c80bf": {
+      "file": "/tts/pregen/52ac8d24d864.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết hai mươi sáu triệu bốn trăm chín mươi nghìn ₫.",
+      "durationSec": 2.77,
+      "bytes": 122412
+    },
+    "ad8ef3607ff64aa89f973fc7d0bf9c791611f8ce0f3a2a73e8e11d5b7ea033b2": {
+      "file": "/tts/pregen/ad8ef3607ff6.wav",
+      "mimeType": "audio/wav",
+      "text": "Samsung Galaxy Z Flip tám hai trăm năm mươi sáu GB giá lên đời từ hai mươi mốt nghìn hai trăm mười lăm tr, trợ giá sáu tr.",
+      "durationSec": 6.79,
+      "bytes": 299564
+    },
+    "5f4313f45ab112c8c92b56e2feff2d0e2a9615a4114523b8c1c8c33a9695f029": {
+      "file": "/tts/pregen/5f4313f45ab1.wav",
+      "mimeType": "audio/wav",
+      "text": "tặng Google ây ai Pờ rô sáu tháng và hậu mãi đặc quyền. Mua Z Flip tám tại CellphoneS.",
+      "durationSec": 6.13,
+      "bytes": 270380
+    },
+    "0927b50241abedfee3899696a1626b8b75f959c89efc86c9d780e2e21e36f0f1": {
+      "file": "/tts/pregen/0927b50241ab.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm iPhone mười bảy Pờ rô Mắc hai trăm năm mươi sáu GB | Chính hãng.",
+      "durationSec": 4.23,
+      "bytes": 186412
+    },
+    "46e06ae473217c22d95e3fe65ad79dc937bf28302b9915451712c9d977a63b36": {
+      "file": "/tts/pregen/46e06ae47321.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết ba mươi tư triệu chín trăm chín mươi nghìn ₫.",
+      "durationSec": 2.82,
+      "bytes": 124460
+    },
+    "290fa756821462db0eec7c4798c8ac34c489295eb8e8a8389bdbfd483e04807d": {
+      "file": "/tts/pregen/290fa7568214.wav",
+      "mimeType": "audio/wav",
+      "text": "iPhone mười bảy Pờ rô Mắc chính hãng đủ dung lượng từ hai trăm năm mươi sáu GB - hai TB.",
+      "durationSec": 4.99,
+      "bytes": 220204
+    },
+    "81e8375b1a66807a3f74c806c37deeb48be0ab54f629d339cd76cbd8b001636d": {
+      "file": "/tts/pregen/81e8375b1a66.wav",
+      "mimeType": "audio/wav",
+      "text": "giá tốt tháng mười một/hai nghìn không trăm hai mươi sáu - mua Apple iP mười bảy Promax trả góp không phần trăm mười hai tháng tại CellphoneS.",
+      "durationSec": 7.07,
+      "bytes": 311852
+    },
+    "fe7a5547989782454a1d89b59ffb0c08682d419ebc0287eb9a310d28095d523c": {
+      "file": "/tts/pregen/fe7a55479897.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm iPhone mười tám Pờ rô hai trăm năm mươi sáu GB.",
+      "durationSec": 3.54,
+      "bytes": 156204
+    },
+    "532a7d8847b784b72947ea7369a68f0656de910230144e5e84c5e12e5442b700": {
+      "file": "/tts/pregen/532a7d8847b7.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết ba mươi tám triệu sáu trăm chín mươi nghìn ₫.",
+      "durationSec": 2.86,
+      "bytes": 125996
+    },
+    "a732f5ad54c347fb56342735f1ffe7a0964856ae1dc646a2710655fb991004c2": {
+      "file": "/tts/pregen/a732f5ad54c3.wav",
+      "mimeType": "audio/wav",
+      "text": "iPhone mười tám Pờ rô chính hãng giá ba mươi tám phẩy chín mươi chín triệu tại CellphoneS, màn hình sáu phẩy ba inch.",
+      "durationSec": 6.42,
+      "bytes": 283180
+    },
+    "c169f2329c551309c69204bc3e8ef47e798d4b75021ec112a19e2563c44e70a9": {
+      "file": "/tts/pregen/c169f2329c55.wav",
+      "mimeType": "audio/wav",
+      "text": "Chip A hai mươi Pờ rô, đủ màu, thu cũ giảm năm tr | Mua ai pi mười tám Pờ rô tại CellphoneS.",
+      "durationSec": 5.47,
+      "bytes": 241196
+    },
+    "09b6a67a7b76c8087c8ff85fb3043e1bc59bb8673eb7ccb8a6696779e6e28881": {
+      "file": "/tts/pregen/09b6a67a7b76.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm Samsung Galaxy S hai mươi sáu Un tra năm di mười hai GB hai trăm năm mươi sáu GB.",
+      "durationSec": 5.27,
+      "bytes": 232492
+    },
+    "cbad03f52ba3b7bb7d8fde40612d46c69ec32ae6b39fc6f9e3f192a6b228d549": {
+      "file": "/tts/pregen/cbad03f52ba3.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết ba mươi mốt triệu bốn trăm chín mươi nghìn ₫.",
+      "durationSec": 2.6,
+      "bytes": 114732
+    },
+    "8b9eaf2929fea895c2672cf989e1854100b672c488571c72e130df3deeecb4b9": {
+      "file": "/tts/pregen/8b9eaf2929fe.wav",
+      "mimeType": "audio/wav",
+      "text": "Samsung Galaxy S hai mươi sáu Un tra pin năm nghìn mi li am pe giờ, hỗ trợ S Pen và màn hình chống nhìn trộm, lên đời trợ giá đến năm tr.",
+      "durationSec": 7.62,
+      "bytes": 335916
+    },
+    "aa249254263046d4309dcef61251d60d5e5505ce7f7f5e1cccb3daa39d70b04e": {
+      "file": "/tts/pregen/aa2492542630.wav",
+      "mimeType": "audio/wav",
+      "text": "Mua S hai mươi sáu Un tra góp không phần trăm tại CellphoneS.",
+      "durationSec": 3.81,
+      "bytes": 167980
+    },
+    "3f3e6df9e7ae40123617bc2283f9fb8ccbb18b6136dbef8109e9378861974616": {
+      "file": "/tts/pregen/3f3e6df9e7ae.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm Xiaomi Redmi Note mười bảy bốn GB một trăm hai mươi tám GB.",
+      "durationSec": 3.94,
+      "bytes": 173612
+    },
+    "43e2432527b1a61bdac96317b94bf802ad706be69b44ce22fc5b9a711ae6f825": {
+      "file": "/tts/pregen/43e2432527b1.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết sáu triệu hai trăm tám mươi nghìn ₫.",
+      "durationSec": 2.46,
+      "bytes": 108588
+    },
+    "0ae495ea1d310855d96ee9dde9708911b65684a4ccf2922f967700ffb1448edb": {
+      "file": "/tts/pregen/0ae495ea1d31.wav",
+      "mimeType": "audio/wav",
+      "text": "Xiaomi Redmi Note mười bảy bốn GB một trăm hai mươi tám GB chính hãng giá rẻ - Thu cũ đổi mới, bảo hành một năm, đổi mới ba mươi ngày.",
+      "durationSec": 7.42,
+      "bytes": 327212
+    },
+    "d6101a0befa5dcbb1bf213e398ab6311c2d8968d5741a2a2420e9fd092f0e2aa": {
+      "file": "/tts/pregen/d6101a0befa5.wav",
+      "mimeType": "audio/wav",
+      "text": "trả góp không phần trăm, giao toàn quốc. Mua ngay tại đây.",
+      "durationSec": 3.03,
+      "bytes": 133676
+    },
+    "c96998ac6e1c2b15b668d3941c402a5aa201c5355b7b33fd49d033ff040ce8a8": {
+      "file": "/tts/pregen/c96998ac6e1c.wav",
+      "mimeType": "audio/wav",
+      "text": "Cảm ơn quý khách đã tham quan gian hàng CELLPHONES · Điện thoại #một của CELLPHONES.",
+      "durationSec": 4.1,
+      "bytes": 180780
+    },
+    "00b290cde1e30fd0f532f04520be79cb734f214990a27eb91219285b8a7dfe4f": {
+      "file": "/tts/pregen/00b290cde1e3.wav",
+      "mimeType": "audio/wav",
+      "text": "với gian hàng CELLPHONES · Điện thoại #hai của CELLPHONES tại Khu Điện thoại.",
+      "durationSec": 3.51,
+      "bytes": 154668
+    },
+    "e6b28d670ce6bdb4fdee18adecefe1b4ce298667d8d2bacf82d62945182254ea": {
+      "file": "/tts/pregen/e6b28d670ce6.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm Samsung Galaxy A tám bốn GB sáu mươi tư GB.",
+      "durationSec": 3.22,
+      "bytes": 141868
+    },
+    "5afccf820369e419e8ee9b71a3f871cb0dab6adac9a6b37b13b067820f0fdb30": {
+      "file": "/tts/pregen/5afccf820369.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết bốn triệu năm trăm bảy mươi nghìn ₫.",
+      "durationSec": 2.4,
+      "bytes": 106028
+    },
+    "573ccf5a459a7844c810878a9dd3d4f7641349afc0f037423b306f9ef38143eb": {
+      "file": "/tts/pregen/573ccf5a459a.wav",
+      "mimeType": "audio/wav",
+      "text": "Samsung Galaxy A tám bốn GB/sáu mươi tư GB giá từ bốn phẩy sáu mươi tư tr, lên đời trợ giá một phẩy năm tr.",
+      "durationSec": 6.69,
+      "bytes": 294956
+    },
+    "61c8bddd1b47cc2e2ab0e61d3203d114fe4c9459a926697a88b7c3f721347460": {
+      "file": "/tts/pregen/61c8bddd1b47.wav",
+      "mimeType": "audio/wav",
+      "text": "tặng bộ sạc bảy trăm chín mươi k, trả góp không phần trăm.",
+      "durationSec": 3.02,
+      "bytes": 133164
+    },
+    "e73654bee595f8a3c4531fe518986efd621b2f5290bceec187ca5bb2ad79fc05": {
+      "file": "/tts/pregen/e73654bee595.wav",
+      "mimeType": "audio/wav",
+      "text": "Mua Samsung A tám chính hãng tại CellphoneS.",
+      "durationSec": 2.54,
+      "bytes": 112172
+    },
+    "84ccce1021bb5474e8972bb9c470e81ba4e787a275f5850841fdcfdcbe081c84": {
+      "file": "/tts/pregen/84ccce1021bb.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm OPPO Find ích mười năm di mười hai GB hai trăm năm mươi sáu GB.",
+      "durationSec": 4.48,
+      "bytes": 197676
+    },
+    "bbb69f805bd29acda02d8dead9f31321a83469e315e328314e46a415256c41fe": {
+      "file": "/tts/pregen/bbb69f805bd2.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết ba mươi ba triệu chín trăm chín mươi nghìn ₫.",
+      "durationSec": 2.87,
+      "bytes": 126508
+    },
+    "d591fdf1bc1e81293c7ab780f43ba83078fc26bfec2db2f2ebd7bb78772f80d0": {
+      "file": "/tts/pregen/d591fdf1bc1e.wav",
+      "mimeType": "audio/wav",
+      "text": "OPPO Find ích mười chính hãng giá ba mươi ba phẩy chín mươi chín tr, góp không phần trăm, thu cũ trợ giá năm tr, quà mười hai tr.",
+      "durationSec": 7.36,
+      "bytes": 324652
+    },
+    "ca75e1521e87a522f847cdb4eb6cf5e2599245902e058afbaebe4bf0123cc7f8": {
+      "file": "/tts/pregen/ca75e1521e87.wav",
+      "mimeType": "audio/wav",
+      "text": "Hai camera hai trăm MP, chip Dimensity chín nghìn sáu trăm M, pin tám nghìn mi li am pe giờ. Mua ngay.",
+      "durationSec": 6.12,
+      "bytes": 269868
+    },
+    "66f84588a1c738e3ac68ff511e719616b176f9c561d450f347914d3da8a572b1": {
+      "file": "/tts/pregen/66f84588a1c7.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm iPhone Duo hai trăm năm mươi sáu GB.",
+      "durationSec": 2.74,
+      "bytes": 120876
+    },
+    "d8058076df6f91745399f8ced8d6cb14311c6e7c7cf134483cb5c154b56b40c5": {
+      "file": "/tts/pregen/d8058076df6f.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết sáu mươi tư triệu chín trăm chín mươi nghìn ₫.",
+      "durationSec": 2.86,
+      "bytes": 125996
+    },
+    "afe0782ab5bbe67600504d3755fa021e84d4a750a12d21ca6c3d9d76d443f903": {
+      "file": "/tts/pregen/afe0782ab5bb.wav",
+      "mimeType": "audio/wav",
+      "text": "iPhone Duo hai trăm năm mươi sáu GB chính hãng giá niêm yết từ sáu mươi tư triệu chín trăm chín mươi nghìn VNĐ, đủ màu.",
+      "durationSec": 7.12,
+      "bytes": 313900
+    },
+    "d2834d7793d1e965e3e458ea90dbd4ede9e4b34e32af7043a55b83eca56183b9": {
+      "file": "/tts/pregen/d2834d7793d1.wav",
+      "mimeType": "audio/wav",
+      "text": "trả góp không phần trăm mười tám tháng - Mua iPhone Duo hai trăm năm mươi sáu gb tại CellphoneS ngay.",
+      "durationSec": 5.47,
+      "bytes": 241196
+    },
+    "515a3a24ca95cd59d165c4e6d669de35464d29b36f2aa2e687ef6667a013d3c8": {
+      "file": "/tts/pregen/515a3a24ca95.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm iPhone mười tám Pờ rô Mắc hai trăm năm mươi sáu GB.",
+      "durationSec": 3.66,
+      "bytes": 161324
+    },
+    "89986388676bb9af8ac7fa951771b6b817f11d6669fe680beb6f67c3d6abf434": {
+      "file": "/tts/pregen/89986388676b.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết bốn mươi mốt triệu sáu trăm chín mươi nghìn ₫.",
+      "durationSec": 2.87,
+      "bytes": 126508
+    },
+    "003761c0caf48f683f415990e7defed513802ec97c4a35964516c2816d6eb7c5": {
+      "file": "/tts/pregen/003761c0caf4.wav",
+      "mimeType": "audio/wav",
+      "text": "iPhone mười tám Pờ rô Mắc hai trăm năm mươi sáu GB chính hãng giá từ bốn mươi mốt triệu chín trăm chín mươi nghìn đồng.",
+      "durationSec": 6.28,
+      "bytes": 277036
+    },
+    "6366dd9a6ab98cb295190d5dd4f53314d35f3b612e16a11882022d379e634f8f": {
+      "file": "/tts/pregen/6366dd9a6ab9.wav",
+      "mimeType": "audio/wav",
+      "text": "sẵn màu đỏ Burgundy, xanh băng thanh mới, thu cũ giảm năm tr T mười một/hai nghìn không trăm hai mươi sáu - góp không phần trăm mười tám tháng.",
+      "durationSec": 7.16,
+      "bytes": 315948
+    },
+    "4b3caafaea9738b80e333fc20fb1c824cc757a707b2d638514fecede0f7d2b2b": {
+      "file": "/tts/pregen/4b3caafaea97.wav",
+      "mimeType": "audio/wav",
+      "text": "Cảm ơn quý khách đã tham quan gian hàng CELLPHONES · Điện thoại #hai của CELLPHONES.",
+      "durationSec": 4.21,
+      "bytes": 185900
+    },
+    "abb5a646e17ea3371ed187562b68e803b1af3e9b156656697fa85bd56d3822aa": {
+      "file": "/tts/pregen/abb5a646e17e.wav",
+      "mimeType": "audio/wav",
+      "text": "với gian hàng CELLPHONES · Âm thanh #một của CELLPHONES tại Khu Âm thanh.",
+      "durationSec": 3.36,
+      "bytes": 148012
+    },
+    "33ebcf8eef6c6eced46dc86dc491803e0cc5684e8111fb94cdb07e66b470d27e": {
+      "file": "/tts/pregen/33ebcf8eef6c.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm Tai nghe Bờ lu tút chụp tai Sony WH một nghìn XM bốn C.",
+      "durationSec": 4.27,
+      "bytes": 188460
+    },
+    "0832726db88976a3e254afecc76ca6006f8a1f1904ee3e4618720482a114504b": {
+      "file": "/tts/pregen/0832726db889.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết năm triệu chín trăm chín mươi nghìn ₫.",
+      "durationSec": 2.32,
+      "bytes": 102444
+    },
+    "8c66d33141cc76d82a4abd283938593c37246fe02e753603a4f201d1a0a86dc7": {
+      "file": "/tts/pregen/8c66d33141cc.wav",
+      "mimeType": "audio/wav",
+      "text": "Mua tai nghe Bờ lu tút chụp tai Sony WH một nghìn XM bốn C chính hãng, giá rẻ, bảo hành mười hai tháng.",
+      "durationSec": 5.97,
+      "bytes": 263212
+    },
+    "cc2b1e667379f1756cefac366893d59096e72768fd8a69323f16215391d929db": {
+      "file": "/tts/pregen/cc2b1e667379.wav",
+      "mimeType": "audio/wav",
+      "text": "một đổi một trong mười lăm ngày nếu lỗi NSX.",
+      "durationSec": 2.21,
+      "bytes": 97324
+    },
+    "3d22371f00146746bef7f9030adbcf562e07fcb9441229993f4d0faee012c0c3": {
+      "file": "/tts/pregen/3d22371f0014.wav",
+      "mimeType": "audio/wav",
+      "text": "Mua ngay Sony WH một nghìn xm bốn tại đây.",
+      "durationSec": 2.74,
+      "bytes": 120876
+    },
+    "83bc7b4b2865f3382846f08adde9c413f05527f83b1f827452a2de3aa29d5856": {
+      "file": "/tts/pregen/83bc7b4b2865.wav",
+      "mimeType": "audio/wav",
+      "text": "Cảm ơn quý khách đã tham quan gian hàng CELLPHONES · Âm thanh #một của CELLPHONES.",
+      "durationSec": 3.99,
+      "bytes": 176172
+    },
+    "f68d530ce9de0eb9cb40c0c39446089a6cc8353ecbe655b6299bb405e1069795": {
+      "file": "/tts/pregen/f68d530ce9de.wav",
+      "mimeType": "audio/wav",
+      "text": "với gian hàng CELLPHONES · Máy tính bảng #một của CELLPHONES tại Khu Máy tính bảng.",
+      "durationSec": 4.1,
+      "bytes": 180780
+    },
+    "f072e5a7780c7bc940fc329c2e7b0392cf9b1067da70129765c45767bb681f2f": {
+      "file": "/tts/pregen/f072e5a7780c.wav",
+      "mimeType": "audio/wav",
+      "text": "Sản phẩm HONOR Pad X chín B Mắc oai phai sáu GB một trăm hai mươi tám GB.",
+      "durationSec": 4.25,
+      "bytes": 187436
+    },
+    "c5b83960e2bb992b0278b5f5a767fd7840f9a47bbfb60b5ccd171d35d0319b04": {
+      "file": "/tts/pregen/c5b83960e2bb.wav",
+      "mimeType": "audio/wav",
+      "text": "Giá niêm yết mười hai triệu chín trăm chín mươi nghìn ₫.",
+      "durationSec": 2.3,
+      "bytes": 101420
+    },
+    "19f0b9d000f91a169325d8399e89f0f76f4279912577b2da5d72c2bf916f03de": {
+      "file": "/tts/pregen/19f0b9d000f9.wav",
+      "mimeType": "audio/wav",
+      "text": "Mua Máy tính bảng HONOR Pad X chín B Mắc oai phai chính hãng giá rẻ - Thu cũ đổi mới, bảo hành mười hai tháng, đổi mới ba mươi ngày, trả góp không phần trăm.",
+      "durationSec": 8.58,
+      "bytes": 378412
+    },
+    "6c6c1923a346bd05d05d15e39ba45fe4026373b024abc277597141957fcbf9a3": {
+      "file": "/tts/pregen/6c6c1923a346.wav",
+      "mimeType": "audio/wav",
+      "text": "Mua ngay HONOR Pad X chín B Mắc oai phai tại đây.",
+      "durationSec": 2.94,
+      "bytes": 129580
+    },
+    "cb985c2b8c7c65a2931c57a3140ad007be6bc42e51f19a72632107e81a4e3014": {
+      "file": "/tts/pregen/cb985c2b8c7c.wav",
+      "mimeType": "audio/wav",
+      "text": "Cảm ơn quý khách đã tham quan gian hàng CELLPHONES · Máy tính bảng #một của CELLPHONES.",
+      "durationSec": 4.53,
+      "bytes": 199724
     }
   }
 }
