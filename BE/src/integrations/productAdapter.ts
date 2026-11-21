@@ -10,7 +10,7 @@ import {
 export const MAX_HTML_BYTES = 3_500_000; // 3.5 MB decompressed per HTML page (safe for modern SSR e-commerce)
 export const MAX_SITEMAP_BYTES = 2_000_000; // 2 MB per robots.txt / sitemap XML
 export const MAX_TOTAL_CRAWL_BYTES = 12_000_000; // 12 MB total decompressed budget per website discovery
-const FETCH_TIMEOUT_MS = 8_000;
+const FETCH_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 3;
 
 export type ExternalFetchErrorCode =
@@ -220,7 +220,7 @@ async function createPinnedDispatcher(
     const undici = (await import(modName)) as {
       Agent?: new (opts: Record<string, unknown>) => { close: () => Promise<void> };
     };
-    if (!undici?.Agent) return { close: async () => {} };
+    if (!undici?.Agent) return { close: async () => { } };
     const agent = new undici.Agent({
       connect: {
         lookup: (
@@ -238,9 +238,9 @@ async function createPinnedDispatcher(
         },
       },
     });
-    return { dispatcher: agent, close: () => agent.close().catch(() => {}) };
+    return { dispatcher: agent, close: () => agent.close().catch(() => { }) };
   } catch {
-    return { close: async () => {} };
+    return { close: async () => { } };
   }
 }
 
@@ -357,7 +357,7 @@ export async function fetchExternalText(
     if (rawContentLength) {
       const declaredBytes = Number(rawContentLength);
       if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
-        await response.body?.cancel().catch(() => {});
+        await response.body?.cancel().catch(() => { });
         throw new ExternalFetchError(
           `Dung lượng ${resourceLabel} (${(declaredBytes / (1024 * 1024)).toFixed(2)} MB) vượt quá giới hạn an toàn (${(maxBytes / (1024 * 1024)).toFixed(1)} MB).`,
           'SIZE_LIMIT',
@@ -394,7 +394,7 @@ export async function fetchExternalText(
       if (step.value) {
         totalBytes += step.value.byteLength;
         if (totalBytes > maxBytes) {
-          await reader.cancel().catch(() => {});
+          await reader.cancel().catch(() => { });
           throw new ExternalFetchError(
             `Dung lượng ${resourceLabel} sau giải nén vượt quá giới hạn an toàn (${(maxBytes / (1024 * 1024)).toFixed(1)} MB).`,
             'SIZE_LIMIT',
@@ -402,7 +402,7 @@ export async function fetchExternalText(
           );
         }
         if (budget && budget.totalBytesRead + totalBytes > budget.maxTotalBytes) {
-          await reader.cancel().catch(() => {});
+          await reader.cancel().catch(() => { });
           throw new ExternalFetchError(
             `Tổng dung lượng dữ liệu tải từ website vượt quá giới hạn an toàn (${(budget.maxTotalBytes / (1024 * 1024)).toFixed(1)} MB).`,
             'TOTAL_BUDGET_LIMIT',
@@ -685,10 +685,10 @@ export function extractProductFromHtml(html: string, sourceUrl: string): Extract
   const extractionMethod: ExtractedProductDraft['extractionMethod'] = hasJsonLdProduct
     ? 'json-ld'
     : hasOpenGraph
-    ? 'opengraph'
-    : name
-    ? 'meta-fallback'
-    : 'partial';
+      ? 'opengraph'
+      : name
+        ? 'meta-fallback'
+        : 'partial';
 
   return ExtractedProductDraftSchema.parse({
     name,
@@ -758,8 +758,8 @@ export function parseBatchProducts(
       const images = Array.isArray(obj.images)
         ? obj.images.map(String)
         : typeof obj.imageUrl === 'string' && obj.imageUrl
-        ? [obj.imageUrl]
-        : [];
+          ? [obj.imageUrl]
+          : [];
 
       const res = CreateProductInputSchema.safeParse({
         boothId,
