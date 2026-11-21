@@ -8,6 +8,11 @@ import {
   type V28Product,
 } from '../../services/v28Api';
 import { getNpcAssistantProfile } from '../../services/npcPresentationService';
+import { piperBrowserTts, type PiperProgressEvent } from '../../services/hybridTtsAdapter';
+import {
+  chunkNormalizedSpeechForPiper,
+  normalizeVietnameseForPiper,
+} from '../../services/piperSpeechNormalizer';
 import { formatCurrency } from '../ProductPanel';
 import type { V28NpcAnimState } from '../../scene/v28/DynamicBoothNpc3D';
 import { API_BASE_URL } from '../../config/apiConfig';
@@ -119,8 +124,11 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
   const [status, setStatus] = useState<PresentationStatus>('GREETING');
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false);
+  const [piperLoadingText, setPiperLoadingText] = useState<string | null>(null);
 
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const activeObjectUrlRef = useRef<string | null>(null);
+  const ttsAbortControllerRef = useRef<AbortController | null>(null);
   const activeClipKeyRef = useRef<string | null>(null);
   const isMutedRef = useRef<boolean>(isMuted);
   isMutedRef.current = isMuted;
@@ -152,6 +160,10 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
   );
 
   const stopAudioElement = useCallback(() => {
+    if (ttsAbortControllerRef.current) {
+      ttsAbortControllerRef.current.abort();
+      ttsAbortControllerRef.current = null;
+    }
     if (audioElRef.current) {
       audioElRef.current.onplay = null;
       audioElRef.current.onpause = null;
@@ -161,6 +173,14 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
       audioElRef.current.currentTime = 0;
       audioElRef.current = null;
     }
+    if (activeObjectUrlRef.current) {
+      try {
+        URL.revokeObjectURL(activeObjectUrlRef.current);
+      } catch {
+        // ignore revoke error
+      }
+      activeObjectUrlRef.current = null;
+    }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.cancel();
@@ -169,6 +189,7 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
       }
     }
     activeClipKeyRef.current = null;
+    setPiperLoadingText(null);
     setIsAudioPlaying(false);
   }, []);
 
@@ -236,42 +257,171 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
         return;
       }
 
-      // Mode 2: Strict Vietnamese female Web Speech fallback ONLY if a real `vi` voice is installed on the OS.
-      // NEVER fall back to system default English/Male voices (e.g. Microsoft David) or 440Hz chime!
       const speechText = clip?.transcript || step.fallbackText;
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window && speechText) {
-        try {
-          const voices = window.speechSynthesis.getVoices();
-          const viVoices = voices.filter((v) => v.lang.toLowerCase().startsWith('vi'));
-          const preferredViFemale =
-            viVoices.find((v) => /hoaimy|linh|an|female|nu|nữ/i.test(v.name) && !/namminh|male|nam/i.test(v.name)) ||
-            viVoices.find((v) => !/namminh|male/i.test(v.name));
 
-          if (preferredViFemale) {
-            const utter = new SpeechSynthesisUtterance(speechText);
-            utter.lang = 'vi-VN';
-            utter.voice = preferredViFemale;
-            utter.rate = 1.0;
-            utter.onstart = () => setIsAudioPlaying(true);
-            utter.onend = advanceToNext;
-            utter.onerror = () => {
-              setIsAudioPlaying(false);
-            };
-            activeClipKeyRef.current = `${booth.boothId}:${step.slotKey}:speech-vi-female`;
-            window.speechSynthesis.speak(utter);
-            return;
+      const tryWebSpeechOrSubtitleFallback = () => {
+        // Mode 3: Strict Vietnamese female Web Speech fallback ONLY if a real `vi` voice is installed on the OS.
+        // NEVER fall back to system default English/Male voices (e.g. Microsoft David) or 440Hz chime!
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window && speechText) {
+          try {
+            const voices = window.speechSynthesis.getVoices();
+            const viVoices = voices.filter((v) => v.lang.toLowerCase().startsWith('vi'));
+            const preferredViFemale =
+              viVoices.find((v) => /hoaimy|linh|an|female|nu|nữ/i.test(v.name) && !/namminh|male|nam/i.test(v.name)) ||
+              viVoices.find((v) => !/namminh|male/i.test(v.name));
+
+            if (preferredViFemale) {
+              const utter = new SpeechSynthesisUtterance(speechText);
+              utter.lang = 'vi-VN';
+              utter.voice = preferredViFemale;
+              utter.rate = 1.0;
+              utter.onstart = () => setIsAudioPlaying(true);
+              utter.onend = advanceToNext;
+              utter.onerror = () => {
+                setIsAudioPlaying(false);
+              };
+              activeClipKeyRef.current = `${booth.boothId}:${step.slotKey}:speech-vi-female`;
+              window.speechSynthesis.speak(utter);
+              return;
+            }
+          } catch {
+            // fall through to honest subtitle-only notice
           }
-        } catch {
-          // fall through to honest subtitle-only notice
+        }
+
+        // Mode 4: Honest notice when neither live Gemini TTS, Piper WASM, nor OS Vietnamese female voice is available
+        setIsAudioPlaying(false);
+        setAudioError(
+          'Tạm thời chưa phát được giọng đọc tiếng Việt trên trình duyệt này. Hệ thống đang hiển thị phụ đề tiếng Việt.'
+        );
+        onAnimStateChange('idle');
+      };
+
+      // Mode 2: Built-in Piper WASM Vietnamese Female Voice (vi_VN-vais1000-medium) — works on ALL browsers without API key!
+      if (typeof window !== 'undefined' && typeof Worker !== 'undefined' && speechText) {
+        const normalized = normalizeVietnameseForPiper(speechText);
+        const chunks = chunkNormalizedSpeechForPiper(normalized);
+        if (chunks.length > 0) {
+          const controller = new AbortController();
+          ttsAbortControllerRef.current = controller;
+          const runClipKey = `${booth.boothId}:${step.slotKey}:piper-wasm`;
+          activeClipKeyRef.current = runClipKey;
+
+          const handleProgress = (ev: PiperProgressEvent) => {
+            if (controller.signal.aborted || !isMountedRef.current) return;
+            if (ev.stage === 'downloading') {
+              const pct = ev.percent != null ? ` (${ev.percent}%)` : '';
+              setPiperLoadingText(`⏳ Đang tải giọng đọc tiếng Việt${pct}...`);
+            } else if (ev.stage === 'initializing') {
+              setPiperLoadingText('⏳ Đang khởi tạo giọng nữ tiếng Việt...');
+            } else if (ev.stage === 'synthesizing') {
+              setPiperLoadingText('⏳ Đang chuẩn bị câu thoại...');
+            }
+          };
+
+          void (async () => {
+            try {
+              for (let i = 0; i < chunks.length; i += 1) {
+                if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
+                const result = await piperBrowserTts.synthesizeNormalizedChunk({
+                  normalizedText: chunks[i],
+                  signal: controller.signal,
+                  onProgress: i === 0 ? handleProgress : undefined,
+                });
+                if (controller.signal.aborted || !isMountedRef.current || isMutedRef.current) return;
+                setPiperLoadingText(null);
+
+                // Prefetch next chunk while current chunk plays
+                if (i + 1 < chunks.length) {
+                  void piperBrowserTts
+                    .synthesizeNormalizedChunk({
+                      normalizedText: chunks[i + 1],
+                      signal: controller.signal,
+                    })
+                    .catch(() => {});
+                }
+
+                if (activeObjectUrlRef.current) {
+                  try {
+                    URL.revokeObjectURL(activeObjectUrlRef.current);
+                  } catch {
+                    // ignore
+                  }
+                }
+                const objUrl = URL.createObjectURL(result.blob);
+                activeObjectUrlRef.current = objUrl;
+
+                await new Promise<void>((resolve, reject) => {
+                  const audio = new Audio(objUrl);
+                  audio.preload = 'auto';
+                  audio.muted = isMutedRef.current;
+                  audioElRef.current = audio;
+
+                  const cleanup = () => {
+                    audio.onplay = null;
+                    audio.onpause = null;
+                    audio.onended = null;
+                    audio.onerror = null;
+                  };
+
+                  audio.onplay = () => {
+                    if (!controller.signal.aborted) setIsAudioPlaying(true);
+                  };
+                  audio.onpause = () => {
+                    setIsAudioPlaying(false);
+                  };
+                  audio.onended = () => {
+                    cleanup();
+                    setIsAudioPlaying(false);
+                    resolve();
+                  };
+                  audio.onerror = () => {
+                    cleanup();
+                    setIsAudioPlaying(false);
+                    reject(new Error('Piper audio playback error'));
+                  };
+
+                  controller.signal.addEventListener(
+                    'abort',
+                    () => {
+                      cleanup();
+                      audio.pause();
+                      resolve();
+                    },
+                    { once: true }
+                  );
+
+                  audio.play().catch((err: unknown) => {
+                    cleanup();
+                    if (controller.signal.aborted || audioElRef.current !== audio) {
+                      resolve();
+                      return;
+                    }
+                    reject(err);
+                  });
+                });
+              }
+
+              if (!controller.signal.aborted && isMountedRef.current && activeClipKeyRef.current === runClipKey) {
+                advanceToNext();
+              }
+            } catch (err: unknown) {
+              if (controller.signal.aborted || !isMountedRef.current) return;
+              setPiperLoadingText(null);
+              if ((err as { name?: string })?.name === 'NotAllowedError') {
+                setIsAudioPlaying(false);
+                setStatus('PAUSED');
+                setAudioError('Trình duyệt tạm chặn tự động phát âm thanh. Bấm ▶ Tiếp tục để nghe giọng nữ tiếng Việt.');
+                return;
+              }
+              tryWebSpeechOrSubtitleFallback();
+            }
+          })();
+          return;
         }
       }
 
-      // Honest notice when neither live Gemini TTS nor a real Vietnamese female voice is available
-      setIsAudioPlaying(false);
-      setAudioError(
-        'Giọng nữ tiếng Việt (Gemini TTS) chưa được kích hoạt trên máy chủ (thiếu GEMINI_API_KEY / V28_ENABLE_LIVE_AI=true) và trình duyệt không có giọng nữ tiếng Việt. Hệ thống hiển thị phụ đề tiếng Việt và không phát nhầm giọng nam/tiếng Anh.'
-      );
-      onAnimStateChange('idle');
+      tryWebSpeechOrSubtitleFallback();
     },
     [audioPack, booth.boothId, onAnimStateChange, steps, stopAudioElement]
   );
@@ -350,6 +500,11 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
 
   // Playback Controls (Exact V27.5 behavior)
   const handlePause = () => {
+    if (ttsAbortControllerRef.current) {
+      ttsAbortControllerRef.current.abort();
+      ttsAbortControllerRef.current = null;
+    }
+    setPiperLoadingText(null);
     if (audioElRef.current && !audioElRef.current.paused) {
       audioElRef.current.pause();
     }
@@ -404,11 +559,18 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
     isMutedRef.current = nextMuted;
-    if (nextMuted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {
-        // ignore
+    if (nextMuted) {
+      if (ttsAbortControllerRef.current) {
+        ttsAbortControllerRef.current.abort();
+        ttsAbortControllerRef.current = null;
+      }
+      setPiperLoadingText(null);
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch {
+          // ignore
+        }
       }
       setIsAudioPlaying(false);
     }
@@ -429,6 +591,11 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
   const handleSwitchTab = (nextTab: 'intro' | 'chat') => {
     if (nextTab === activeTab) return;
     if (nextTab === 'chat' && (status === 'GREETING' || status === 'PRESENTING')) {
+      if (ttsAbortControllerRef.current) {
+        ttsAbortControllerRef.current.abort();
+        ttsAbortControllerRef.current = null;
+      }
+      setPiperLoadingText(null);
       if (audioElRef.current && !audioElRef.current.paused) {
         audioElRef.current.pause();
       }
@@ -502,6 +669,7 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
 
   const statusLabel = (() => {
     if (loadingAudio) return '⏳ Đang tải audio đã lưu...';
+    if (piperLoadingText) return piperLoadingText;
     if (status === 'PAUSED') return '⏸️ Đang tạm dừng thuyết minh';
     if (status === 'COMPLETED') return '✅ Đã hoàn tất giới thiệu gian hàng';
     if (status === 'CANCELLED') return '⏹️ Đã dừng thuyết minh';
@@ -662,11 +830,6 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
             <p className="npc-assistant-panel__subtitle-text">
               “{currentClip?.transcript || currentStep?.fallbackText || ''}”
             </p>
-            {audioPack && !audioPack.liveGeminiTtsEnabled && (
-              <div style={{ marginTop: 4, fontSize: 10.5, color: '#64748b' }}>
-                Audio Cache: Local Fallback WAV (LIVE GEMINI TTS NOT VERIFIED · {audioPack.cacheHits} cache hit)
-              </div>
-            )}
           </div>
 
           {activeProduct && (
