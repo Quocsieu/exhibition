@@ -58,44 +58,77 @@ export function computeYouthArchPlacement(
   };
 }
 
-function createArchSignageTexture(exhibitionName: string): THREE.CanvasTexture {
+export const OFFICIAL_ARCH_TITLE = 'CON ĐƯỜNG NÔNG SẢN';
+export const OFFICIAL_ARCH_SUBTITLE = 'TRIỂN LÃM 3D THANH NIÊN KHỞI NGHIỆP';
+
+function createArchSignageTexture(_exhibitionName: string): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 256;
+  canvas.width = 1536;
+  canvas.height = 320;
   const ctx = canvas.getContext('2d');
   if (ctx) {
-    // Deep Youth Blue gradient backdrop
-    const grad = ctx.createLinearGradient(0, 0, 1024, 256);
-    grad.addColorStop(0, '#004799');
-    grad.addColorStop(0.5, '#0062cc');
-    grad.addColorStop(1, '#0284c7');
+    // Rich Youth Blue -> Deep Emerald-Teal agricultural exhibition gradient backdrop
+    const grad = ctx.createLinearGradient(0, 0, 1536, 320);
+    grad.addColorStop(0, '#003d82');
+    grad.addColorStop(0.28, '#0057b8');
+    grad.addColorStop(0.72, '#0369a1');
+    grad.addColorStop(1, '#047857');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 1024, 256);
+    ctx.fillRect(0, 0, 1536, 320);
 
-    // Subtle geometric architectural chevron lines
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+    // Subtle radial highlight behind center title
+    const glow = ctx.createRadialGradient(768, 155, 40, 768, 155, 620);
+    glow.addColorStop(0, 'rgba(255, 255, 255, 0.14)');
+    glow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, 1536, 320);
+
+    // Architectural double hairline border & warm harvest gold edge strips
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillRect(0, 0, 1536, 10);
+    ctx.fillRect(0, 310, 1536, 10);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.24)';
     ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(24, 24);
-    ctx.lineTo(1000, 24);
-    ctx.moveTo(24, 232);
-    ctx.lineTo(1000, 232);
-    ctx.stroke();
+    ctx.strokeRect(24, 24, 1488, 272);
 
-    // Soft sky-blue LED top/bottom hairline accent
-    ctx.fillStyle = '#7dd3fc';
-    ctx.fillRect(0, 0, 1024, 8);
-    ctx.fillRect(0, 248, 1024, 8);
+    // Subtle stylized harvest leaf accents flanking the official title
+    const drawLeafAccent = (cx: number, cy: number, flip: number) => {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(flip, 1);
+      ctx.fillStyle = '#34d399';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(36, -34, 72, -6);
+      ctx.quadraticCurveTo(36, 20, 0, 0);
+      ctx.fill();
+      ctx.fillStyle = '#fbbf24';
+      ctx.beginPath();
+      ctx.moveTo(10, 14);
+      ctx.quadraticCurveTo(42, 34, 70, 12);
+      ctx.quadraticCurveTo(38, 4, 10, 14);
+      ctx.fill();
+      ctx.restore();
+    };
+    drawLeafAccent(86, 156, 1);
+    drawLeafAccent(1450, 156, -1);
 
-    // Official exhibition title from live World data (never hardcoded slogan)
-    const rawTitle = (exhibitionName || 'GRAND EXPO V28').trim().toUpperCase();
-    const title = rawTitle.length > 32 ? `${rawTitle.slice(0, 31)}…` : rawTitle;
-    ctx.fillStyle = '#ffffff';
+    // Official Phase 5 Entrance Arch Title with crisp full Vietnamese diacritics
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const fontSize = title.length > 22 ? 52 : 64;
-    ctx.font = `800 ${fontSize}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-    ctx.fillText(title, 512, 130);
+    ctx.shadowColor = 'rgba(15, 23, 42, 0.45)';
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetY = 4;
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 94px "Segoe UI", system-ui, -apple-system, Roboto, sans-serif';
+    ctx.fillText(OFFICIAL_ARCH_TITLE, 768, 134);
+
+    // Refined gold-white subtitle ribbon
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = '#fef08a';
+    ctx.font = '700 32px "Segoe UI", system-ui, -apple-system, Roboto, sans-serif';
+    ctx.fillText(OFFICIAL_ARCH_SUBTITLE, 768, 236);
   }
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -246,6 +279,18 @@ const LED_ACCENT_MAT = new THREE.MeshStandardMaterial({
   roughness: 0.2,
 });
 
+const AGRI_EMERALD_MAT = new THREE.MeshStandardMaterial({
+  color: '#059669',
+  roughness: 0.34,
+  metalness: 0.18,
+});
+
+const HARVEST_GOLD_MAT = new THREE.MeshStandardMaterial({
+  color: '#eab308',
+  roughness: 0.26,
+  metalness: 0.62,
+});
+
 /**
  * Grand Expo V28 Phase 6 — Youth-Themed Architectural 3D Entrance Arch.
  * - Youth Blue (#0057b8) + Satin White (#f8fafc) + subtle sky-blue LED trim.
@@ -340,19 +385,22 @@ export const YouthEntranceArch3D: React.FC<YouthEntranceArch3DProps> = React.mem
             <boxGeometry args={[beamWidth + 0.6, 1.85, 1.62]} />
           </mesh>
 
-          {/* Sculpted White Upper Crown Canopy Wing */}
+          {/* Sculpted White Upper Crown Canopy Wing + Phase 5 Agricultural Emerald/Gold Crest */}
           <mesh position={[0, 1.38, 0]} material={ARCH_WHITE_MAT}>
             <boxGeometry args={[beamWidth + 1.4, 0.34, 2.05]} />
           </mesh>
-          <mesh position={[0, 1.66, 0]} material={YOUTH_BLUE_DEEP_MAT}>
-            <boxGeometry args={[signW + 1.6, 0.28, 1.72]} />
+          <mesh position={[0, 1.66, 0]} material={AGRI_EMERALD_MAT}>
+            <boxGeometry args={[signW + 2.0, 0.28, 1.76]} />
+          </mesh>
+          <mesh position={[0, 1.86, 0]} material={HARVEST_GOLD_MAT}>
+            <boxGeometry args={[signW + 0.4, 0.12, 1.48]} />
           </mesh>
           {/* Top LED Crown Accent */}
-          <mesh position={[0, 1.56, 1.03]} material={LED_ACCENT_MAT}>
-            <boxGeometry args={[beamWidth + 1.0, 0.07, 0.06]} />
+          <mesh position={[0, 1.56, 1.03]} material={HARVEST_GOLD_MAT}>
+            <boxGeometry args={[beamWidth + 1.0, 0.08, 0.06]} />
           </mesh>
-          <mesh position={[0, 1.56, -1.03]} material={LED_ACCENT_MAT}>
-            <boxGeometry args={[beamWidth + 1.0, 0.07, 0.06]} />
+          <mesh position={[0, 1.56, -1.03]} material={HARVEST_GOLD_MAT}>
+            <boxGeometry args={[beamWidth + 1.0, 0.08, 0.06]} />
           </mesh>
 
           {/* Front Exhibition Name Board (facing +Z toward arriving visitors at spawn) */}

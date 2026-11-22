@@ -5,6 +5,9 @@ import {
   getCanonicalBoothNumber,
   resolveMapBoothVisualStyle,
   validateMap2DDataConsistency,
+  worldBoundsToLandscapeRect,
+  worldHeadingToLandscapeDir,
+  worldToLandscapeMapPoint,
 } from '../components/v28/InteractiveMap2D';
 import type { V28BoothPlacementView, V28ExhibitionVersionDetail } from '../services/v28Api';
 
@@ -137,5 +140,29 @@ describe('Grand Expo V28 Phase 2 — 2D Interactive Map U-Shaped Consistency & N
     expect(selectedVisited.fill).toBe('#38bdf8');
     expect(selectedVisited.stroke).toBe('#f59e0b');
     expect(selectedVisited.showVisitedCheck).toBe(true);
+  });
+
+  it('UAT-FIX-02: rotates 2D map 90° clockwise into landscape orientation without mirroring or mutating 3D coordinates', () => {
+    // Entrance (+Z = +138) maps to LEFT (mx = -138); North end (-Z = -148) maps to RIGHT (mx = +148)
+    const entrance = worldToLandscapeMapPoint(0, 138);
+    const northEnd = worldToLandscapeMapPoint(0, -148);
+    expect(entrance.mx).toBe(-138);
+    expect(northEnd.mx).toBe(148);
+    expect(northEnd.mx).toBeGreaterThan(entrance.mx);
+
+    // Left zones (x < 0) map to TOP (my < 0); Right zones (x > 0) map to BOTTOM (my > 0)
+    expect(worldToLandscapeMapPoint(-45, 0).my).toBe(-45);
+    expect(worldToLandscapeMapPoint(45, 0).my).toBe(45);
+
+    // Landscape hall rect has width > height (~2.2x aspect)
+    const hall = worldBoundsToLandscapeRect({ minX: -66, maxX: 66, minZ: -148, maxZ: 148 });
+    expect(hall.width).toBe(296);
+    expect(hall.height).toBe(132);
+    expect(hall.width).toBeGreaterThan(hall.height * 2);
+
+    // Heading at spawn (rotationY = Math.PI, facing -Z into hall) points RIGHT (+1, 0) in landscape map
+    const spawnHeading = worldHeadingToLandscapeDir(Math.PI);
+    expect(spawnHeading.dx).toBeCloseTo(1, 5);
+    expect(spawnHeading.dy).toBeCloseTo(0, 5);
   });
 });

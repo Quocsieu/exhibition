@@ -23,6 +23,12 @@ export interface V28ArchetypeSlotSpec {
   rotationY: number;
   /** Unscaled stand scale factor matched to V27.4 GLB furniture proportions */
   scale: number;
+  /** Optional physical shelf-tier render scale override so tall stands fit cleanly under the shelf tier above without clipping */
+  shelfFitScale?: number;
+  /** Optional vertical surface alignment delta (meters, GLB local) for elevated upper shelf tiers */
+  surfaceYOffset?: number;
+  /** Optional vertical headroom (meters, GLB local) to the underside of an upper shelf tier; clamps hover/highlight scale & keeps highlight badge clear */
+  maxHeadroomM?: number;
   displayStyle: ArchitecturalDisplayStyle;
 }
 
@@ -36,57 +42,57 @@ export interface V28ArchetypeSlotSpec {
 export const V28_ARCHETYPE_SLOT_LAYOUTS: Record<V28ArchetypeId, readonly V28ArchetypeSlotSpec[]> = {
   // Booth 01 — Signature Ring (booth_01_signature_ring_v27_4.glb)
   signature_ring: [
-    { slotId: 'slot_01', furnitureZone: 'podium', furnitureSurface: 'Đảo trung tâm Hero (Center Island)', position: [0.0, 0.98, 0.15], rotationY: 0.0, scale: 0.72, displayStyle: 'physical-stand' },
-    { slotId: 'slot_02', furnitureZone: 'podium', furnitureSurface: 'Bục tròn trái phía trước (Front-Left Round Pedestal)', position: [-1.25, 0.91, 0.85], rotationY: 0.24, scale: 0.62, displayStyle: 'tabletop-display' },
-    { slotId: 'slot_03', furnitureZone: 'counter', furnitureSurface: 'Quầy trưng bày bên phải sau (Rear-Right Counter)', position: [1.15, 1.11, -0.95], rotationY: -0.22, scale: 0.64, displayStyle: 'gallery-frame' },
-    { slotId: 'slot_04', furnitureZone: 'counter', furnitureSurface: 'Bàn tư vấn bên phải (Right Consultation Desk)', position: [2.02, 1.03, 0.62], rotationY: -0.52, scale: 0.56, displayStyle: 'tabletop-display' },
-    { slotId: 'slot_05', furnitureZone: 'shelf', furnitureSurface: 'Kệ vòng cung sau giữa-trái (Rear Curved Arc Shelf #1)', position: [-0.45, 1.22, -1.78], rotationY: 0.16, scale: 0.58, displayStyle: 'gallery-frame' },
-    { slotId: 'slot_06', furnitureZone: 'shelf', furnitureSurface: 'Kệ vòng cung sau bên trái (Rear Curved Arc Shelf #2)', position: [-1.32, 1.22, -1.42], rotationY: 0.45, scale: 0.56, displayStyle: 'gallery-frame' },
+    { slotId: 'slot_01', furnitureZone: 'podium', furnitureSurface: 'Đảo trung tâm Hero (Center Island)', position: [0.0, 0.98, 0.15], rotationY: 0.0, scale: 0.80, displayStyle: 'physical-stand' },
+    { slotId: 'slot_02', furnitureZone: 'podium', furnitureSurface: 'Bục tròn trái phía trước (Front-Left Round Pedestal)', position: [-1.25, 0.91, 0.85], rotationY: 0.22, scale: 0.72, displayStyle: 'tabletop-display' },
+    { slotId: 'slot_03', furnitureZone: 'counter', furnitureSurface: 'Quầy trưng bày bên phải sau (Rear-Right Counter)', position: [1.15, 1.11, -0.95], rotationY: -0.20, scale: 0.74, displayStyle: 'gallery-frame' },
+    { slotId: 'slot_04', furnitureZone: 'counter', furnitureSurface: 'Bàn tư vấn bên phải (Right Consultation Desk)', position: [2.02, 1.03, 0.62], rotationY: -0.38, scale: 0.66, displayStyle: 'tabletop-display' },
+    { slotId: 'slot_05', furnitureZone: 'shelf', furnitureSurface: 'Kệ vòng cung sau giữa-trái (Rear Curved Arc Shelf #1)', position: [-0.45, 1.22, -1.78], rotationY: 0.14, scale: 0.66, displayStyle: 'gallery-frame' },
+    { slotId: 'slot_06', furnitureZone: 'shelf', furnitureSurface: 'Kệ vòng cung sau bên trái (Rear Curved Arc Shelf #2)', position: [-1.32, 1.22, -1.42], rotationY: 0.36, scale: 0.64, displayStyle: 'gallery-frame' },
   ],
   // Booth 02 — Organic Flow (booth_02_organic_flow_v27_4.glb)
   organic_flow: [
-    { slotId: 'slot_01', furnitureZone: 'podium', furnitureSurface: 'Bục điêu khắc trung tâm trái (Center-Left Pill Pedestal)', position: [-0.45, 0.96, 0.35], rotationY: 0.28, scale: 0.70, displayStyle: 'gallery-frame' },
-    { slotId: 'slot_02', furnitureZone: 'podium', furnitureSurface: 'Bục trưng bày trung tâm phải (Center-Right Pedestal)', position: [0.92, 1.08, -0.65], rotationY: -0.22, scale: 0.66, displayStyle: 'gallery-frame' },
-    { slotId: 'slot_03', furnitureZone: 'counter', furnitureSurface: 'Bục thấp trưng bày trái sau (Rear-Left Low Stand)', position: [-1.15, 0.82, -0.72], rotationY: 0.32, scale: 0.60, displayStyle: 'physical-stand' },
-    { slotId: 'slot_04', furnitureZone: 'counter', furnitureSurface: 'Quầy oval bên trái (Left Oval Desk)', position: [-2.05, 1.00, 0.65], rotationY: 0.36, scale: 0.56, displayStyle: 'tabletop-display' },
-    { slotId: 'slot_05', furnitureZone: 'shelf', furnitureSurface: 'Hốc kệ tường cong bên phải (Right S-Curve Wall Niche)', position: [1.95, 1.00, -1.25], rotationY: -0.42, scale: 0.54, displayStyle: 'wall-niche' },
-    { slotId: 'slot_06', furnitureZone: 'shelf', furnitureSurface: 'Kệ tường cong phía sau (Rear S-Curve Gallery Shelf)', position: [0.15, 1.24, -1.55], rotationY: 0.0, scale: 0.60, displayStyle: 'gallery-frame' },
+    { slotId: 'slot_01', furnitureZone: 'podium', furnitureSurface: 'Bục điêu khắc trung tâm trái (Center-Left Pill Pedestal)', position: [-0.45, 0.96, 0.35], rotationY: 0.22, scale: 0.78, displayStyle: 'gallery-frame' },
+    { slotId: 'slot_02', furnitureZone: 'podium', furnitureSurface: 'Bục trưng bày trung tâm phải (Center-Right Pedestal)', position: [0.92, 1.08, -0.65], rotationY: -0.18, scale: 0.75, displayStyle: 'gallery-frame' },
+    { slotId: 'slot_03', furnitureZone: 'counter', furnitureSurface: 'Bục thấp trưng bày trái sau (Rear-Left Low Stand)', position: [-1.15, 0.82, -0.72], rotationY: 0.26, scale: 0.68, displayStyle: 'physical-stand' },
+    { slotId: 'slot_04', furnitureZone: 'counter', furnitureSurface: 'Quầy oval bên trái (Left Oval Desk)', position: [-2.05, 1.00, 0.65], rotationY: 0.30, scale: 0.65, displayStyle: 'tabletop-display' },
+    { slotId: 'slot_05', furnitureZone: 'shelf', furnitureSurface: 'Hốc kệ tường cong bên phải (Right S-Curve Wall Niche)', position: [1.95, 1.00, -1.25], rotationY: -0.34, scale: 0.62, displayStyle: 'wall-niche' },
+    { slotId: 'slot_06', furnitureZone: 'shelf', furnitureSurface: 'Kệ tường cong phía sau (Rear S-Curve Gallery Shelf)', position: [0.15, 1.24, -1.55], rotationY: 0.0, scale: 0.68, displayStyle: 'gallery-frame' },
   ],
   // Booth 03 — Grand Portal (booth_03_grand_portal_v27_4.glb)
   grand_portal: [
-    { slotId: 'slot_01', furnitureZone: 'podium', furnitureSurface: 'Đảo demo bậc thang trung tâm (Stepped Demo Island)', position: [0.55, 0.99, 0.58], rotationY: -0.16, scale: 0.70, displayStyle: 'physical-stand' },
-    { slotId: 'slot_02', furnitureZone: 'counter', furnitureSurface: 'Quầy chữ L bên trái (Left L-Counter)', position: [-1.45, 1.01, 0.82], rotationY: 0.18, scale: 0.64, displayStyle: 'tabletop-display' },
-    { slotId: 'slot_03', furnitureZone: 'podium', furnitureSurface: 'Kiosk kỹ thuật số bên phải (Right Digital Kiosk)', position: [1.98, 1.18, -0.38], rotationY: -0.38, scale: 0.66, displayStyle: 'digital-kiosk' },
-    { slotId: 'slot_04', furnitureZone: 'counter', furnitureSurface: 'Kệ tường media trung tâm sau (Rear Center Media Wall)', position: [-0.35, 1.25, -1.78], rotationY: 0.0, scale: 0.72, displayStyle: 'shelf-screen' },
-    { slotId: 'slot_05', furnitureZone: 'shelf', furnitureSurface: 'Kệ trưng bày bên trái sau (Rear-Left Blade Shelf)', position: [-2.35, 1.00, -1.48], rotationY: 0.14, scale: 0.56, displayStyle: 'shelf-screen' },
-    { slotId: 'slot_06', furnitureZone: 'shelf', furnitureSurface: 'Kệ trưng bày bên phải sau (Rear-Right Blade Shelf)', position: [1.55, 1.00, -1.48], rotationY: -0.14, scale: 0.56, displayStyle: 'shelf-screen' },
+    { slotId: 'slot_01', furnitureZone: 'podium', furnitureSurface: 'Đảo demo bậc thang trung tâm (Stepped Demo Island)', position: [0.55, 0.99, 0.58], rotationY: -0.14, scale: 0.78, displayStyle: 'physical-stand' },
+    { slotId: 'slot_02', furnitureZone: 'counter', furnitureSurface: 'Quầy chữ L bên trái (Left L-Counter)', position: [-1.45, 1.01, 0.82], rotationY: 0.16, scale: 0.74, displayStyle: 'tabletop-display' },
+    { slotId: 'slot_03', furnitureZone: 'podium', furnitureSurface: 'Kiosk kỹ thuật số bên phải (Right Digital Kiosk)', position: [1.98, 1.18, -0.38], rotationY: -0.32, scale: 0.74, displayStyle: 'digital-kiosk' },
+    { slotId: 'slot_04', furnitureZone: 'counter', furnitureSurface: 'Kệ tường media trung tâm sau (Rear Center Media Wall)', position: [-0.35, 1.25, -1.78], rotationY: 0.0, scale: 0.78, displayStyle: 'shelf-screen' },
+    { slotId: 'slot_05', furnitureZone: 'shelf', furnitureSurface: 'Kệ trưng bày bên trái sau (Rear-Left Blade Shelf)', position: [-2.35, 1.00, -1.48], rotationY: 0.14, scale: 0.64, displayStyle: 'shelf-screen' },
+    { slotId: 'slot_06', furnitureZone: 'shelf', furnitureSurface: 'Kệ trưng bày bên phải sau (Rear-Right Blade Shelf)', position: [1.55, 1.00, -1.48], rotationY: -0.14, scale: 0.64, displayStyle: 'shelf-screen' },
   ],
   // Booth 04 — Wave Pavilion (booth_04_wave_pavilion_v27_4.glb)
   wave_pavilion: [
-    { slotId: 'slot_01', furnitureZone: 'podium', furnitureSurface: 'Cụm bục trưng bày trái-giữa #1 (Left-Center Pedestal #1)', position: [-0.92, 0.98, 0.58], rotationY: 0.22, scale: 0.70, displayStyle: 'physical-stand' },
-    { slotId: 'slot_02', furnitureZone: 'podium', furnitureSurface: 'Cụm bục trưng bày trung tâm #2 (Center Pedestal #2)', position: [-0.18, 1.08, -0.35], rotationY: 0.08, scale: 0.66, displayStyle: 'tabletop-display' },
-    { slotId: 'slot_03', furnitureZone: 'counter', furnitureSurface: 'Quầy sóng bên phải trước (Right Wave Bar Front)', position: [1.92, 1.02, 0.42], rotationY: -0.88, scale: 0.60, displayStyle: 'tabletop-display' },
-    { slotId: 'slot_04', furnitureZone: 'counter', furnitureSurface: 'Quầy sóng bên phải sau (Right Wave Bar Rear)', position: [1.92, 1.02, -0.58], rotationY: -0.88, scale: 0.60, displayStyle: 'tabletop-display' },
-    { slotId: 'slot_05', furnitureZone: 'shelf', furnitureSurface: 'Bục thấp bên trái (Left Low Pedestal)', position: [-1.62, 0.78, 0.12], rotationY: 0.34, scale: 0.58, displayStyle: 'physical-stand' },
-    { slotId: 'slot_06', furnitureZone: 'shelf', furnitureSurface: 'Màn hình/Kiosk góc trái sau (Rear-Left Promo Kiosk)', position: [-1.86, 1.18, -1.08], rotationY: 0.48, scale: 0.64, displayStyle: 'digital-kiosk' },
+    { slotId: 'slot_01', furnitureZone: 'podium', furnitureSurface: 'Cụm bục trưng bày trái-giữa #1 (Left-Center Pedestal #1)', position: [-0.92, 0.98, 0.58], rotationY: 0.18, scale: 0.78, displayStyle: 'physical-stand' },
+    { slotId: 'slot_02', furnitureZone: 'podium', furnitureSurface: 'Cụm bục trưng bày trung tâm #2 (Center Pedestal #2)', position: [-0.18, 1.08, -0.35], rotationY: 0.08, scale: 0.74, displayStyle: 'tabletop-display' },
+    { slotId: 'slot_03', furnitureZone: 'counter', furnitureSurface: 'Quầy sóng bên phải trước (Right Wave Bar Front)', position: [1.92, 1.02, 0.42], rotationY: -0.38, scale: 0.68, displayStyle: 'tabletop-display' },
+    { slotId: 'slot_04', furnitureZone: 'counter', furnitureSurface: 'Quầy sóng bên phải sau (Right Wave Bar Rear)', position: [1.92, 1.02, -0.58], rotationY: -0.38, scale: 0.68, displayStyle: 'tabletop-display' },
+    { slotId: 'slot_05', furnitureZone: 'shelf', furnitureSurface: 'Bục thấp bên trái (Left Low Pedestal)', position: [-1.62, 0.78, 0.12], rotationY: 0.28, scale: 0.66, displayStyle: 'physical-stand' },
+    { slotId: 'slot_06', furnitureZone: 'shelf', furnitureSurface: 'Màn hình/Kiosk góc trái sau (Rear-Left Promo Kiosk)', position: [-1.86, 1.18, -1.08], rotationY: 0.36, scale: 0.72, displayStyle: 'digital-kiosk' },
   ],
   // Booth 05 — Gallery Arch (booth_05_gallery_arch_v27_4.glb)
   gallery_arch: [
-    { slotId: 'slot_01', furnitureZone: 'counter', furnitureSurface: 'Đảo trưng bày trung tâm trái (Center Island Riser Left)', position: [-0.72, 1.02, -0.05], rotationY: 0.14, scale: 0.68, displayStyle: 'gallery-frame' },
-    { slotId: 'slot_02', furnitureZone: 'counter', furnitureSurface: 'Đảo trưng bày trung tâm phải (Center Island Riser Right)', position: [0.58, 0.91, -0.05], rotationY: -0.14, scale: 0.66, displayStyle: 'tabletop-display' },
-    { slotId: 'slot_03', furnitureZone: 'shelf', furnitureSurface: 'Hốc vòm tường sau giữa (Rear Center Arched Niche)', position: [0.0, 1.50, -1.68], rotationY: 0.0, scale: 0.62, displayStyle: 'wall-niche' },
-    { slotId: 'slot_04', furnitureZone: 'shelf', furnitureSurface: 'Hốc vòm tường sau trái (Rear Left Arched Niche)', position: [-1.92, 1.50, -1.68], rotationY: 0.12, scale: 0.60, displayStyle: 'wall-niche' },
-    { slotId: 'slot_05', furnitureZone: 'podium', furnitureSurface: 'Hốc vòm tường sau phải (Rear Right Arched Niche)', position: [1.92, 1.50, -1.68], rotationY: -0.12, scale: 0.60, displayStyle: 'wall-niche' },
-    { slotId: 'slot_06', furnitureZone: 'podium', furnitureSurface: 'Quầy boutique bên phải (Right Boutique Desk)', position: [1.98, 1.01, -0.68], rotationY: -0.42, scale: 0.56, displayStyle: 'tabletop-display' },
+    { slotId: 'slot_01', furnitureZone: 'counter', furnitureSurface: 'Đảo trưng bày trung tâm trái (Center Island Riser Left)', position: [-0.72, 1.02, -0.05], rotationY: 0.12, scale: 0.76, displayStyle: 'gallery-frame' },
+    { slotId: 'slot_02', furnitureZone: 'counter', furnitureSurface: 'Đảo trưng bày trung tâm phải (Center Island Riser Right)', position: [0.58, 0.91, -0.05], rotationY: -0.12, scale: 0.74, displayStyle: 'tabletop-display' },
+    { slotId: 'slot_03', furnitureZone: 'shelf', furnitureSurface: 'Hốc vòm tường sau giữa (Rear Center Arched Niche)', position: [0.0, 1.50, -1.68], rotationY: 0.0, scale: 0.70, displayStyle: 'wall-niche' },
+    { slotId: 'slot_04', furnitureZone: 'shelf', furnitureSurface: 'Hốc vòm tường sau trái (Rear Left Arched Niche)', position: [-1.92, 1.50, -1.68], rotationY: 0.12, scale: 0.68, displayStyle: 'wall-niche' },
+    { slotId: 'slot_05', furnitureZone: 'podium', furnitureSurface: 'Hốc vòm tường sau phải (Rear Right Arched Niche)', position: [1.92, 1.50, -1.68], rotationY: -0.12, scale: 0.68, displayStyle: 'wall-niche' },
+    { slotId: 'slot_06', furnitureZone: 'podium', furnitureSurface: 'Quầy boutique bên phải (Right Boutique Desk)', position: [1.98, 1.01, -0.68], rotationY: -0.34, scale: 0.66, displayStyle: 'tabletop-display' },
   ],
-  // Booth 06 — Dynamic Frame (booth_06_dynamic_frame_v27_4.glb)
+  // Booth 06 — Dynamic Frame (booth_06_dynamic_frame_v27_4.glb — UAT Fix 07: exact GLB-measured flush furniture & 2-tier right shelf placement)
   dynamic_frame: [
-    { slotId: 'slot_01', furnitureZone: 'podium', furnitureSurface: 'Bục đa diện bên trái trước (Left Twin Faceted Pod #1)', position: [-1.35, 0.99, 0.62], rotationY: 0.24, scale: 0.70, displayStyle: 'physical-stand' },
-    { slotId: 'slot_02', furnitureZone: 'counter', furnitureSurface: 'Quầy nghiêng phải phía trước (Front-Right Angled Counter)', position: [1.35, 1.00, 0.78], rotationY: -0.32, scale: 0.66, displayStyle: 'tabletop-display' },
-    { slotId: 'slot_03', furnitureZone: 'podium', furnitureSurface: 'Bục đa diện trung tâm sau (Center-Left Pod #2)', position: [-0.62, 1.11, -0.65], rotationY: 0.16, scale: 0.66, displayStyle: 'physical-stand' },
-    { slotId: 'slot_04', furnitureZone: 'counter', furnitureSurface: 'Trụ kỹ thuật số trái sau (Rear-Left Digital Monolith)', position: [-2.12, 1.24, -0.84], rotationY: 0.42, scale: 0.64, displayStyle: 'digital-kiosk' },
-    { slotId: 'slot_05', furnitureZone: 'shelf', furnitureSurface: 'Kệ nổi bên phải trước (Right Floating Shelf #1)', position: [2.52, 1.10, 0.28], rotationY: -1.48, scale: 0.54, displayStyle: 'shelf-screen' },
-    { slotId: 'slot_06', furnitureZone: 'shelf', furnitureSurface: 'Kệ nổi bên phải sau (Right Floating Shelf #2)', position: [2.52, 1.10, -0.58], rotationY: -1.48, scale: 0.54, displayStyle: 'shelf-screen' },
+    { slotId: 'slot_01', furnitureZone: 'podium', furnitureSurface: 'Bục đa diện bên trái trước (Left Twin Faceted Pod #1, Y=0.985)', position: [-1.35, 0.985, 0.62], rotationY: 0.16, scale: 0.76, displayStyle: 'physical-stand' },
+    { slotId: 'slot_02', furnitureZone: 'counter', furnitureSurface: 'Quầy nghiêng phải phía trước (Front-Right Counter, Y=0.995)', position: [1.35, 0.995, 0.78], rotationY: -0.14, scale: 0.75, displayStyle: 'tabletop-display' },
+    { slotId: 'slot_03', furnitureZone: 'podium', furnitureSurface: 'Bục đa diện trung tâm sau (Center-Left Pod #2, Y=1.105)', position: [-0.62, 1.105, -0.65], rotationY: 0.12, scale: 0.72, displayStyle: 'physical-stand' },
+    { slotId: 'slot_04', furnitureZone: 'counter', furnitureSurface: 'Trụ kỹ thuật số trái sau (Rear-Left Digital Monolith, Z=-0.78)', position: [-2.12, 1.24, -0.78], rotationY: 0.24, scale: 0.70, displayStyle: 'digital-kiosk' },
+    { slotId: 'slot_05', furnitureZone: 'shelf', furnitureSurface: 'Kệ nổi tường phải tầng 1 (Right Floating Shelf Tier 1, Y=1.072)', position: [2.55, 1.072, 0.25], rotationY: -0.35, scale: 0.50, shelfFitScale: 0.355, maxHeadroomM: 0.59, displayStyle: 'shelf-screen' },
+    { slotId: 'slot_06', furnitureZone: 'shelf', furnitureSurface: 'Kệ nổi tường phải tầng 2 (Right Floating Shelf Tier 2, Y=1.702)', position: [2.55, 1.65, -0.22], rotationY: -0.35, scale: 0.50, shelfFitScale: 0.35, surfaceYOffset: 0.052, maxHeadroomM: 0.58, displayStyle: 'shelf-screen' },
   ],
 };
 

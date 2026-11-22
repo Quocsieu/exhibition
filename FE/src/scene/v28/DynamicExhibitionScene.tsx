@@ -8,7 +8,12 @@ import type {
   V28ZoneRecord,
 } from '../../services/v28Api';
 import { DynamicBooth3D } from './DynamicBooth3D';
+import { NavigationPath3D } from './NavigationPath3D';
+import { CharacterNavigationRing3D } from './CharacterNavigationRing3D';
+import { getV28BoothSlotSpec } from './v28ProductSlotLayouts';
 import type { V28NpcAnimState } from './DynamicBoothNpc3D';
+import type { HighlightedBoothProduct, NpcSessionState } from '../../hooks/useNpcConsultationSession';
+import type { GuidedRouteResult } from '../../services/v28NavigationEngine';
 import { getTextureCacheStats } from './v28BoothAssets';
 import { V27VisualKitLayer, useV27TerrazzoFloorTexture } from './V27VisualKit';
 import { YouthEntranceArch3D } from './YouthEntranceArch3D';
@@ -109,6 +114,11 @@ export interface DynamicExhibitionSceneProps {
   remoteAvatars?: V28RemoteAvatarView[];
   npcAnimState?: V28NpcAnimState;
   isNpcSpeaking?: boolean;
+  npcSessionState?: NpcSessionState;
+  activeNpcBoothId?: string | null;
+  highlightedProduct?: HighlightedBoothProduct | null;
+  guidedRoute?: GuidedRouteResult | null;
+  onCameraYawChange?: (yaw: number) => void;
   playerName?: string;
   playerColor?: string;
   onPlayerMove?: (pos: V28PlayerState) => void;
@@ -197,6 +207,11 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   remoteAvatars = [],
   npcAnimState = 'idle',
   isNpcSpeaking = false,
+  npcSessionState = 'IDLE',
+  activeNpcBoothId = null,
+  highlightedProduct = null,
+  guidedRoute = null,
+  onCameraYawChange,
   playerName = 'Khách V28',
   playerColor = '#0ea5e9',
   onPlayerMove,
@@ -423,7 +438,9 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
     });
     gestureControllerRef.current = controller;
 
+    let activeDragStart: { id: number; x: number; y: number; dragged: boolean } | null = null;
     const onPtrDown = (e: PointerEvent) => {
+      activeDragStart = { id: e.pointerId, x: e.clientX, y: e.clientY, dragged: false };
       const role = controller.handlePointerDown({
         pointerId: e.pointerId,
         pointerType: e.pointerType,
@@ -440,6 +457,12 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       }
     };
     const onPtrMove = (e: PointerEvent) => {
+      if (activeDragStart && activeDragStart.id === e.pointerId && !activeDragStart.dragged) {
+        if (Math.hypot(e.clientX - activeDragStart.x, e.clientY - activeDragStart.y) >= 8) {
+          activeDragStart.dragged = true;
+          suppressClickUntilRef.current = Math.max(suppressClickUntilRef.current, performance.now() + 260);
+        }
+      }
       controller.handlePointerMove({
         pointerId: e.pointerId,
         pointerType: e.pointerType,
@@ -449,6 +472,12 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       });
     };
     const onPtrUpOrCancel = (e: PointerEvent) => {
+      if (activeDragStart && activeDragStart.id === e.pointerId) {
+        if (activeDragStart.dragged || Math.hypot(e.clientX - activeDragStart.x, e.clientY - activeDragStart.y) >= 8) {
+          suppressClickUntilRef.current = Math.max(suppressClickUntilRef.current, performance.now() + 260);
+        }
+        activeDragStart = null;
+      }
       controller.handlePointerEnd(e.pointerId);
       if (typeof canvasEl.hasPointerCapture === 'function' && canvasEl.hasPointerCapture(e.pointerId)) {
         try {
@@ -748,9 +777,16 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       fpsAccumRef.current.lastTime = now;
     }
 
-    if (moved && now - lastReportRef.current > 120) {
+    if (now - lastReportRef.current > 160) {
       lastReportRef.current = now;
-      onPlayerMove?.({ ...p });
+      if (moved) {
+        onPlayerMove?.({ ...p });
+      }
+      if (onCameraYawChange) {
+        const activeYaw =
+          cameraMode === 'explore' ? smoothedExploreYawRef.current : smoothedOverviewYawRef.current;
+        onCameraYawChange(activeYaw);
+      }
     }
 
     // Read-only telemetry for QA & Phase 3/4/6 profiling
@@ -859,44 +895,80 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       ))}
 
       {/* Dynamic Booths (6 V27.4 GLB Archetypes reused via shared cache; V28-AUDIT-026: omit unused npcAnimState to preserve React.memo) */}
-      {world.booths.map((booth) => (
-        <DynamicBooth3D
-          key={booth.boothId}
-          booth={booth}
-          lodTier={boothLodMap ? (boothLodMap[booth.boothId] ?? 0) : 0}
-          isFocused={focusedBooth?.boothId === booth.boothId}
-          onFocusBooth={(b) => {
-            if (shouldSuppressInteractionClick()) return;
-            onFocusBooth(b);
-          }}
-          onSelectProduct={(b, prod, sId) => {
-            if (shouldSuppressInteractionClick()) return;
-            onSelectProduct(b, prod, sId);
-          }}
-        />
-      ))}
+      {world.booths.map((booth) => {
+        const isBoothHighlighted = highlightedProduct?.boothId === booth.boothId;
+        return (
+          <DynamicBooth3D
+            key={booth.boothId}
+            booth={booth}
+            lodTier={boothLodMap ? (boothLodMap[booth.boothId] ?? 0) : 0}
+            isFocused={focusedBooth?.boothId === booth.boothId}
+            highlightedSlotId={isBoothHighlighted ? highlightedProduct?.slotId : null}
+            highlightedProductId={isBoothHighlighted ? highlightedProduct?.productId : null}
+            onFocusBooth={(b) => {
+              if (shouldSuppressInteractionClick()) return;
+              onFocusBooth(b);
+            }}
+            onSelectProduct={(b, prod, sId) => {
+              if (shouldSuppressInteractionClick()) return;
+              onSelectProduct(b, prod, sId);
+            }}
+          />
+        );
+      })}
 
       {/* Authentic V27.5 Sales Assistant NPCs (Mounted in booth-local space ONLY for Ring 0 Near Booths — 100% V27.5 model, rig & animations!) */}
       {world.booths
         .filter((b) => (boothLodMap ? (boothLodMap[b.boothId] ?? 0) === 0 : true))
-        .map((booth) => (
-          <group
-            key={`v27-npc-${booth.boothId}`}
-            position={[booth.positionX, 0, booth.positionZ]}
-            rotation={[0, booth.rotationY, 0]}
-          >
-            <SalesAssistantNpc
-              booth={toLegacyBoothAdapter(booth)}
-              isActiveSession={Boolean(isNpcSpeaking) && focusedBooth?.boothId === booth.boothId}
-              activeAnimation={Boolean(isNpcSpeaking) && focusedBooth?.boothId === booth.boothId ? toV27NpcAnim(npcAnimState) : 'IDLE'}
-              actionLabel="🎙 Nghe tư vấn"
-              onActivate={() => {
-                if (shouldSuppressInteractionClick()) return;
-                onClickNpc?.(booth);
-              }}
-            />
-          </group>
-        ))}
+        .map((booth) => {
+          const isThisNpcActiveBooth = activeNpcBoothId === booth.boothId;
+          const isThisNpcSpeaking = isThisNpcActiveBooth && (npcSessionState === 'SPEAKING' || npcSessionState === 'LOADING' || Boolean(isNpcSpeaking));
+          const npcStatusLabel = (() => {
+            if (!isThisNpcActiveBooth) return '🎙 Nghe tư vấn';
+            if (npcSessionState === 'LOADING') return '⏳ Đang chuẩn bị...';
+            if (npcSessionState === 'SPEAKING') return '🔊 Đang tư vấn · Tạm dừng';
+            if (npcSessionState === 'PAUSED') return '⏸ Bấm để tiếp tục';
+            if (npcSessionState === 'COMPLETED') return '🔄 Nghe lại tư vấn';
+            if (npcSessionState === 'ERROR') return '🎙 Thử nghe lại';
+            return '🎙 Nghe tư vấn';
+          })();
+          const lookTargetLocalX =
+            isThisNpcSpeaking && highlightedProduct?.boothId === booth.boothId
+              ? getV28BoothSlotSpec(booth.archetypeId, highlightedProduct.slotId).position[0]
+              : null;
+
+          return (
+            <group
+              key={`v27-npc-${booth.boothId}`}
+              position={[booth.positionX, 0, booth.positionZ]}
+              rotation={[0, booth.rotationY, 0]}
+            >
+              <SalesAssistantNpc
+                booth={toLegacyBoothAdapter(booth)}
+                isActiveSession={isThisNpcSpeaking}
+                activeAnimation={isThisNpcSpeaking ? toV27NpcAnim(npcAnimState) : 'IDLE'}
+                actionLabel="🎙 Nghe tư vấn"
+                statusLabel={npcStatusLabel}
+                lookTargetLocalX={lookTargetLocalX}
+                onActivate={() => {
+                  if (shouldSuppressInteractionClick()) return;
+                  onClickNpc?.(booth);
+                }}
+              />
+            </group>
+          );
+        })}
+
+      {/* Phase 2.3: Intelligent 3D Walkway Guided Path & Arrival Beacon */}
+      <NavigationPath3D route={guidedRoute} />
+
+      {/* UAT Fix 01: Character-Anchored 3D World-Space Navigation Indicators (around avatar feet, hidden in Focus Mode) */}
+      <CharacterNavigationRing3D
+        world={world}
+        liveTransform={() => playerPosRef.current}
+        visible={cameraMode !== 'focus'}
+        guidedRoute={guidedRoute}
+      />
 
       {/* Optional Phase 3 Far Instanced Proxies & Parametric Roof */}
       {renderFarProxies?.()}

@@ -225,11 +225,28 @@ export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
           <V27PlazaGlb url="/models/plaza/v27_4/rest_lounge_v27_4.glb" position={[wingPropX, 0, -0.4]} />
           {!isSixBoothParity && (
             <>
-              <V27PlazaGlb url="/models/plaza/v27_5/avenue_planter_island_v27_5.glb" position={[-8.8, 0, -4.6]} />
+              {/* Phase 5: Realistic tree & lush planter replacing geometric sphere placeholder */}
               <V27PlazaGlb
-                url="/models/plaza/v27_5/avenue_planter_island_v27_5.glb"
-                position={[8.8, 0, -4.6]}
+                url="/models/env/tree-gian.glb"
+                position={[-9.2, 0, -4.6]}
+                targetHeight={3.65}
+              />
+              <V27PlazaGlb
+                url="/models/env/planter-near-ch.glb"
+                position={[-7.8, 0, -3.4]}
+                targetHeight={1.25}
+              />
+              <V27PlazaGlb
+                url="/models/env/tree-gian.glb"
+                position={[9.2, 0, -4.6]}
                 rotation={[0, Math.PI, 0]}
+                targetHeight={3.65}
+              />
+              <V27PlazaGlb
+                url="/models/env/planter-near-ch.glb"
+                position={[7.8, 0, -3.4]}
+                rotation={[0, Math.PI, 0]}
+                targetHeight={1.25}
               />
             </>
           )}
@@ -260,11 +277,12 @@ export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
               {/* Deterministic V27.5 Heritage Centerpiece Variation (clear of all 6 booth approach & focus paths!) */}
               {mountCenterpieceGlb && c.centerpieceKind === 'medallion_oasis' && (
                 <>
-                  <V27PlazaGlb url="/models/plaza/v27_5/plaza_oasis_v27_5.glb" position={[-6.8, 0, 1.2]} />
+                  <V27PlazaGlb url="/models/env/tree-gian.glb" position={[-6.8, 0, 1.2]} targetHeight={3.25} />
                   <V27PlazaGlb
-                    url="/models/plaza/v27_5/plaza_oasis_v27_5.glb"
+                    url="/models/env/tree-gian.glb"
                     position={[6.8, 0, 1.2]}
                     rotation={[0, Math.PI, 0]}
+                    targetHeight={3.25}
                   />
                 </>
               )}

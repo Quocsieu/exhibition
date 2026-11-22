@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getStoredVisitorToken,
   v28Api,
@@ -38,6 +38,10 @@ import { piperBrowserTts, shouldAllowPiperBackgroundPrewarm } from '../services/
 import { resolveNpcTtsMode } from '../services/npcTtsConfig';
 import { npcHybridTtsEngine, shouldAllowHybridPreload } from '../services/npcHybridTtsEngine';
 import { extractBoothConsultationChunks } from '../services/npcConsultationScript';
+import { findSimilarBooths } from '../services/similarBooths';
+import { applyAgriDemoShowcaseOverlay } from '../services/v28AgriDemoShowcase';
+import { computeGuidedRoute } from '../services/v28NavigationEngine';
+import { useNpcConsultationSession } from '../hooks/useNpcConsultationSession';
 import type { V28NpcAnimState } from '../scene/v28/DynamicBoothNpc3D';
 
 export interface DynamicExhibitionPageProps {
@@ -51,9 +55,51 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   const [cameraMode, setCameraMode] = useState<V28CameraMode>('explore');
   const previousExteriorModeRef = useRef<'overview' | 'explore'>('explore');
   const [focusedBooth, setFocusedBooth] = useState<V28BoothPlacementView | null>(null);
-  const [npcPanelOpen, setNpcPanelOpen] = useState<boolean>(false);
-  const [npcAnimState, setNpcAnimState] = useState<V28NpcAnimState>('idle');
+  const [guidedTargetBooth, setGuidedTargetBooth] = useState<V28BoothPlacementView | null>(null);
+  const [cameraYaw, setCameraYaw] = useState<number>(Math.PI);
+  const lastYawUpdateRef = useRef<number>(Math.PI);
+  const [npcChatOpen, setNpcChatOpen] = useState<boolean>(false);
+  const [chatAnimState, setChatAnimState] = useState<V28NpcAnimState>('idle');
+  const [similarDismissed, setSimilarDismissed] = useState<boolean>(false);
   const [directoryOpenNonce, setDirectoryOpenNonce] = useState<number>(0);
+
+  // Phase 1.1–1.4: Headless Web Audio API NPC consultation state machine (no blocking UI panel)
+  const npcSession = useNpcConsultationSession();
+  const effectiveNpcAnimState: V28NpcAnimState = npcChatOpen ? chatAnimState : npcSession.animState;
+  const isNpcConsultActive =
+    npcSession.sessionState === 'SPEAKING' ||
+    npcSession.sessionState === 'LOADING' ||
+    npcChatOpen;
+
+  const similarBooths = useMemo(
+    () => findSimilarBooths(focusedBooth, world?.booths || [], 3),
+    [focusedBooth, world?.booths]
+  );
+
+  const handleCameraYawChange = useCallback((nextYaw: number) => {
+    if (Math.abs(nextYaw - lastYawUpdateRef.current) >= 0.04) {
+      lastYawUpdateRef.current = nextYaw;
+      setCameraYaw(nextYaw);
+    }
+  }, []);
+
+  const handleStartGuideToBooth = useCallback(
+    (booth: V28BoothPlacementView) => {
+      npcSession.stopSession();
+      setFocusedBooth(null);
+      setSelectedProduct(null);
+      setNpcChatOpen(false);
+      setChatAnimState('idle');
+      setGuidedTargetBooth(booth);
+      setCameraMode('explore');
+    },
+    [npcSession]
+  );
+
+  // Reset similar-booths dismissal when switching booths or starting a new consultation
+  useEffect(() => {
+    setSimilarDismissed(false);
+  }, [focusedBooth?.boothId, npcSession.sessionState]);
 
   // Exact V27.5 Visitor Profile identity (sessionStorage: expo_visitor_name & expo_visitor_color)
   const [playerName, setPlayerName] = useState<string>(() => {
@@ -81,6 +127,22 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     pos: { x: number; z: number; rotationY: number } | null;
   }>({ nonce: 0, pos: null });
   const [playerPos, setPlayerPos] = useState<V28PlayerState>({ x: 0, z: 20, rotationY: Math.PI });
+
+  // Phase 2.3: Collision-free 3D guided route along world.walkwayGraph
+  const guidedRoute = useMemo(() => {
+    if (!world || !guidedTargetBooth) return null;
+    return computeGuidedRoute(world, playerPos, guidedTargetBooth);
+  }, [world, guidedTargetBooth, playerPos]);
+
+  // Auto-complete guided route when visitor reaches within 4.0m of target booth approachPoint
+  useEffect(() => {
+    if (!guidedTargetBooth) return;
+    const tx = guidedTargetBooth.approachPoint?.x ?? guidedTargetBooth.positionX;
+    const tz = guidedTargetBooth.approachPoint?.z ?? guidedTargetBooth.positionZ;
+    if (Math.hypot(playerPos.x - tx, playerPos.z - tz) <= 4.0) {
+      setGuidedTargetBooth(null);
+    }
+  }, [guidedTargetBooth, playerPos.x, playerPos.z]);
   const joystickVecRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const floatingJoystickRef = useRef<FloatingJoystickOverlayHandle | null>(null);
   const [zoomRequest, setZoomRequest] = useState<{ delta: number; nonce: number }>({ delta: 0, nonce: 0 });
@@ -175,7 +237,13 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     }
     setError('');
     try {
-      const { world: loaded } = await v28Api.getActiveWorld(previewVersionId, bypassCache);
+      const { world: rawLoaded } = await v28Api.getActiveWorld(previewVersionId, bypassCache);
+      const demoAgriRequested =
+        typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('demoAgri') === '1';
+      const loaded = demoAgriRequested
+        ? applyAgriDemoShowcaseOverlay(rawLoaded).world
+        : rawLoaded;
       const isInitial = !hasLoadedWorldRef.current;
       hasLoadedWorldRef.current = true;
       setWorld(loaded);
@@ -191,8 +259,9 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
           if (!prev) return null;
           const next = loaded.booths.find((b) => b.boothId === prev.boothId) || null;
           if (!next) {
-            setNpcPanelOpen(false);
-            setNpcAnimState('idle');
+            npcSession.stopSession();
+            setNpcChatOpen(false);
+            setChatAnimState('idle');
             setCameraMode((cm) => (cm === 'focus' ? 'explore' : cm));
           }
           return next;
@@ -531,7 +600,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
       }, waitMs);
       return () => window.clearTimeout(timer);
     }
-    if (npcPanelOpen) {
+    if (isNpcConsultActive) {
       const waitMs = Math.max(0, eng.minDwellInteractMs + 60 - elapsed);
       const timer = window.setTimeout(() => {
         void submitVerifiedVisit(focusedBooth, 'npc_consult', eng.token);
@@ -549,7 +618,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     cameraMode,
     focusedBooth,
     selectedProduct,
-    npcPanelOpen,
+    isNpcConsultActive,
     engagementReadyNonce,
     submitVerifiedVisit,
   ]);
@@ -571,6 +640,9 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     if (cameraMode === 'overview' || cameraMode === 'explore') {
       previousExteriorModeRef.current = cameraMode;
     }
+    if (npcSession.activeBoothId && npcSession.activeBoothId !== booth.boothId) {
+      npcSession.stopSession();
+    }
     const lookRot = Math.atan2(
       booth.positionX - booth.approachPoint.x,
       booth.positionZ - booth.approachPoint.z
@@ -583,17 +655,22 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     sendTeleport(booth.approachPoint.x, booth.approachPoint.z, lookRot);
     setFocusedBooth(booth);
     setSelectedProduct(null);
+    setNpcChatOpen(false);
     setCameraMode('focus');
-  }, [cameraMode, sendTeleport]);
+  }, [cameraMode, sendTeleport, npcSession]);
 
   const handleFocusBooth = useCallback((booth: V28BoothPlacementView) => {
     if (cameraMode === 'overview' || cameraMode === 'explore') {
       previousExteriorModeRef.current = cameraMode;
     }
+    if (npcSession.activeBoothId && npcSession.activeBoothId !== booth.boothId) {
+      npcSession.stopSession();
+    }
     setFocusedBooth(booth);
     setSelectedProduct(null);
+    setNpcChatOpen(false);
     setCameraMode('focus');
-  }, [cameraMode]);
+  }, [cameraMode, npcSession]);
 
   const handleSelectProduct = useCallback(
     (booth: V28BoothPlacementView, product: V28Product, slotId: string) => {
@@ -602,25 +679,20 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
       }
       setFocusedBooth(booth);
       setSelectedProduct({ booth, product, slotId });
+      setNpcChatOpen(false);
       setCameraMode('focus');
     },
     [cameraMode]
   );
 
   const handleExitBoothFocus = useCallback((forceExplore = false) => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {
-        // ignore
-      }
-    }
+    npcSession.stopSession();
     setFocusedBooth(null);
     setSelectedProduct(null);
-    setNpcPanelOpen(false);
-    setNpcAnimState('idle');
+    setNpcChatOpen(false);
+    setChatAnimState('idle');
     setCameraMode(forceExplore ? 'explore' : previousExteriorModeRef.current);
-  }, []);
+  }, [npcSession]);
 
   // Single unified Escape & WASD keyboard handler (Modal-first priority matching V27.5 BoothPanel)
   useEffect(() => {
@@ -628,12 +700,18 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
       const activeTag = document.activeElement?.tagName;
       const isTyping = activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT';
       if (e.key === 'Escape') {
+        if (npcChatOpen) {
+          e.preventDefault();
+          setNpcChatOpen(false);
+          setChatAnimState('idle');
+          return;
+        }
         if (selectedProduct) {
           e.preventDefault();
           setSelectedProduct(null);
           return;
         }
-        if (cameraMode === 'focus' || focusedBooth || npcPanelOpen) {
+        if (cameraMode === 'focus' || focusedBooth) {
           e.preventDefault();
           handleExitBoothFocus(false);
           return;
@@ -656,14 +734,15 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [cameraMode, focusedBooth, selectedProduct, npcPanelOpen, handleExitBoothFocus]);
+  }, [cameraMode, focusedBooth, selectedProduct, npcChatOpen, handleExitBoothFocus]);
 
   const handleReturnToCenter = useCallback(() => {
     if (!world) return;
+    npcSession.stopSession();
     setFocusedBooth(null);
     setSelectedProduct(null);
-    setNpcPanelOpen(false);
-    setNpcAnimState('idle');
+    setNpcChatOpen(false);
+    setChatAnimState('idle');
     setPlayerTarget(null);
     setCameraMode('explore');
     previousExteriorModeRef.current = 'explore';
@@ -676,19 +755,20 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
       },
     }));
     sendTeleport(world.spawnPoint.x, world.spawnPoint.z, world.spawnPoint.rotationY);
-  }, [world, sendTeleport]);
+  }, [world, sendTeleport, npcSession]);
 
   const handleFloorClick = useCallback((x: number, z: number) => {
     if (cameraMode === 'focus') {
       handleExitBoothFocus(true);
       return;
     }
+    npcSession.stopSession();
     setPlayerTarget({ x, z });
     setFocusedBooth(null);
     setSelectedProduct(null);
-    setNpcPanelOpen(false);
-    setNpcAnimState('idle');
-  }, [cameraMode, handleExitBoothFocus]);
+    setNpcChatOpen(false);
+    setChatAnimState('idle');
+  }, [cameraMode, handleExitBoothFocus, npcSession]);
 
   if (loading) {
     return (
@@ -764,8 +844,13 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         graphicsQuality={graphicsQuality}
         boothLodMap={boothLodMap}
         remoteAvatars={remoteAvatars}
-        npcAnimState={npcAnimState}
-        isNpcSpeaking={npcPanelOpen && npcAnimState !== 'idle'}
+        npcAnimState={effectiveNpcAnimState}
+        isNpcSpeaking={npcSession.sessionState === 'SPEAKING' || npcSession.sessionState === 'LOADING'}
+        npcSessionState={npcSession.sessionState}
+        activeNpcBoothId={npcSession.activeBoothId}
+        highlightedProduct={npcSession.highlightedProduct}
+        guidedRoute={guidedRoute}
+        onCameraYawChange={handleCameraYawChange}
         playerName={playerName}
         playerColor={playerColor}
         onPlayerMove={(pos) => {
@@ -781,8 +866,9 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
           }
           setFocusedBooth(booth);
           setSelectedProduct(null);
-          setNpcPanelOpen(true);
+          setNpcChatOpen(false);
           setCameraMode('focus');
+          npcSession.handleNpcClick(booth);
         }}
         onOpenDirectoryMap={() => setDirectoryOpenNonce((n) => n + 1)}
         onFloatingJoystickVisual={(visual) => {
@@ -812,7 +898,21 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         onRewardStatusUpdated={setRewardStatus}
         focusedBooth={focusedBooth}
         selectedProduct={selectedProduct}
-        npcPanelOpen={npcPanelOpen}
+        npcPanelOpen={false}
+        npcChatOpen={npcChatOpen}
+        npcIsMuted={npcSession.isMuted}
+        similarBooths={similarBooths}
+        showSimilarBooths={
+          cameraMode === 'focus' &&
+          Boolean(focusedBooth) &&
+          npcSession.sessionState === 'COMPLETED' &&
+          npcSession.activeBoothId === focusedBooth?.boothId &&
+          !similarDismissed
+        }
+        guidedRoute={guidedRoute}
+        cameraYaw={cameraYaw}
+        onStartGuideToBooth={handleStartGuideToBooth}
+        onCancelGuide={() => setGuidedTargetBooth(null)}
         directoryOpenNonce={directoryOpenNonce}
         playerName={playerName}
         playerColor={playerColor}
@@ -825,22 +925,38 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
           }
           setCameraMode(mode);
           if (mode !== 'focus') {
+            npcSession.stopSession();
             setFocusedBooth(null);
             setSelectedProduct(null);
-            setNpcPanelOpen(false);
-            setNpcAnimState('idle');
+            setNpcChatOpen(false);
+            setChatAnimState('idle');
           }
         }}
         onTeleportToBooth={handleTeleportToBooth}
         onSelectProduct={handleSelectProduct}
         onCloseProduct={() => setSelectedProduct(null)}
         onCloseFocus={() => handleExitBoothFocus(false)}
-        onOpenNpcPanel={() => setNpcPanelOpen(true)}
-        onCloseNpcPanel={() => {
-          setNpcPanelOpen(false);
-          setNpcAnimState('idle');
+        onOpenNpcPanel={() => {
+          if (focusedBooth) {
+            setSelectedProduct(null);
+            npcSession.handleNpcClick(focusedBooth);
+          }
         }}
-        onNpcAnimStateChange={setNpcAnimState}
+        onCloseNpcPanel={() => {
+          npcSession.stopSession();
+        }}
+        onOpenNpcChat={() => {
+          npcSession.pauseSession();
+          setSelectedProduct(null);
+          setNpcChatOpen(true);
+        }}
+        onCloseNpcChat={() => {
+          setNpcChatOpen(false);
+          setChatAnimState('idle');
+        }}
+        onToggleNpcMute={npcSession.toggleMute}
+        onDismissSimilarBooths={() => setSimilarDismissed(true)}
+        onNpcAnimStateChange={setChatAnimState}
         onJoystickChange={(vec) => {
           if ((Math.abs(vec.x) > 0.08 || Math.abs(vec.y) > 0.08) && cameraMode === 'focus') {
             handleExitBoothFocus(true);

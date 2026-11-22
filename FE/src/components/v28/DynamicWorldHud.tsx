@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   V28BoothPlacementView,
   V28ExhibitionVersionDetail,
@@ -8,7 +8,17 @@ import type {
 import type { V28CameraMode, V28PlayerState } from '../../scene/v28/DynamicExhibitionScene';
 import type { V28NpcAnimState } from '../../scene/v28/DynamicBoothNpc3D';
 import type { V28GraphicsQualityMode } from '../../scene/v28/v28MobileControls';
-import { V28NpcConsultantPanel } from './V28NpcConsultantPanel';
+import { V28NpcChatModal } from './V28NpcChatModal';
+import { SimilarBoothsCard } from './SimilarBoothsCard';
+import { NavigationGuidanceHud } from './NavigationGuidanceHud';
+import type { SimilarBoothSuggestion } from '../../services/similarBooths';
+import {
+  computeDirectionIndicators,
+  computeZoneGuidance,
+  formatZoneNavigationSubtitle,
+  shouldEmitZoneTransition,
+  type GuidedRouteResult,
+} from '../../services/v28NavigationEngine';
 import { MobileProductBottomSheet } from './MobileProductBottomSheet';
 import { InteractiveMap2D } from './InteractiveMap2D';
 import { NearbyDiscoveryWidget } from './NearbyDiscoveryWidget';
@@ -32,6 +42,14 @@ export interface DynamicWorldHudProps {
   focusedBooth: V28BoothPlacementView | null;
   selectedProduct: { booth: V28BoothPlacementView; product: V28Product; slotId: string } | null;
   npcPanelOpen: boolean;
+  npcChatOpen?: boolean;
+  npcIsMuted?: boolean;
+  similarBooths?: SimilarBoothSuggestion[];
+  showSimilarBooths?: boolean;
+  guidedRoute?: GuidedRouteResult | null;
+  cameraYaw?: number;
+  onStartGuideToBooth?: (booth: V28BoothPlacementView) => void;
+  onCancelGuide?: () => void;
   directoryOpenNonce?: number;
   playerName?: string;
   playerColor?: string;
@@ -45,6 +63,10 @@ export interface DynamicWorldHudProps {
   onCloseFocus: () => void;
   onOpenNpcPanel: () => void;
   onCloseNpcPanel: () => void;
+  onOpenNpcChat?: () => void;
+  onCloseNpcChat?: () => void;
+  onToggleNpcMute?: () => void;
+  onDismissSimilarBooths?: () => void;
   onNpcAnimStateChange: (state: V28NpcAnimState) => void;
   onJoystickChange: (vec: { x: number; y: number }) => void;
   onZoomIn?: () => void;
@@ -82,7 +104,15 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   onRewardStatusUpdated,
   focusedBooth,
   selectedProduct,
-  npcPanelOpen,
+  npcPanelOpen: _npcPanelOpen,
+  npcChatOpen = false,
+  npcIsMuted = false,
+  similarBooths = [],
+  showSimilarBooths = false,
+  guidedRoute = null,
+  cameraYaw = Math.PI,
+  onStartGuideToBooth,
+  onCancelGuide,
   directoryOpenNonce = 0,
   playerName = 'Khách V28',
   playerColor = '#0ea5e9',
@@ -95,7 +125,11 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   onCloseProduct,
   onCloseFocus,
   onOpenNpcPanel,
-  onCloseNpcPanel,
+  onCloseNpcPanel: _onCloseNpcPanel,
+  onOpenNpcChat,
+  onCloseNpcChat,
+  onToggleNpcMute,
+  onDismissSimilarBooths,
   onNpcAnimStateChange,
   onZoomIn,
   onZoomOut,
@@ -103,6 +137,7 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   const isMobileUi = isMobileViewport || isMobilePortrait || isMobileLandscape;
   const [directoryOpen, setDirectoryOpen] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [desktopMoreOpen, setDesktopMoreOpen] = useState<boolean>(false);
   const [rewardModalOpen, setRewardModalOpen] = useState<boolean>(false);
   const [controlsGuideOpen, setControlsGuideOpen] = useState<boolean>(false);
   const [showFirstVisitHint, setShowFirstVisitHint] = useState<boolean>(() => {
@@ -112,6 +147,46 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
       return false;
     }
   });
+
+  // Phase 2.3 & 2.4: Live camera-relative directional arrows & real-data zone guidance
+  const activeRouteIndicator = useMemo(() => {
+    if (!guidedRoute) return null;
+    return computeDirectionIndicators(playerPos, cameraYaw, [guidedRoute.targetBooth], 1)[0] || null;
+  }, [guidedRoute, playerPos, cameraYaw]);
+
+  const suggestedNavIndicators = useMemo(() => {
+    if (guidedRoute) return [];
+    // Prioritize populated booths closest to visitor (up to 3)
+    const populated = world.booths.filter((b) => b.assignedSlotCount > 0);
+    const pool = populated.length > 0 ? populated : world.booths.slice(0, 6);
+    const sorted = [...pool].sort((a, b) => {
+      const da = Math.hypot((a.approachPoint?.x ?? a.positionX) - playerPos.x, (a.approachPoint?.z ?? a.positionZ) - playerPos.z);
+      const db = Math.hypot((b.approachPoint?.x ?? b.positionX) - playerPos.x, (b.approachPoint?.z ?? b.positionZ) - playerPos.z);
+      return da - db;
+    });
+    return computeDirectionIndicators(playerPos, cameraYaw, sorted, 3);
+  }, [guidedRoute, world.booths, playerPos, cameraYaw]);
+
+  const zoneGuidance = useMemo(
+    () => computeZoneGuidance(world.zones, playerPos, cameraYaw),
+    [world.zones, playerPos, cameraYaw]
+  );
+
+  const [zoneToastText, setZoneToastText] = useState<string | null>(null);
+  const prevZoneIdRef = useRef<string | null>(null);
+  const zoneCooldownMapRef = useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    const nextZone = zoneGuidance.currentZone;
+    const nextId = nextZone?.id ?? null;
+    if (shouldEmitZoneTransition(prevZoneIdRef.current, nextId, zoneCooldownMapRef.current, Date.now(), 8000) && nextZone) {
+      setZoneToastText(`Khu ${nextZone.code} — ${formatZoneNavigationSubtitle(nextZone)}`);
+      const t = window.setTimeout(() => setZoneToastText(null), 3200);
+      prevZoneIdRef.current = nextId;
+      return () => window.clearTimeout(t);
+    }
+    prevZoneIdRef.current = nextId;
+  }, [zoneGuidance.currentZone]);
 
   useEffect(() => {
     if (!isMobileUi || !showFirstVisitHint) return;
@@ -143,15 +218,17 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
 
   const isBoothFocusActive = cameraMode === 'focus' && Boolean(focusedBooth);
   const focusedWebsiteUrl = getSafeWebsiteUrl(focusedBooth?.contactUrl);
+  const focusedTotalSlots = Math.max(1, focusedBooth?.slots?.length || 6);
   const focusedCategoryLabel =
     (focusedBooth?.zoneCategoryTag && focusedBooth.zoneCategoryTag !== 'Chưa phân bổ'
       ? focusedBooth.zoneCategoryTag
       : focusedBooth?.category) || 'Triển lãm V28';
 
-  // Close collapsible mobile menu when entering booth focus or selecting a product
+  // Close collapsible menus when entering booth focus or selecting a product
   useEffect(() => {
     if (isBoothFocusActive || selectedProduct) {
       setMobileMenuOpen(false);
+      setDesktopMoreOpen(false);
     }
   }, [isBoothFocusActive, selectedProduct]);
 
@@ -225,31 +302,71 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               ← Quay lại
             </button>
 
+            {/* Phase 6.2: Compact non-duplicate context pill (full business name is prominently shown on 3D booth signage) */}
             <div style={{ minWidth: 0, flex: 1, overflow: 'hidden', padding: '0 4px' }}>
               <div
+                data-testid="v28-focus-compact-meta-mobile"
                 style={{
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: 700,
-                  color: '#fff',
+                  color: '#e2e8f0',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                 }}
               >
-                {focusedBooth.companyName || focusedBooth.boothName}
-              </div>
-              <div
-                style={{
-                  fontSize: 10.5,
-                  color: '#94a3b8',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {focusedBooth.assignedSlotCount}/6 SP · Chạm sản phẩm hoặc NPC
+                #{Math.max(1, (focusedBooth.slotIndex ?? 0) + 1)} · Khu {focusedBooth.zoneCode} · {focusedBooth.assignedSlotCount}/{focusedTotalSlots} SP
               </div>
             </div>
+
+            {onToggleNpcMute && (
+              <button
+                type="button"
+                data-testid="v28-focus-mute-btn"
+                onClick={onToggleNpcMute}
+                aria-label={npcIsMuted ? 'Bật âm thanh tư vấn' : 'Tắt âm thanh tư vấn'}
+                title={npcIsMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
+                style={{
+                  minWidth: 40,
+                  minHeight: 40,
+                  padding: '0 8px',
+                  borderRadius: 9,
+                  border: '1px solid rgba(148, 163, 184, 0.35)',
+                  background: npcIsMuted ? 'rgba(239, 68, 68, 0.25)' : 'rgba(255, 255, 255, 0.1)',
+                  color: '#fff',
+                  fontSize: 15,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                {npcIsMuted ? '🔇' : '🔊'}
+              </button>
+            )}
+
+            {onOpenNpcChat && (
+              <button
+                type="button"
+                data-testid="v28-focus-chat-btn"
+                onClick={onOpenNpcChat}
+                aria-label="Mở khung chat với nhân viên tư vấn"
+                style={{
+                  minWidth: 44,
+                  minHeight: 40,
+                  padding: '0 10px',
+                  borderRadius: 9,
+                  border: '1px solid rgba(56, 189, 248, 0.5)',
+                  background: 'rgba(14, 165, 233, 0.22)',
+                  color: '#e0f2fe',
+                  fontWeight: 700,
+                  fontSize: 12.5,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                💬 Chat
+              </button>
+            )}
 
             {focusedWebsiteUrl && (
               <a
@@ -307,47 +424,53 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               ← Quay lại <kbd>Esc</kbd>
             </button>
 
+            {/* Phase 6.2: Compact non-duplicate badge (business name lives cleanly on the 3D Booth Signage Board) */}
             <div
               className="shop-showcase-booth-banner"
-              title={`${focusedBooth.companyName || focusedBooth.boothName}${focusedBooth.companyName && focusedBooth.companyName !== focusedBooth.boothName
-                ? ` (${focusedBooth.boothName})`
-                : ''
-                } · ${focusedBooth.zoneName} · ${focusedBooth.assignedSlotCount}/6 sản phẩm`}
-              style={{ maxWidth: 340, padding: '4px 10px', minHeight: 34 }}
+              data-testid="v28-focus-compact-meta"
+              title={`${focusedBooth.companyName || focusedBooth.boothName} · ${focusedCategoryLabel} · ${focusedBooth.assignedSlotCount}/${focusedTotalSlots} sản phẩm`}
+              style={{ maxWidth: 360, padding: '4px 10px', minHeight: 34 }}
             >
-              {focusedBooth.logoUrl && (
-                <img
-                  src={focusedBooth.logoUrl}
-                  alt={focusedBooth.companyName || focusedBooth.boothName}
-                  style={{
-                    width: 20,
-                    height: 20,
-                    borderRadius: 5,
-                    objectFit: 'cover',
-                    border: `1.5px solid ${focusedBooth.color || '#0ea5e9'}`,
-                    flexShrink: 0,
-                  }}
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.display = 'none';
-                  }}
-                />
-              )}
               <span
                 className="expo-dialog__badge"
                 style={{ backgroundColor: focusedBooth.color || '#0ea5e9', flexShrink: 0, fontSize: 11, padding: '2px 7px' }}
               >
-                {focusedCategoryLabel}
+                #{Math.max(1, (focusedBooth.slotIndex ?? 0) + 1)} · Khu {focusedBooth.zoneCode}
               </span>
-              <strong
-                className="shop-showcase-booth-banner__title"
-                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}
+              <span
+                className="shop-showcase-booth-banner__sub"
+                style={{ fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
               >
-                {focusedBooth.companyName || focusedBooth.boothName}
-              </strong>
-              <span className="shop-showcase-booth-banner__sub" style={{ flexShrink: 0, fontSize: 12 }}>
-                · {focusedBooth.assignedSlotCount}/6 SP
+                {focusedCategoryLabel} · {focusedBooth.assignedSlotCount}/{focusedTotalSlots} SP
               </span>
             </div>
+
+            {onToggleNpcMute && (
+              <button
+                type="button"
+                data-testid="v28-focus-mute-btn"
+                onClick={onToggleNpcMute}
+                className="btn btn--outline btn--sm"
+                aria-label={npcIsMuted ? 'Bật âm thanh tư vấn' : 'Tắt âm thanh tư vấn'}
+                title={npcIsMuted ? 'Bật âm thanh tư vấn' : 'Tắt âm thanh tư vấn'}
+                style={{ minHeight: 34, minWidth: 36, padding: '4px 8px', fontSize: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                {npcIsMuted ? '🔇' : '🔊'}
+              </button>
+            )}
+
+            {onOpenNpcChat && (
+              <button
+                type="button"
+                data-testid="v28-focus-chat-btn"
+                onClick={onOpenNpcChat}
+                className="btn btn--outline btn--sm"
+                aria-label="Mở khung chat với nhân viên tư vấn"
+                style={{ minHeight: 34, padding: '4px 10px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}
+              >
+                💬 Chat
+              </button>
+            )}
 
             {focusedWebsiteUrl && (
               <a
@@ -510,175 +633,273 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
         </header>
       ) : (
         /* ===================================================================
-         * MODE B: OVERVIEW / EXPLORE HEADER (Synchronized with V27.5 Hình 2)
-         * [3D] Virtual Expo Plaza + Online count | [Đi nhanh tới gian hàng...] [Khách #...]
+         * MODE B: COMPACT DESKTOP HEADER (UAT Fix 04 — Quick-Jump removed, slim height)
+         * [3D + Grand Expo World V28 + Đã tham quan]    [🗺️ Bản đồ 2D] [⋯ Xem thêm]
          * =================================================================== */
         <header
           className="expo-hud-top"
+          data-testid="v28-desktop-top-bar"
           style={{
             position: 'static',
             pointerEvents: 'auto',
             width: '100%',
             boxSizing: 'border-box',
+            padding: '7px 14px',
+            minHeight: 48,
+            borderRadius: 12,
           }}
         >
-          <div className="expo-hud-top__brand">
-            <div className="expo-hud-top__logo">3D</div>
+          <div className="expo-hud-top__brand" style={{ gap: 10 }}>
+            <div
+              className="expo-hud-top__logo"
+              style={{ width: 32, height: 32, fontSize: 13, borderRadius: 9 }}
+            >
+              3D
+            </div>
             <div>
-              <h1 className="expo-hud-top__title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>{world.exhibitionName || 'Virtual Expo Plaza'}</span>
+              <h1
+                className="expo-hud-top__title"
+                style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14.5, lineHeight: 1.2 }}
+              >
+                <span>{world.exhibitionName || 'Con Đường Nông Sản 3D'}</span>
                 {isPreviewMode && (
-                  <span style={{ background: '#0284c7', color: '#fff', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
+                  <span style={{ background: '#0284c7', color: '#fff', padding: '1px 6px', borderRadius: 5, fontSize: 10.5, fontWeight: 700 }}>
                     DRAFT PREVIEW
                   </span>
                 )}
               </h1>
-              <div className="expo-hud-top__status">
+              <div className="expo-hud-top__status" style={{ fontSize: 11.5, marginTop: 1 }}>
                 <span className="status-dot status-dot--online" />
-                <span>
-                  {onlineCount} khách đang trực tuyến ·{' '}
-                  <strong
-                    data-testid="v28-visit-progress"
-                    title={
-                      journeyStatus === 'error'
-                        ? 'Không thể đồng bộ tiến độ từ máy chủ'
-                        : 'Tiến độ tham quan được xác minh từ máy chủ'
-                    }
-                    style={{ color: journeyStatus === 'error' ? '#fca5a5' : '#38bdf8' }}
-                  >
-                    Đã tham quan:{' '}
-                    {journeyStatus === 'loading'
-                      ? '...'
-                      : `${Math.min(world.booths.length, visitedBoothIds?.size ?? 0)}/${world.booths.length}`}{' '}
-                    gian
-                  </strong>
-                  {overflowVisitorCount > 0 ? ` (+${overflowVisitorCount} khu vực)` : ''}
-                </span>
+                <strong
+                  data-testid="v28-visit-progress"
+                  title={
+                    journeyStatus === 'error'
+                      ? 'Không thể đồng bộ tiến độ từ máy chủ'
+                      : 'Tiến độ tham quan được xác minh từ máy chủ'
+                  }
+                  style={{ color: journeyStatus === 'error' ? '#fca5a5' : '#38bdf8' }}
+                >
+                  Đã tham quan:{' '}
+                  {journeyStatus === 'loading'
+                    ? '...'
+                    : `${Math.min(world.booths.length, visitedBoothIds?.size ?? 0)}/${world.booths.length}`}{' '}
+                  gian
+                </strong>
               </div>
             </div>
           </div>
 
-          <div className="expo-hud-top__nav" style={{ flexWrap: 'wrap', gap: 8 }}>
-            <div className="hud-booth-picker">
-              <select
-                aria-label="Đi nhanh tới gian hàng"
-                className="hud-select"
-                defaultValue=""
-                onChange={(e) => {
-                  const target = world.booths.find((b) => b.boothId === e.target.value);
-                  if (target) {
-                    onTeleportToBooth(target);
-                    e.target.value = '';
-                  }
-                }}
-              >
-                <option value="" disabled>
-                  📍 Đi nhanh tới gian hàng ({world.booths.length})...
-                </option>
-                {world.booths.map((b) => (
-                  <option key={b.boothId} value={b.boothId}>
-                    {b.companyName !== b.boothName ? `${b.companyName} — ${b.boothName}` : b.boothName} ({b.zoneName})
-                  </option>
-                ))}
-              </select>
-            </div>
-
+          <div className="expo-hud-top__nav" style={{ flexWrap: 'nowrap', gap: 8, position: 'relative' }}>
             <button
               type="button"
               className="btn btn--secondary btn--sm"
-              onClick={() => setDirectoryOpen((v) => !v)}
+              onClick={() => {
+                setDesktopMoreOpen(false);
+                setDirectoryOpen((v) => !v);
+              }}
               title="Mở bản đồ 2D và tìm kiếm toàn bộ gian hàng"
+              style={{ minHeight: 34, padding: '5px 12px', fontSize: 12.5 }}
             >
               🗺️ Bản đồ 2D
             </button>
 
-            {editingProfile ? (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  onUpdateVisitorProfile?.(draftName, draftColor);
-                  setEditingProfile(false);
-                }}
-                style={{ display: 'flex', gap: 4, alignItems: 'center' }}
-              >
-                <input
-                  name="visitorName"
-                  aria-label="Tên hiển thị của bạn"
-                  value={draftName}
-                  onChange={(e) => setDraftName(e.target.value)}
-                  maxLength={32}
-                  autoFocus
-                  style={{
-                    width: 120,
-                    minHeight: 34,
-                    padding: '4px 8px',
-                    borderRadius: 8,
-                    border: '1px solid #38bdf8',
-                    background: '#0f172a',
-                    color: '#fff',
-                    fontSize: 12.5,
-                  }}
-                />
-                <input
-                  type="color"
-                  aria-label="Màu nhân vật"
-                  value={draftColor}
-                  onChange={(e) => setDraftColor(e.target.value)}
-                  style={{ width: 28, height: 32, border: 'none', background: 'transparent', cursor: 'pointer' }}
-                />
-                <button type="submit" className="btn btn--primary btn--sm">
-                  Lưu
-                </button>
-              </form>
-            ) : (
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                title="Đổi tên & màu nhân vật"
-                onClick={() => {
-                  setDraftName(playerName);
-                  setDraftColor(playerColor);
-                  setEditingProfile(true);
-                }}
-              >
-                <span className="avatar-dot" style={{ backgroundColor: playerColor }} />
-                {playerName} ✎
-              </button>
-            )}
-
             <button
               type="button"
-              data-testid="v28-reward-trigger"
+              data-testid="v28-hud-more-btn"
               className="btn btn--secondary btn--sm"
+              aria-expanded={desktopMoreOpen}
+              aria-label="Mở menu tùy chọn bổ sung"
               onClick={() => {
                 setDirectoryOpen(false);
-                setRewardModalOpen(true);
+                setDesktopMoreOpen((v) => !v);
               }}
-              title="Mở tiến độ và đăng ký nhận quà"
-              style={
-                rewardStatus?.eligibleToSubmit
-                  ? {
-                      background: '#10b981',
-                      borderColor: '#34d399',
-                      color: '#ffffff',
-                    }
-                  : undefined
-              }
+              style={{ position: 'relative', minHeight: 34, padding: '5px 12px', fontSize: 12.5 }}
             >
-              {rewardStatus?.redemption
-                ? rewardStatus.redemption.status === 'PENDING'
-                  ? '🎁 Chờ duyệt'
-                  : rewardStatus.redemption.status === 'APPROVED'
-                    ? '🎁 Đã duyệt'
-                    : rewardStatus.redemption.status === 'FULFILLED'
-                      ? '🎁 Đã trao quà'
-                      : '🎁 Bị từ chối'
-                : rewardStatus?.eligibleToSubmit
-                  ? '🎁 Đăng ký nhận quà'
-                  : rewardStatus
-                    ? `🎁 Quà (${Math.min(rewardStatus.recordedUniqueBooths, rewardStatus.requiredUniqueBooths)}/${rewardStatus.requiredUniqueBooths})`
-                    : '🎁 Quà (...)'}
+              ⋯ Xem thêm
+              {rewardStatus?.eligibleToSubmit && (
+                <span
+                  aria-label="Đủ điều kiện nhận quà"
+                  style={{
+                    position: 'absolute',
+                    top: -3,
+                    right: -3,
+                    width: 10,
+                    height: 10,
+                    borderRadius: '50%',
+                    background: '#10b981',
+                    border: '2px solid #0f172a',
+                  }}
+                />
+              )}
             </button>
+
+            {desktopMoreOpen && (
+              <div
+                data-testid="v28-hud-more-menu"
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 10px)',
+                  right: 0,
+                  width: 286,
+                  background: 'rgba(15, 23, 42, 0.96)',
+                  backdropFilter: 'blur(14px)',
+                  borderRadius: 14,
+                  border: '1px solid rgba(148, 163, 184, 0.28)',
+                  boxShadow: '0 16px 38px rgba(15, 23, 42, 0.42)',
+                  padding: 12,
+                  color: '#f8fafc',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                  zIndex: 40,
+                }}
+              >
+                {/* Online Visitors Status */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: '#cbd5e1', paddingBottom: 6, borderBottom: '1px solid rgba(148,163,184,0.18)' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span className="status-dot status-dot--online" />
+                    {onlineCount} khách đang trực tuyến
+                  </span>
+                  {overflowVisitorCount > 0 && <span>+{overflowVisitorCount}</span>}
+                </div>
+
+                {/* Reward Progress & Redemption */}
+                <button
+                  type="button"
+                  data-testid="v28-reward-trigger"
+                  className="btn btn--secondary btn--sm"
+                  onClick={() => {
+                    setDesktopMoreOpen(false);
+                    setDirectoryOpen(false);
+                    setRewardModalOpen(true);
+                  }}
+                  style={{
+                    width: '100%',
+                    justifyContent: 'flex-start',
+                    ...(rewardStatus?.eligibleToSubmit
+                      ? { background: '#10b981', borderColor: '#34d399', color: '#ffffff' }
+                      : {}),
+                  }}
+                >
+                  {rewardStatus?.redemption
+                    ? rewardStatus.redemption.status === 'PENDING'
+                      ? '🎁 Quà tặng: Chờ duyệt'
+                      : rewardStatus.redemption.status === 'APPROVED'
+                        ? '🎁 Quà tặng: Đã duyệt'
+                        : rewardStatus.redemption.status === 'FULFILLED'
+                          ? '🎁 Quà tặng: Đã trao'
+                          : '🎁 Quà tặng: Bị từ chối'
+                    : rewardStatus?.eligibleToSubmit
+                      ? '🎁 Đăng ký nhận quà ngay!'
+                      : rewardStatus
+                        ? `🎁 Quà tham quan (${Math.min(rewardStatus.recordedUniqueBooths, rewardStatus.requiredUniqueBooths)}/${rewardStatus.requiredUniqueBooths})`
+                        : '🎁 Quà tham quan (...)'}
+                </button>
+
+                {/* Visitor Profile Inline Editor */}
+                {editingProfile ? (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      onUpdateVisitorProfile?.(draftName, draftColor);
+                      setEditingProfile(false);
+                    }}
+                    style={{ display: 'flex', gap: 6, alignItems: 'center' }}
+                  >
+                    <input
+                      name="visitorName"
+                      aria-label="Tên hiển thị của bạn"
+                      value={draftName}
+                      onChange={(e) => setDraftName(e.target.value)}
+                      maxLength={32}
+                      autoFocus
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        minHeight: 34,
+                        padding: '4px 8px',
+                        borderRadius: 8,
+                        border: '1px solid #38bdf8',
+                        background: '#0f172a',
+                        color: '#fff',
+                        fontSize: 12.5,
+                      }}
+                    />
+                    <input
+                      type="color"
+                      aria-label="Màu nhân vật"
+                      value={draftColor}
+                      onChange={(e) => setDraftColor(e.target.value)}
+                      style={{ width: 28, height: 32, border: 'none', background: 'transparent', cursor: 'pointer' }}
+                    />
+                    <button type="submit" className="btn btn--primary btn--sm">
+                      Lưu
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    style={{ width: '100%', justifyContent: 'flex-start' }}
+                    onClick={() => {
+                      setDraftName(playerName);
+                      setDraftColor(playerColor);
+                      setEditingProfile(true);
+                    }}
+                  >
+                    <span className="avatar-dot" style={{ backgroundColor: playerColor }} />
+                    Hồ sơ: {playerName} ✎
+                  </button>
+                )}
+
+                {/* Return to Center & Graphics Quality */}
+                {onReturnToCenter && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    style={{ width: '100%', justifyContent: 'flex-start' }}
+                    onClick={() => {
+                      setDesktopMoreOpen(false);
+                      onReturnToCenter();
+                    }}
+                  >
+                    🧭 Về sảnh trung tâm
+                  </button>
+                )}
+
+                {onChangeGraphicsQuality && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 4, borderTop: '1px solid rgba(148,163,184,0.18)' }}>
+                    <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>⚡ Đồ họa 3D</span>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
+                      {([
+                        ['auto', 'Tự động'],
+                        ['performance', 'Mượt'],
+                        ['quality', 'Đẹp'],
+                      ] as const).map(([mode, label]) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => onChangeGraphicsQuality(mode)}
+                          style={{
+                            padding: '5px 4px',
+                            borderRadius: 7,
+                            border: graphicsQuality === mode ? '1px solid #38bdf8' : '1px solid rgba(148,163,184,0.25)',
+                            background: graphicsQuality === mode ? 'rgba(14,165,233,0.28)' : 'rgba(255,255,255,0.06)',
+                            color: '#f8fafc',
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </header>
       )}
@@ -939,7 +1160,28 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
         </nav>
       )}
 
-      {/* PHASE 3: CONTEXTUAL NEARBY BOOTH & PRODUCT DISCOVERY (Suppressed during focus, map, menu, NPC, or product modal) */}
+      {/* PHASE 2.3 & 2.4: INTELLIGENT 3D NAVIGATION COMPASS, DIRECTIONAL ARROWS & ZONE SIGNPOST */}
+      <NavigationGuidanceHud
+        isMobileUi={isMobileUi}
+        suppressed={
+          isBoothFocusActive ||
+          directoryOpen ||
+          mobileMenuOpen ||
+          rewardModalOpen ||
+          npcChatOpen ||
+          Boolean(selectedProduct)
+        }
+        guidedRoute={guidedRoute}
+        activeRouteIndicator={activeRouteIndicator}
+        suggestedIndicators={suggestedNavIndicators}
+        zoneGuidance={zoneGuidance}
+        zoneToastText={zoneToastText}
+        onSelectGuideBooth={(b) => onStartGuideToBooth?.(b)}
+        onTeleportToBooth={onTeleportToBooth}
+        onCancelGuide={() => onCancelGuide?.()}
+      />
+
+      {/* PHASE 3 & PHASE 8: CONTEXTUAL NEARBY BOOTH & PRODUCT DISCOVERY (Tightened radius, true X close, Phase 2 guide sync) */}
       <NearbyDiscoveryWidget
         world={world}
         playerPos={playerPos}
@@ -950,10 +1192,11 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
           directoryOpen ||
           mobileMenuOpen ||
           rewardModalOpen ||
-          npcPanelOpen ||
+          npcChatOpen ||
           Boolean(selectedProduct)
         }
         onNavigateToBooth={onTeleportToBooth}
+        onGuideToBooth={onStartGuideToBooth}
         onSelectProduct={onSelectProduct}
       />
 
@@ -977,9 +1220,15 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
           playerPos={playerPos}
           focusedBooth={focusedBooth}
           visitedBoothIds={visitedBoothIds}
+          guidedRoute={guidedRoute}
+          suggestedBoothIds={new Set(suggestedNavIndicators.map((i) => i.boothId))}
           isMobileUi={isMobileUi}
           isMobileLandscape={isMobileLandscape}
           onNavigateToBooth={onTeleportToBooth}
+          onGuideToBooth={(b) => {
+            setDirectoryOpen(false);
+            onStartGuideToBooth?.(b);
+          }}
           onClose={() => setDirectoryOpen(false)}
         />
       )}
@@ -1146,21 +1395,17 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
           )
         )}
 
-        {/* Product Detail Card (Desktop) / Bottom Sheet (Mobile) or NPC Consultant Panel */}
-        {npcPanelOpen && focusedBooth ? (
+        {/* User-initiated NPC Chat Modal (Phase 1.1: narration panel removed), Product Detail, or Similar Booths Recommendation */}
+        {npcChatOpen && focusedBooth ? (
           <div style={{ marginLeft: 'auto', width: isMobileUi ? '100%' : 'auto' }}>
-            <V28NpcConsultantPanel
+            <V28NpcChatModal
               booth={focusedBooth}
-              isMobilePortrait={isMobileUi}
+              isMobileUi={isMobileUi}
               onAnimStateChange={onNpcAnimStateChange}
-              onClose={onCloseNpcPanel}
-              onInspectProduct={(product, slotId) => {
-                onCloseNpcPanel();
-                onSelectProduct(focusedBooth, product, slotId);
-              }}
+              onClose={() => onCloseNpcChat?.()}
             />
           </div>
-        ) : selectedProduct && (
+        ) : selectedProduct ? (
           isMobileUi ? (
             <MobileProductBottomSheet
               booth={selectedProduct.booth}
@@ -1230,7 +1475,25 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               </div>
             </div>
           )
-        )}
+        ) : showSimilarBooths && similarBooths.length > 0 ? (
+          <SimilarBoothsCard
+            suggestions={similarBooths}
+            isMobileUi={isMobileUi}
+            onNavigateToBooth={(b) => {
+              onDismissSimilarBooths?.();
+              onTeleportToBooth(b);
+            }}
+            onGuideToBooth={
+              onStartGuideToBooth
+                ? (b) => {
+                  onDismissSimilarBooths?.();
+                  onStartGuideToBooth(b);
+                }
+                : undefined
+            }
+            onDismiss={() => onDismissSimilarBooths?.()}
+          />
+        ) : null}
       </div>
     </div>
   );

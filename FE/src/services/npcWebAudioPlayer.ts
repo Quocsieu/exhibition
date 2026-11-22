@@ -17,6 +17,7 @@ const MAX_DECODED_BUFFERS = 28;
 export interface WebAudioPlayOptions {
   signal: AbortSignal;
   muted: boolean;
+  startOffsetSec?: number;
   onStartPlayback: () => void;
 }
 
@@ -29,8 +30,13 @@ function createNotAllowedError(): Error {
 class NpcWebAudioPlayer {
   private ctx: AudioContext | null = null;
   private gainNode: GainNode | null = null;
+  private analyser: AnalyserNode | null = null;
+  private timeDomainBuf: Uint8Array<ArrayBuffer> | null = null;
   private activeSource: AudioBufferSourceNode | null = null;
   private activeResolve: (() => void) | null = null;
+  private activeStartCtxTime = 0;
+  private activeStartOffsetSec = 0;
+  private activeDurationSec = 0;
   private decodedCache = new Map<string, AudioBuffer>();
   private inFlightDecodes = new Map<string, Promise<AudioBuffer | null>>();
   private muted = false;
@@ -54,11 +60,64 @@ class NpcWebAudioPlayer {
       const gain = ctx.createGain();
       gain.gain.value = this.muted ? 0 : 1;
       gain.connect(ctx.destination);
+      // Passive side-tap AnalyserNode (NOT in series with destination -> zero audio latency/scheduling impact)
+      try {
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.65;
+        gain.connect(analyser);
+        this.analyser = analyser;
+        this.timeDomainBuf = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
+      } catch {
+        this.analyser = null;
+        this.timeDomainBuf = null;
+      }
       this.ctx = ctx;
       this.gainNode = gain;
       return ctx;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Returns current playback offset (seconds) within the active AudioBuffer, for exact pause/resume.
+   */
+  public getCurrentOffsetSec(): number {
+    if (!this.activeSource || !this.ctx || this.activeDurationSec <= 0) return 0;
+    const elapsed = Math.max(0, this.ctx.currentTime - this.activeStartCtxTime);
+    return Math.min(this.activeDurationSec, this.activeStartOffsetSec + elapsed);
+  }
+
+  /**
+   * Pauses the active source immediately and returns the exact offset in seconds for resuming later.
+   */
+  public pause(): number {
+    const offset = this.getCurrentOffsetSec();
+    this.stop();
+    return offset;
+  }
+
+  /**
+   * Read-only normalized audio amplitude (0..1) from passive side-tap AnalyserNode.
+   * Zero allocations per call; safe to read inside requestAnimationFrame / useFrame.
+   */
+  public getAudioAmplitude(): number {
+    if (!this.activeSource || this.muted || !this.analyser || !this.timeDomainBuf) {
+      return 0;
+    }
+    try {
+      this.analyser.getByteTimeDomainData(this.timeDomainBuf);
+      let sumSq = 0;
+      const len = this.timeDomainBuf.length;
+      for (let i = 0; i < len; i += 1) {
+        const norm = (this.timeDomainBuf[i] - 128) / 128;
+        sumSq += norm * norm;
+      }
+      const rms = Math.sqrt(sumSq / len);
+      return Math.min(1, rms * 3.8);
+    } catch {
+      return 0;
     }
   }
 
@@ -187,6 +246,12 @@ class NpcWebAudioPlayer {
         return;
       }
 
+      const startOffset = Math.max(0, Math.min(opts.startOffsetSec ?? 0, Math.max(0, buffer.duration - 0.02)));
+      if (opts.startOffsetSec !== undefined && opts.startOffsetSec >= buffer.duration - 0.06) {
+        resolve(true);
+        return;
+      }
+
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.connect(this.gainNode!);
@@ -200,6 +265,9 @@ class NpcWebAudioPlayer {
         if (this.activeSource === source) {
           this.activeSource = null;
           this.activeResolve = null;
+          this.activeStartCtxTime = 0;
+          this.activeStartOffsetSec = 0;
+          this.activeDurationSec = 0;
         }
         try {
           source.disconnect();
@@ -223,9 +291,12 @@ class NpcWebAudioPlayer {
 
       this.activeSource = source;
       this.activeResolve = finish;
+      this.activeStartCtxTime = ctx.currentTime;
+      this.activeStartOffsetSec = startOffset;
+      this.activeDurationSec = buffer.duration;
 
       try {
-        source.start(0);
+        source.start(0, startOffset);
         opts.onStartPlayback();
       } catch {
         finish();

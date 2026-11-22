@@ -4,6 +4,7 @@ import type {
   V28ExhibitionVersionDetail,
 } from '../../services/v28Api';
 import type { V28PlayerState } from '../../scene/v28/DynamicExhibitionScene';
+import type { GuidedRouteResult } from '../../services/v28NavigationEngine';
 
 export interface InteractiveMap2DProps {
   world: V28ExhibitionVersionDetail;
@@ -16,7 +17,10 @@ export interface InteractiveMap2DProps {
    * Phase 2 NEVER fakes visited state or marks a booth visited on map click.
    */
   visitedBoothIds?: ReadonlySet<string>;
+  guidedRoute?: GuidedRouteResult | null;
+  suggestedBoothIds?: ReadonlySet<string>;
   onNavigateToBooth: (booth: V28BoothPlacementView) => void;
+  onGuideToBooth?: (booth: V28BoothPlacementView) => void;
   onClose: () => void;
 }
 
@@ -52,6 +56,51 @@ export function getBoothMapFootprint(
     cx: booth.positionX,
     cy: booth.positionZ,
   };
+}
+
+/**
+ * UAT Fix 02: Unified 90° clockwise landscape coordinate transformation (world 3D X/Z -> 2D SVG X/Y).
+ * - Determinant = +1 (pure rotation, zero mirroring, preserves exact Left/Right zone chirality):
+ *   mapX = -z (Entrance Gate +Z sits cleanly on the LEFT; walking into the hall -Z flows LEFT -> RIGHT)
+ *   mapY =  x (Zones E..A sit along the TOP row; Zones J..F sit along the BOTTOM row)
+ * - Does NOT mutate any 3D world coordinates, layoutGenerator, or walkwayGraph.
+ */
+export function worldToLandscapeMapPoint(x: number, z: number): { mx: number; my: number } {
+  return { mx: -z, my: x };
+}
+
+export function worldBoundsToLandscapeRect(bounds: {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}): { x: number; y: number; width: number; height: number; cx: number; cy: number } {
+  const x = -bounds.maxZ;
+  const y = bounds.minX;
+  const width = bounds.maxZ - bounds.minZ;
+  const height = bounds.maxX - bounds.minX;
+  return { x, y, width, height, cx: x + width / 2, cy: y + height / 2 };
+}
+
+export function worldFootprintToLandscapeRect(fp: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  cx: number;
+  cy: number;
+}): { x: number; y: number; width: number; height: number; cx: number; cy: number } {
+  return worldBoundsToLandscapeRect({
+    minX: fp.x,
+    maxX: fp.x + fp.width,
+    minZ: fp.y,
+    maxZ: fp.y + fp.height,
+  });
+}
+
+export function worldHeadingToLandscapeDir(rotationY: number): { dx: number; dy: number } {
+  // World forward = (sin(rotY), cos(rotY)) -> under (mx = -z, my = x): (-cos(rotY), sin(rotY))
+  return { dx: -Math.cos(rotationY), dy: Math.sin(rotationY) };
 }
 
 /**
@@ -193,7 +242,10 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
   isMobileUi,
   isMobileLandscape,
   visitedBoothIds,
+  guidedRoute = null,
+  suggestedBoothIds,
   onNavigateToBooth,
+  onGuideToBooth,
   onClose,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -235,11 +287,14 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
   const orderedBooths = useMemo(
     () =>
       world.booths
-        .map((booth, idx) => ({
-          booth,
-          boothNumber: getCanonicalBoothNumber(booth, idx),
-          footprint: getBoothMapFootprint(booth),
-        }))
+        .map((booth, idx) => {
+          const worldFp = getBoothMapFootprint(booth);
+          return {
+            booth,
+            boothNumber: getCanonicalBoothNumber(booth, idx),
+            footprint: worldFootprintToLandscapeRect(worldFp),
+          };
+        })
         .sort((a, b) => a.boothNumber - b.boothNumber),
     [world.booths]
   );
@@ -291,12 +346,38 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
     return targetId ? boothById.get(targetId) ?? null : null;
   }, [isMobileUi, hoveredBoothId, selectedBoothId, boothById]);
 
-  // Base world viewBox (exact 1:1 3D X/Z projection — North = -Z top, South/Spawn = +Z bottom)
-  const pad = 4;
-  const baseW = world.hallWidth + pad * 2;
-  const baseH = world.hallDepth + pad * 2;
-  const baseMinX = world.hallBounds.minX - pad;
-  const baseMinZ = world.hallBounds.minZ - pad;
+  // UAT Fix 02: Tight content-fitted 90°-rotated landscape viewBox (aspect ~2.15:1)
+  // Eliminates dark side margins while keeping exact 1:1 undistorted proportions!
+  const { baseMinX, baseMinY, baseW, baseH } = useMemo(() => {
+    const sp = worldToLandscapeMapPoint(world.spawnPoint.x, world.spawnPoint.z);
+    let minX = sp.mx - 12; // room for Entrance Gate badge on left
+    let maxX = sp.mx + 4;
+    let minY = sp.my;
+    let maxY = sp.my;
+    for (const item of orderedBooths) {
+      const fp = item.footprint;
+      if (fp.x < minX) minX = fp.x;
+      if (fp.x + fp.width > maxX) maxX = fp.x + fp.width;
+      if (fp.y < minY) minY = fp.y;
+      if (fp.y + fp.height > maxY) maxY = fp.y + fp.height;
+    }
+    for (const z of world.zones) {
+      if (!z.bounds) continue;
+      const r = worldBoundsToLandscapeRect(z.bounds);
+      if (r.x < minX) minX = r.x;
+      if (r.x + r.width > maxX) maxX = r.x + r.width;
+      if (r.y < minY) minY = r.y;
+      if (r.y + r.height > maxY) maxY = r.y + r.height;
+    }
+    const padX = 5;
+    const padY = 5;
+    return {
+      baseMinX: minX - padX,
+      baseMinY: minY - padY,
+      baseW: Math.max(60, maxX - minX + padX * 2),
+      baseH: Math.max(40, maxY - minY + padY * 2),
+    };
+  }, [orderedBooths, world.zones, world.spawnPoint.x, world.spawnPoint.z]);
 
   const viewW = baseW / mapZoom;
   const viewH = baseH / mapZoom;
@@ -305,7 +386,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
   const clampedPanX = Math.max(-maxPanX, Math.min(maxPanX, panOffset.x));
   const clampedPanY = Math.max(-maxPanY, Math.min(maxPanY, panOffset.y));
   const vbX = baseMinX + (baseW - viewW) / 2 + clampedPanX;
-  const vbY = baseMinZ + (baseH - viewH) / 2 + clampedPanY;
+  const vbY = baseMinY + (baseH - viewH) / 2 + clampedPanY;
 
   const handleZoomStep = useCallback((delta: number) => {
     setMapZoom((prev) => {
@@ -445,39 +526,77 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
     }
   };
 
-  const mapSvgHeight = isMobileLandscape
-    ? 'min(190px, 44dvh)'
-    : isMobileUi
-      ? 'min(430px, 52dvh)'
-      : 'min(420px, 54vh)';
+  const hallRect = useMemo(() => worldBoundsToLandscapeRect(world.hallBounds), [world.hallBounds]);
+  const avenueRect = useMemo(() => worldBoundsToLandscapeRect(world.centralAvenueBounds), [world.centralAvenueBounds]);
+  const welcomeRect = useMemo(
+    () => (world.welcomeAreaBounds ? worldBoundsToLandscapeRect(world.welcomeAreaBounds) : null),
+    [world.welcomeAreaBounds]
+  );
+  const spawnMapPt = useMemo(
+    () => worldToLandscapeMapPoint(world.spawnPoint.x, world.spawnPoint.z),
+    [world.spawnPoint.x, world.spawnPoint.z]
+  );
+  const playerMapPt = worldToLandscapeMapPoint(playerPos.x, playerPos.z);
+  const playerDir = worldHeadingToLandscapeDir(playerPos.rotationY);
+  const leftDir = { dx: -playerDir.dy, dy: playerDir.dx };
+  const playerConePoints = [
+    `${(playerMapPt.mx + playerDir.dx * 7.2).toFixed(2)},${(playerMapPt.my + playerDir.dy * 7.2).toFixed(2)}`,
+    `${(playerMapPt.mx - playerDir.dx * 2.4 + leftDir.dx * 3.0).toFixed(2)},${(playerMapPt.my - playerDir.dy * 2.4 + leftDir.dy * 3.0).toFixed(2)}`,
+    `${(playerMapPt.mx - playerDir.dx * 2.4 - leftDir.dx * 3.0).toFixed(2)},${(playerMapPt.my - playerDir.dy * 2.4 - leftDir.dy * 3.0).toFixed(2)}`,
+  ].join(' ');
+
+  const mapAspect = baseW / Math.max(1, baseH);
   const visitedCount = Math.min(world.booths.length, visitedSet.size);
 
   return (
-    <section
-      role="dialog"
-      aria-label="Bản đồ 2D và danh bạ gian hàng"
+    <div
+      data-testid="v28-map-modal-backdrop"
+      onClick={onClose}
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
       style={{
         pointerEvents: 'auto',
-        alignSelf: isMobileUi && !isMobileLandscape ? 'stretch' : 'flex-end',
-        width: isMobileUi && !isMobileLandscape ? '100%' : isMobileLandscape ? 'min(480px, 84vw)' : 'min(460px, 46vw)',
-        maxHeight: isMobileLandscape ? '86dvh' : isMobileUi ? '82dvh' : '84vh',
-        background: 'rgba(255, 255, 255, 0.97)',
-        backdropFilter: 'blur(14px)',
-        WebkitBackdropFilter: 'blur(14px)',
-        borderRadius: 16,
-        boxShadow: '0 16px 40px rgba(15, 23, 42, 0.3)',
-        border: '1px solid #cbd5e1',
-        padding: isMobileLandscape ? 8 : 12,
+        position: 'fixed',
+        inset: 0,
+        zIndex: 45,
+        background: 'rgba(15, 23, 42, 0.58)',
+        backdropFilter: 'blur(4px)',
+        WebkitBackdropFilter: 'blur(4px)',
         display: 'flex',
-        flexDirection: 'column',
-        gap: isMobileLandscape ? 6 : 8,
-        overflowX: 'hidden',
-        overflowY: isMobileLandscape ? 'auto' : 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: isMobileUi ? 6 : 16,
         boxSizing: 'border-box',
       }}
     >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label="Bản đồ 2D và danh bạ gian hàng"
+        data-testid="v28-map-modal"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onWheel={(e) => e.stopPropagation()}
+        style={{
+          pointerEvents: 'auto',
+          width: isMobileUi ? 'calc(100vw - 12px)' : 'min(1160px, 88vw)',
+          maxWidth: isMobileUi ? '100%' : 1180,
+          maxHeight: isMobileUi ? '94dvh' : '90vh',
+          background: 'rgba(255, 255, 255, 0.98)',
+          backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
+          borderRadius: isMobileUi ? 14 : 18,
+          boxShadow: '0 24px 60px rgba(15, 23, 42, 0.42)',
+          border: '1px solid #cbd5e1',
+          padding: isMobileLandscape ? 10 : isMobileUi ? 12 : 16,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: isMobileLandscape ? 8 : 10,
+          overflowX: 'hidden',
+          overflowY: 'auto',
+          boxSizing: 'border-box',
+        }}
+      >
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <div style={{ minWidth: 0 }}>
@@ -509,8 +628,8 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
         </button>
       </div>
 
-      {/* Search */}
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+      {/* Search + Inline Zoom Controls (never covers Booth #1/#2 on top-right of map!) */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
         <input
           type="search"
           aria-label="Tìm gian hàng, số gian, doanh nghiệp, sản phẩm"
@@ -520,29 +639,21 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
           style={{
             flex: 1,
             minWidth: 0,
-            padding: '7px 10px',
-            borderRadius: 8,
+            padding: '8px 12px',
+            borderRadius: 9,
             border: '1px solid #cbd5e1',
-            fontSize: 12.5,
+            fontSize: 13,
             boxSizing: 'border-box',
           }}
         />
-      </div>
-
-      {/* MAP VIEW */}
-      <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-        {/* Zoom Controls */}
         <div
           style={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            zIndex: 3,
             display: 'flex',
             gap: 4,
-            background: 'rgba(15, 23, 42, 0.78)',
+            background: '#0f172a',
             padding: 3,
             borderRadius: 9,
+            flexShrink: 0,
           }}
         >
           <button
@@ -550,13 +661,14 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
             aria-label="Phóng to bản đồ 2D"
             onClick={() => handleZoomStep(0.5)}
             style={{
-              minWidth: 32,
-              minHeight: 32,
+              minWidth: 34,
+              minHeight: 34,
               borderRadius: 6,
               border: 'none',
               background: 'rgba(255,255,255,0.14)',
               color: '#fff',
               fontWeight: 800,
+              fontSize: 15,
               cursor: 'pointer',
             }}
           >
@@ -567,13 +679,14 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
             aria-label="Thu nhỏ bản đồ 2D"
             onClick={() => handleZoomStep(-0.5)}
             style={{
-              minWidth: 32,
-              minHeight: 32,
+              minWidth: 34,
+              minHeight: 34,
               borderRadius: 6,
               border: 'none',
               background: 'rgba(255,255,255,0.14)',
               color: '#fff',
               fontWeight: 800,
+              fontSize: 15,
               cursor: 'pointer',
             }}
           >
@@ -585,13 +698,13 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
               aria-label="Đặt lại góc nhìn bản đồ 2D"
               onClick={handleResetView}
               style={{
-                minHeight: 32,
-                padding: '0 7px',
+                minHeight: 34,
+                padding: '0 8px',
                 borderRadius: 6,
                 border: 'none',
                 background: '#0284c7',
                 color: '#fff',
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 700,
                 cursor: 'pointer',
               }}
@@ -600,10 +713,14 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
             </button>
           )}
         </div>
+      </div>
 
+      {/* MAP VIEW */}
+      <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: '0 0 auto' }}>
         <svg
           data-testid="v28-interactive-map-svg"
           viewBox={`${vbX.toFixed(2)} ${vbY.toFixed(2)} ${viewW.toFixed(2)} ${viewH.toFixed(2)}`}
+          preserveAspectRatio="xMidYMid meet"
           onWheel={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -615,9 +732,12 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
           onPointerCancel={handleSvgPointerEnd}
           style={{
             width: '100%',
-            height: mapSvgHeight,
+            height: 'auto',
+            aspectRatio: `${mapAspect.toFixed(3)}`,
+            maxHeight: isMobileLandscape ? '56dvh' : isMobileUi ? '46dvh' : '60vh',
+            minHeight: isMobileUi ? 190 : 320,
             background: '#0b1220',
-            borderRadius: 10,
+            borderRadius: 12,
             border: '1px solid #334155',
             display: 'block',
             touchAction: 'none',
@@ -625,48 +745,47 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
             userSelect: 'none',
           }}
         >
-          {/* Hall Outer Floor (Dark Navy Map Canvas) */}
+          {/* Hall Outer Floor (90° Landscape Rotated Dark Navy Map Canvas) */}
           <rect
-            x={world.hallBounds.minX}
-            y={world.hallBounds.minZ}
-            width={world.hallWidth}
-            height={world.hallDepth}
+            x={hallRect.x}
+            y={hallRect.y}
+            width={hallRect.width}
+            height={hallRect.height}
             fill="#0f172a"
             stroke="#334155"
             strokeWidth={1.2}
             rx={3}
           />
 
-          {/* Central Grand Boulevard (preserves exact empty central corridor) */}
+          {/* Central Grand Boulevard (Horizontal Spine from Left Entrance to Right North End) */}
           <rect
-            x={world.centralAvenueBounds.minX}
-            y={world.centralAvenueBounds.minZ}
-            width={world.centralAvenueBounds.maxX - world.centralAvenueBounds.minX}
-            height={world.centralAvenueBounds.maxZ - world.centralAvenueBounds.minZ}
-            fill="#13233f"
+            x={avenueRect.x}
+            y={avenueRect.y}
+            width={avenueRect.width}
+            height={avenueRect.height}
+            fill="#162b4d"
           />
 
-          {/* Welcome / Entrance Area */}
-          {world.welcomeAreaBounds && (
+          {/* Welcome / Entrance Area (Left Threshold) */}
+          {welcomeRect && (
             <rect
-              x={world.welcomeAreaBounds.minX}
-              y={world.welcomeAreaBounds.minZ}
-              width={world.welcomeAreaBounds.maxX - world.welcomeAreaBounds.minX}
-              height={world.welcomeAreaBounds.maxZ - world.welcomeAreaBounds.minZ}
+              x={welcomeRect.x}
+              y={welcomeRect.y}
+              width={welcomeRect.width}
+              height={welcomeRect.height}
               fill="#1e293b"
-              fillOpacity={0.85}
+              fillOpacity={0.88}
               stroke="#f59e0b"
-              strokeWidth={0.7}
-              strokeDasharray="2 2"
-              rx={1.5}
+              strokeWidth={0.9}
+              strokeDasharray="2.5 2"
+              rx={2}
             />
           )}
 
-          {/* Active U-Shaped Zones (exact World coordinates, auto-synced with Phase 8 compaction) */}
+          {/* Active U-Shaped Zones (90° Landscape Coordinates; Text stays 100% Horizontal & High-Contrast!) */}
           {world.zones.map((z) => {
             const activeZone = selectedZoneCode === z.code;
-            const cx = (z.bounds.minX + z.bounds.maxX) / 2;
-            const cz = (z.bounds.minZ + z.bounds.maxZ) / 2;
+            const zr = worldBoundsToLandscapeRect(z.bounds);
             return (
               <g
                 key={z.id}
@@ -678,23 +797,24 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
                 style={{ cursor: 'pointer' }}
               >
                 <rect
-                  x={z.bounds.minX}
-                  y={z.bounds.minZ}
-                  width={z.bounds.maxX - z.bounds.minX}
-                  height={z.bounds.maxZ - z.bounds.minZ}
-                  fill={activeZone ? 'rgba(56, 189, 248, 0.14)' : 'rgba(15, 23, 42, 0.65)'}
-                  stroke={activeZone ? '#38bdf8' : '#334155'}
-                  strokeWidth={activeZone ? 1.5 : 0.8}
-                  rx={2}
+                  x={zr.x}
+                  y={zr.y}
+                  width={zr.width}
+                  height={zr.height}
+                  fill={activeZone ? 'rgba(56, 189, 248, 0.18)' : 'rgba(15, 23, 42, 0.72)'}
+                  stroke={activeZone ? '#38bdf8' : '#475569'}
+                  strokeWidth={activeZone ? 1.8 : 0.9}
+                  rx={2.2}
                 />
                 <text
-                  x={cx}
-                  y={cz}
+                  x={zr.cx}
+                  y={zr.cy}
                   textAnchor="middle"
                   dominantBaseline="middle"
-                  fontSize={Math.max(4.5, Math.min(7.5, world.hallWidth * 0.055))}
-                  fontWeight="800"
-                  fill={activeZone ? '#7dd3fc' : '#64748b'}
+                  fontSize={7.6}
+                  fontWeight="900"
+                  letterSpacing="0.3"
+                  fill={activeZone ? '#7dd3fc' : '#94a3b8'}
                   pointerEvents="none"
                 >
                   KHU {z.code}
@@ -703,7 +823,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
             );
           })}
 
-          {/* Active Booths: Dark unvisited, Bright visited (+ ✓), Direct Click/Enter Navigation */}
+          {/* Active Booths: Horizontal Numbers, Larger Typography, High-Contrast Visited/Unvisited/Selected */}
           {orderedBooths.map(({ booth, boothNumber, footprint }) => {
             const isVisited = visitedSet.has(booth.boothId);
             const isSelected = selectedBoothId === booth.boothId;
@@ -715,34 +835,35 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
               isHovered,
               isFilteredIn,
             });
-            const labelFontSize = Math.max(2.6, Math.min(footprint.width, footprint.height) * 0.46);
+            const minDim = Math.min(footprint.width, footprint.height);
+            const labelFontSize = Math.max(3.6, minDim * (boothNumber >= 100 ? 0.44 : 0.54));
 
-              return (
-                <g
-                  key={booth.boothId}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Gian #${boothNumber} - ${booth.companyName || booth.boothName} - ${isVisited ? 'Đã tham quan' : 'Chưa tham quan'} - Nhấn để đi tới`}
-                  data-testid={`v28-map-booth-${boothNumber}`}
-                  data-booth-id={booth.boothId}
-                  data-booth-number={boothNumber}
-                  data-visited={isVisited ? 'true' : 'false'}
-                  data-selected={isSelected ? 'true' : 'false'}
-                  data-map-tone={styleSpec.tone}
-                  onMouseEnter={() => {
-                    if (!isMobileUi && !panDragRef.current.active) setHoveredBoothId(booth.boothId);
-                  }}
-                  onMouseLeave={() => {
-                    if (!isMobileUi) {
-                      setHoveredBoothId((prev) => (prev === booth.boothId ? null : prev));
-                    }
-                  }}
-                  onFocus={() => {
-                    setHoveredBoothId(booth.boothId);
-                  }}
-                  onBlur={() => {
+            return (
+              <g
+                key={booth.boothId}
+                role="button"
+                tabIndex={0}
+                aria-label={`Gian #${boothNumber} - ${booth.companyName || booth.boothName} - ${isVisited ? 'Đã tham quan' : 'Chưa tham quan'} - Nhấn để đi tới`}
+                data-testid={`v28-map-booth-${boothNumber}`}
+                data-booth-id={booth.boothId}
+                data-booth-number={boothNumber}
+                data-visited={isVisited ? 'true' : 'false'}
+                data-selected={isSelected ? 'true' : 'false'}
+                data-map-tone={styleSpec.tone}
+                onMouseEnter={() => {
+                  if (!isMobileUi && !panDragRef.current.active) setHoveredBoothId(booth.boothId);
+                }}
+                onMouseLeave={() => {
+                  if (!isMobileUi) {
                     setHoveredBoothId((prev) => (prev === booth.boothId ? null : prev));
-                  }}
+                  }
+                }}
+                onFocus={() => {
+                  setHoveredBoothId(booth.boothId);
+                }}
+                onBlur={() => {
+                  setHoveredBoothId((prev) => (prev === booth.boothId ? null : prev));
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
@@ -762,7 +883,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
                   y={footprint.y}
                   width={footprint.width}
                   height={footprint.height}
-                  rx={0.7}
+                  rx={0.95}
                   fill={styleSpec.fill}
                   fillOpacity={styleSpec.fillOpacity}
                   stroke={styleSpec.stroke}
@@ -774,11 +895,11 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
                   textAnchor="middle"
                   dominantBaseline="central"
                   fontSize={labelFontSize}
-                  fontWeight="800"
+                  fontWeight="900"
                   fill={styleSpec.textFill}
                   paintOrder={styleSpec.textStroke === 'none' ? undefined : 'stroke'}
                   stroke={styleSpec.textStroke === 'none' ? undefined : styleSpec.textStroke}
-                  strokeWidth={styleSpec.textStroke === 'none' ? undefined : labelFontSize * 0.2}
+                  strokeWidth={styleSpec.textStroke === 'none' ? undefined : labelFontSize * 0.16}
                   pointerEvents="none"
                 >
                   {styleSpec.showVisitedCheck ? `✓${boothNumber}` : boothNumber}
@@ -787,138 +908,251 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
             );
           })}
 
-          {/* Live Avatar Position Marker */}
+          {/* UAT Fix 02: Prominent Horizontal Entrance Gate Marker on Left Threshold */}
+          <g pointerEvents="none" data-testid="v28-map-entrance-marker">
+            <rect
+              x={spawnMapPt.mx - 12}
+              y={spawnMapPt.my - 11}
+              width={26}
+              height={7.2}
+              rx={1.8}
+              fill="#0057b8"
+              stroke="#ffffff"
+              strokeWidth={0.85}
+            />
+            <text
+              x={spawnMapPt.mx + 1}
+              y={spawnMapPt.my - 7.2}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={3.9}
+              fontWeight={900}
+              fill="#ffffff"
+            >
+              ⛩ CỔNG VÀO
+            </text>
+          </g>
+
+          {/* Phase 2 Synced Guided Route Polyline (Rotated 90° into Landscape Map Space) */}
+          {guidedRoute && guidedRoute.waypoints.length >= 2 && (
+            <polyline
+              data-testid="v28-map-guided-route"
+              points={guidedRoute.waypoints
+                .map((pt) => {
+                  const mp = worldToLandscapeMapPoint(pt.x, pt.z);
+                  return `${mp.mx.toFixed(2)},${mp.my.toFixed(2)}`;
+                })
+                .join(' ')}
+              fill="none"
+              stroke="#38bdf8"
+              strokeWidth={2.2}
+              strokeDasharray="3.8 2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              pointerEvents="none"
+            />
+          )}
+
+          {/* Suggested Booths Dashed Emerald Rings */}
+          {suggestedBoothIds &&
+            orderedBooths
+              .filter((item) => suggestedBoothIds.has(item.booth.boothId))
+              .map(({ booth, footprint }) => (
+                <circle
+                  key={`sug-${booth.boothId}`}
+                  cx={footprint.cx}
+                  cy={footprint.cy}
+                  r={Math.max(footprint.width, footprint.height) * 0.64}
+                  fill="none"
+                  stroke="#10b981"
+                  strokeWidth={1.35}
+                  strokeDasharray="2.2 1.6"
+                  pointerEvents="none"
+                />
+              ))}
+
+          {/* Live Avatar Position & Heading Cone Marker (Synchronized with 90° Landscape Rotation) */}
           <g pointerEvents="none" data-testid="v28-map-player-marker">
             <circle
-              cx={playerPos.x}
-              cy={playerPos.z}
-              r={Math.max(2.5, world.hallWidth * 0.022)}
-              fill="rgba(239, 68, 68, 0.25)"
+              cx={playerMapPt.mx}
+              cy={playerMapPt.my}
+              r={5.8}
+              fill="rgba(239, 68, 68, 0.24)"
             />
-            <circle
-              cx={playerPos.x}
-              cy={playerPos.z}
-              r={Math.max(1.5, world.hallWidth * 0.013)}
+            <polygon
+              points={playerConePoints}
               fill="#ef4444"
               stroke="#ffffff"
-              strokeWidth={0.8}
+              strokeWidth={0.7}
+            />
+            <circle
+              cx={playerMapPt.mx}
+              cy={playerMapPt.my}
+              r={2.5}
+              fill="#dc2626"
+              stroke="#ffffff"
+              strokeWidth={0.9}
             />
           </g>
         </svg>
 
-          {/* Fixed-Height Dedicated Booth Preview Area (zero layout shift on hover) */}
-          <div
-            data-testid="v28-map-booth-preview"
-            aria-live="polite"
-            style={{
-              height: 48,
-              minHeight: 48,
-              maxHeight: 48,
-              marginTop: 6,
-              padding: '6px 10px',
-              borderRadius: 10,
-              border: activePreviewEntry ? '1px solid #0284c7' : '1px solid #e2e8f0',
-              background: activePreviewEntry ? '#f0f9ff' : '#f8fafc',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              gap: 1,
-              overflow: 'hidden',
-              boxSizing: 'border-box',
-              flexShrink: 0,
-            }}
-          >
-            {activePreviewEntry ? (
-              <>
-                <div
+        {/* Fixed-Height Dedicated Booth Preview Area (zero layout shift on hover) */}
+        <div
+          data-testid="v28-map-booth-preview"
+          aria-live="polite"
+          style={{
+            height: 48,
+            minHeight: 48,
+            maxHeight: 48,
+            marginTop: 6,
+            padding: '6px 10px',
+            borderRadius: 10,
+            border: activePreviewEntry ? '1px solid #0284c7' : '1px solid #e2e8f0',
+            background: activePreviewEntry ? '#f0f9ff' : '#f8fafc',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            gap: 1,
+            overflow: 'hidden',
+            boxSizing: 'border-box',
+            flexShrink: 0,
+          }}
+        >
+          {activePreviewEntry ? (
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  minWidth: 0,
+                }}
+              >
+                <strong
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 8,
-                    minWidth: 0,
-                  }}
-                >
-                  <strong
-                    style={{
-                      fontSize: 12.5,
-                      lineHeight: '16px',
-                      color: '#0f172a',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      minWidth: 0,
-                    }}
-                  >
-                    #{activePreviewEntry.boothNumber} · {activePreviewEntry.booth.companyName || activePreviewEntry.booth.boothName}
-                  </strong>
-                  <span
-                    style={{
-                      fontSize: 10.5,
-                      lineHeight: '14px',
-                      fontWeight: 700,
-                      flexShrink: 0,
-                      color: visitedSet.has(activePreviewEntry.booth.boothId) ? '#0369a1' : '#64748b',
-                    }}
-                  >
-                    {visitedSet.has(activePreviewEntry.booth.boothId) ? '✓ Đã tham quan' : 'Chưa tham quan'}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    lineHeight: '15px',
-                    color: '#475569',
+                    fontSize: 12.5,
+                    lineHeight: '16px',
+                    color: '#0f172a',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
+                    minWidth: 0,
                   }}
                 >
-                  Khu {activePreviewEntry.booth.zoneCode} · Gian #{activePreviewEntry.boothNumber}
-                </div>
-              </>
-            ) : (
+                  #{activePreviewEntry.boothNumber} · {activePreviewEntry.booth.companyName || activePreviewEntry.booth.boothName}
+                </strong>
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    lineHeight: '14px',
+                    fontWeight: 700,
+                    flexShrink: 0,
+                    color: visitedSet.has(activePreviewEntry.booth.boothId) ? '#0369a1' : '#64748b',
+                  }}
+                >
+                  {visitedSet.has(activePreviewEntry.booth.boothId) ? '✓ Đã tham quan' : 'Chưa tham quan'}
+                </span>
+              </div>
               <div
                 style={{
-                  fontSize: 11.5,
-                  lineHeight: '16px',
-                  color: '#64748b',
+                  fontSize: 11,
+                  lineHeight: '15px',
+                  color: '#475569',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                 }}
               >
-                {isMobileUi ? 'Chạm trực tiếp vào ô gian để đi tới ngay' : 'Rê chuột vào gian để xem thông tin'}
+                Khu {activePreviewEntry.booth.zoneCode} · Gian #{activePreviewEntry.boothNumber}
               </div>
-            )}
-          </div>
+            </>
+          ) : (
+            <div
+              style={{
+                fontSize: 11.5,
+                lineHeight: '16px',
+                color: '#64748b',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {isMobileUi ? 'Chạm trực tiếp vào ô gian để đi tới ngay' : 'Rê chuột vào gian để xem thông tin'}
+            </div>
+          )}
+        </div>
 
-          {/* Compact Legend */}
+          {/* UAT Fix 02: Redesigned Dedicated "Chú thích bản đồ" (3-col Desktop / 2-col Mobile, 13-14px, 16px icons) */}
           <div
+            data-testid="v28-map-legend"
             style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '4px 10px',
-              marginTop: 5,
-              fontSize: 10.5,
-              color: '#475569',
-              alignItems: 'center',
+              marginTop: 8,
+              padding: isMobileUi ? '10px 10px' : '11px 14px',
+              borderRadius: 12,
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
               flexShrink: 0,
             }}
           >
-            <span>🔴 Bạn</span>
-            <span>
-              <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 2, background: '#1e293b', border: '1px solid #475569', marginRight: 3 }} />
-              Chưa tham quan
-            </span>
-            <span>
-              <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 2, background: '#38bdf8', border: '1px solid #0284c7', marginRight: 3 }} />
-              ✓ Đã tham quan
-            </span>
-            <span>
-              <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 2, background: '#1e293b', border: '1.5px solid #f59e0b', marginRight: 3 }} />
-              Đang chọn
-            </span>
+            <div
+              style={{
+                fontSize: isMobileUi ? 12.5 : 13.5,
+                fontWeight: 800,
+                color: '#0f172a',
+                marginBottom: 8,
+              }}
+            >
+              Chú thích bản đồ
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: isMobileUi ? 'repeat(2, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))',
+                gap: isMobileUi ? '8px 10px' : '8px 18px',
+                fontSize: isMobileUi ? 12.5 : 13.5,
+                fontWeight: 600,
+                color: '#1e293b',
+                alignItems: 'center',
+              }}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: 4, background: '#0057b8', color: '#fff', fontSize: 11, flexShrink: 0 }}>⛩</span>
+                Cổng vào
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ display: 'inline-block', width: 18, height: 10, borderRadius: 3, background: '#162b4d', border: '1px solid #334155', flexShrink: 0 }} />
+                Lối đi
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ display: 'inline-block', width: 16, height: 14, borderRadius: 3, background: 'rgba(15, 23, 42, 0.14)', border: '1.5px solid #475569', flexShrink: 0 }} />
+                Khu vực
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, fontSize: 13, color: '#dc2626', flexShrink: 0 }}>🔴▲</span>
+                Vị trí &amp; hướng của bạn
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: 4, background: '#1e293b', border: '1.5px solid #475569', flexShrink: 0 }} />
+                Chưa tham quan
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: 4, background: '#38bdf8', border: '1.5px solid #0284c7', color: '#082f49', fontSize: 11, fontWeight: 900, flexShrink: 0 }}>✓</span>
+                Đã tham quan
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: 4, background: '#1e293b', border: '2.5px solid #f59e0b', boxSizing: 'border-box', flexShrink: 0 }} />
+                Đang chọn
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: '50%', border: '2px dashed #10b981', boxSizing: 'border-box', flexShrink: 0 }} />
+                Gian gợi ý
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ display: 'inline-block', width: 18, height: 0, borderTop: '3px dashed #38bdf8', flexShrink: 0 }} />
+                Tuyến chỉ đường
+              </span>
+            </div>
           </div>
         </div>
 
@@ -926,7 +1160,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
         <div
           role="alert"
           style={{
-            fontSize: 12,
+            fontSize: 12.5,
             color: '#b91c1c',
             background: '#fef2f2',
             border: '1px solid #fecaca',
@@ -938,6 +1172,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
           ⚠️ {navFeedback}
         </div>
       )}
-    </section>
+      </section>
+    </div>
   );
 };

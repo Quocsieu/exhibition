@@ -12,6 +12,14 @@ import {
   type NearbyBoothMatch,
 } from '../../scene/v28/v28NearbyDiscovery';
 
+/**
+ * Phase 8: Tightened live UI notification trigger radius (down from 18.5m -> 11.5m enter,
+ * 21.0m -> 13.5m exit) so distant booths never pop up prematurely while browsing the avenue.
+ */
+export const NEARBY_WIDGET_ENTER_RADIUS_M = 11.5;
+export const NEARBY_WIDGET_EXIT_RADIUS_M = 13.5;
+export const NEARBY_DISMISS_REOPEN_MOVE_M = 4.0;
+
 export interface NearbyDiscoveryWidgetProps {
   world: V28ExhibitionVersionDetail;
   playerPos: V28PlayerState;
@@ -20,6 +28,7 @@ export interface NearbyDiscoveryWidgetProps {
   /** True when user is focused on a booth, viewing 2D map, menu, NPC, or product detail. */
   suppressed: boolean;
   onNavigateToBooth: (booth: V28BoothPlacementView) => void;
+  onGuideToBooth?: (booth: V28BoothPlacementView) => void;
   onSelectProduct: (booth: V28BoothPlacementView, product: V28Product, slotId: string) => void;
 }
 
@@ -37,13 +46,14 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
   isMobileLandscape,
   suppressed,
   onNavigateToBooth,
+  onGuideToBooth,
   onSelectProduct,
 }) => {
   const index = useMemo(() => buildNearbyDiscoveryIndex(world), [world]);
   const [matches, setMatches] = useState<NearbyBoothMatch[]>([]);
   // Desktop starts open (compact corner card); Mobile starts collapsed as a single slim pill
   const [expanded, setExpanded] = useState<boolean>(() => !isMobileUi);
-  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+  const [dismissedState, setDismissedState] = useState<{ key: string; x: number; z: number } | null>(null);
 
   const lastEvalPosRef = useRef<{ x: number; z: number } | null>(null);
   const prevIdsRef = useRef<Set<string>>(new Set());
@@ -65,6 +75,9 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
 
     lastEvalPosRef.current = { x: playerPos.x, z: playerPos.z };
     const next = findNearbyBooths(index, playerPos, {
+      enterRadiusM: NEARBY_WIDGET_ENTER_RADIUS_M,
+      exitRadiusM: NEARBY_WIDGET_EXIT_RADIUS_M,
+      maxResults: 3,
       prevNearbyIds: prevIdsRef.current,
     });
     const nextIdSet = new Set(next.map((m) => m.booth.boothId));
@@ -90,6 +103,9 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
   useEffect(() => {
     lastEvalPosRef.current = null;
     const next = findNearbyBooths(index, playerPos, {
+      enterRadiusM: NEARBY_WIDGET_ENTER_RADIUS_M,
+      exitRadiusM: NEARBY_WIDGET_EXIT_RADIUS_M,
+      maxResults: 3,
       prevNearbyIds: prevIdsRef.current,
     });
     prevIdsRef.current = new Set(next.map((m) => m.booth.boothId));
@@ -99,18 +115,30 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
 
   const currentTopKey = matches.map((m) => m.booth.boothId).join(',');
 
-  // Re-show automatically if user walked to a completely different set of nearby booths
+  // Phase 8: Only clear dismissal when visitor enters a NEW booth cluster AND moved >= 4m away
   useEffect(() => {
-    if (dismissedKey && currentTopKey && dismissedKey !== currentTopKey) {
-      setDismissedKey(null);
+    if (!dismissedState) return;
+    const movedM = Math.hypot(playerPos.x - dismissedState.x, playerPos.z - dismissedState.z);
+    if (currentTopKey && dismissedState.key !== currentTopKey && movedM >= NEARBY_DISMISS_REOPEN_MOVE_M) {
+      setDismissedState(null);
     }
-  }, [dismissedKey, currentTopKey]);
+  }, [dismissedState, currentTopKey, playerPos.x, playerPos.z]);
 
-  if (suppressed || matches.length === 0) {
+  const isDismissed =
+    dismissedState !== null &&
+    (dismissedState.key === currentTopKey ||
+      Math.hypot(playerPos.x - dismissedState.x, playerPos.z - dismissedState.z) < NEARBY_DISMISS_REOPEN_MOVE_M);
+
+  // True dismissal: completely hides the notification until visitor walks to a new booth cluster
+  if (suppressed || matches.length === 0 || isDismissed) {
     return null;
   }
 
-  const isDismissed = dismissedKey !== null && dismissedKey === currentTopKey;
+  const handleClose = () => {
+    setDismissedState({ key: currentTopKey, x: playerPos.x, z: playerPos.z });
+    setExpanded(false);
+  };
+
   const closest = matches[0];
 
   // =========================================================================
@@ -119,7 +147,7 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
   // =========================================================================
   if (isMobileUi) {
     const mobileTop = 'max(64px, calc(env(safe-area-inset-top, 8px) + 56px))';
-    if (!expanded || isDismissed) {
+    if (!expanded) {
       return (
         <div
           data-testid="v28-nearby-discovery-pill"
@@ -139,7 +167,7 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
           <button
             type="button"
             onClick={() => {
-              setDismissedKey(null);
+              setDismissedState(null);
               setExpanded(true);
             }}
             aria-label={`Xem ${matches.length} gian hàng gần bạn`}
@@ -229,8 +257,9 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
           </strong>
           <button
             type="button"
-            onClick={() => setExpanded(false)}
-            aria-label="Thu gọn gợi ý gần bạn"
+            data-testid="v28-nearby-close-btn"
+            onClick={handleClose}
+            aria-label="Đóng thông báo gian hàng gần bạn"
             style={{
               minWidth: 36,
               minHeight: 36,
@@ -254,6 +283,14 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
               setExpanded(false);
               onNavigateToBooth(match.booth);
             }}
+            onGuide={
+              onGuideToBooth
+                ? () => {
+                    setExpanded(false);
+                    onGuideToBooth(match.booth);
+                  }
+                : undefined
+            }
             onSelectProduct={(prod, slotId) => {
               setExpanded(false);
               onSelectProduct(match.booth, prod, slotId);
@@ -267,7 +304,7 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
   // =========================================================================
   // DESKTOP: Compact bottom-left floating card (never blocks center 3D or bottom-right dock)
   // =========================================================================
-  if (isDismissed || !expanded) {
+  if (!expanded) {
     return (
       <div
         data-testid="v28-nearby-discovery-pill"
@@ -283,7 +320,7 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
         <button
           type="button"
           onClick={() => {
-            setDismissedKey(null);
+            setDismissedState(null);
             setExpanded(true);
           }}
           aria-label={`Mở danh sách ${matches.length} gian hàng gần bạn`}
@@ -346,11 +383,10 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
         </div>
         <button
           type="button"
-          onClick={() => {
-            setDismissedKey(currentTopKey);
-            setExpanded(false);
-          }}
-          aria-label="Thu gọn gợi ý gần bạn"
+          data-testid="v28-nearby-close-btn"
+          onClick={handleClose}
+          aria-label="Đóng thông báo gian hàng gần bạn"
+          title="Đóng thông báo"
           style={{
             minWidth: 30,
             minHeight: 30,
@@ -358,12 +394,12 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
             border: '1px solid #cbd5e1',
             background: '#f8fafc',
             color: '#334155',
-            fontWeight: 700,
+            fontWeight: 800,
             cursor: 'pointer',
             flexShrink: 0,
           }}
         >
-          −
+          ✕
         </button>
       </div>
 
@@ -373,6 +409,7 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
           match={match}
           compact={false}
           onNavigate={() => onNavigateToBooth(match.booth)}
+          onGuide={onGuideToBooth ? () => onGuideToBooth(match.booth) : undefined}
           onSelectProduct={(prod, slotId) => onSelectProduct(match.booth, prod, slotId)}
         />
       ))}
@@ -384,6 +421,7 @@ interface NearbyBoothCardProps {
   match: NearbyBoothMatch;
   compact: boolean;
   onNavigate: () => void;
+  onGuide?: () => void;
   onSelectProduct: (product: V28Product, slotId: string) => void;
 }
 
@@ -391,6 +429,7 @@ const NearbyBoothCard: React.FC<NearbyBoothCardProps> = ({
   match,
   compact,
   onNavigate,
+  onGuide,
   onSelectProduct,
 }) => {
   const { booth, boothNumber, approachDistanceM, products } = match;
@@ -446,26 +485,49 @@ const NearbyBoothCard: React.FC<NearbyBoothCardProps> = ({
             {booth.companyName || booth.boothName}
           </div>
         </div>
-        <button
-          type="button"
-          data-testid={`v28-nearby-go-${boothNumber}`}
-          onClick={onNavigate}
-          style={{
-            minHeight: compact ? 36 : 32,
-            padding: '0 10px',
-            borderRadius: 8,
-            border: 'none',
-            background: 'var(--v28-youth-blue, #0057b8)',
-            color: '#fff',
-            fontSize: 11.5,
-            fontWeight: 700,
-            cursor: 'pointer',
-            flexShrink: 0,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          Đi tới →
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+          {onGuide && (
+            <button
+              type="button"
+              data-testid={`v28-nearby-guide-${boothNumber}`}
+              onClick={onGuide}
+              title="Dẫn đường 3D tới gian hàng này"
+              style={{
+                minHeight: compact ? 36 : 32,
+                padding: '0 8px',
+                borderRadius: 8,
+                border: '1px solid #0284c7',
+                background: '#e0f2fe',
+                color: '#0369a1',
+                fontSize: 11.5,
+                fontWeight: 700,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              🧭 Chỉ đường
+            </button>
+          )}
+          <button
+            type="button"
+            data-testid={`v28-nearby-go-${boothNumber}`}
+            onClick={onNavigate}
+            style={{
+              minHeight: compact ? 36 : 32,
+              padding: '0 10px',
+              borderRadius: 8,
+              border: 'none',
+              background: 'var(--v28-youth-blue, #0057b8)',
+              color: '#fff',
+              fontSize: 11.5,
+              fontWeight: 700,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Đi tới →
+          </button>
+        </div>
       </div>
 
       {visibleProducts.length > 0 ? (

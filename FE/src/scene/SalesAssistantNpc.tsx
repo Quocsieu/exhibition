@@ -13,6 +13,7 @@ import {
   computeNpcPlacement,
   getNpcAssistantProfile,
 } from '../services/npcPresentationService';
+import { npcWebAudioPlayer } from '../services/npcWebAudioPlayer';
 
 export interface SalesAssistantNpcProps {
   booth: Booth;
@@ -22,6 +23,10 @@ export interface SalesAssistantNpcProps {
   visible?: boolean;
   /** Optional single-line action label override (e.g. V28 "🎙 Nghe tư vấn"). Omitted in V27.5 to preserve legacy badge. */
   actionLabel?: string;
+  /** Optional compact status label override (e.g. "🔊 Đang tư vấn · Tạm dừng", "⏸ Bấm để tiếp tục"). */
+  statusLabel?: string;
+  /** Optional local X coordinate of currently highlighted product slot inside booth so NPC subtly gestures toward it. */
+  lookTargetLocalX?: number | null;
 }
 
 interface CachedNpcMaster {
@@ -799,9 +804,10 @@ function createNpcBadgeTexture(opts: {
   isActive: boolean;
   isHovered: boolean;
   actionLabel?: string;
+  statusLabel?: string;
 }): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
-  canvas.width = 272;
+  canvas.width = 340;
   canvas.height = 92;
   const ctx = canvas.getContext('2d');
 
@@ -809,10 +815,10 @@ function createNpcBadgeTexture(opts: {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const x = 5;
-    const y = opts.actionLabel ? 16 : 5;
+    const y = opts.actionLabel || opts.statusLabel ? 16 : 5;
     const w = canvas.width - 10;
-    const h = opts.actionLabel ? 60 : canvas.height - 10;
-    const r = opts.actionLabel ? 30 : 20;
+    const h = opts.actionLabel || opts.statusLabel ? 60 : canvas.height - 10;
+    const r = opts.actionLabel || opts.statusLabel ? 30 : 20;
 
     ctx.save();
     ctx.beginPath();
@@ -834,13 +840,13 @@ function createNpcBadgeTexture(opts: {
     ctx.strokeStyle = opts.isActive ? '#fbbf24' : opts.accentColor;
     ctx.stroke();
 
-    if (opts.actionLabel) {
-      // Compact single-line floating action pill (V28: "🎙 Nghe tư vấn")
+    if (opts.statusLabel || opts.actionLabel) {
+      // Compact single-line floating action pill (V28 Phase 1.1: never obstructs NPC face)
       ctx.fillStyle = opts.isActive ? '#fde68a' : '#ffffff';
-      ctx.font = '700 24px Inter, Segoe UI, sans-serif';
+      ctx.font = '700 22px Inter, Segoe UI, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const label = opts.isActive ? '🔊 Đang tư vấn' : opts.actionLabel;
+      const label = opts.statusLabel || (opts.isActive ? '🔊 Đang tư vấn' : opts.actionLabel || '🎙 Nghe tư vấn');
       ctx.fillText(label, canvas.width / 2, y + h / 2 + 1, w - 24);
     } else {
       // Legacy V27.5 two-line badge (100% preserved)
@@ -869,7 +875,7 @@ function createNpcBadgeTexture(opts: {
 }
 
 export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
-  ({ booth, isActiveSession, activeAnimation, onActivate, visible = true, actionLabel }) => {
+  ({ booth, isActiveSession, activeAnimation, onActivate, visible = true, actionLabel, statusLabel, lookTargetLocalX = null }) => {
     const [master, setMaster] = useState<CachedNpcMaster | null>(
       () => cachedMasters[isActiveSession ? 0 : 2] ?? cachedMasters[0] ?? null
     );
@@ -1060,8 +1066,9 @@ export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
           isActive: isActiveSession,
           isHovered: hovered,
           actionLabel,
+          statusLabel,
         }),
-      [profile.assistantName, booth.color, isActiveSession, hovered, actionLabel]
+      [profile.assistantName, booth.color, isActiveSession, hovered, actionLabel, statusLabel]
     );
 
     useEffect(() => {
@@ -1143,48 +1150,55 @@ export const SalesAssistantNpc: React.FC<SalesAssistantNpcProps> = React.memo(
         let handRY = 0;
         let handRZ = -0.08;
 
+        // Passive read-only audio amplitude modulation ONLY for the active speaking NPC (zero React state updates)
+        const audioAmp = isActiveSession ? npcWebAudioPlayer.getAudioAmplitude() : 0;
+
         if (mode === 'WAVE') {
           // Graceful Vietnamese greeting: left arm stays relaxed; right forearm raises politely for a soft wave
           spineY = 0.04 + Math.sin(t * 2.4) * 0.025;
-          headX = 0.045 + Math.sin(t * 3.2) * 0.025;
+          headX = 0.045 + Math.sin(t * 3.2) * (0.025 + audioAmp * 0.035);
           headY = 0.05;
 
           uArmRX = -0.28;
           uArmRY = -0.08;
           uArmRZ = 0.44;
-          fArmRX = -1.02;
+          fArmRX = -1.02 - audioAmp * 0.06;
           fArmRY = -0.18;
           fArmRZ = 0.16 + Math.sin(t * 5.4) * 0.13;
           handRZ = -0.04 + Math.sin(t * 5.4 + 0.4) * 0.12;
         } else if (mode === 'PRESENT') {
-          // Open-hand presentation toward the booth's display shelves on her inward (-X) side
-          spineY = -0.09 + Math.sin(t * 2.0) * 0.025;
-          headY = -0.11 + Math.sin(t * 1.8) * 0.035;
-          headX = 0.02;
+          // Open-hand presentation oriented gently toward the highlighted product slot inside the booth
+          const dirBias =
+            typeof lookTargetLocalX === 'number'
+              ? THREE.MathUtils.clamp((lookTargetLocalX - placement.localX) * 0.06, -0.22, 0.14)
+              : -0.11;
+          spineY = dirBias * 0.75 + Math.sin(t * 2.0) * 0.025;
+          headY = dirBias + Math.sin(t * 1.8) * 0.035;
+          headX = 0.02 + Math.sin(t * 4.2) * (0.015 + audioAmp * 0.04);
 
-          uArmRX = -0.34;
-          uArmRY = -0.22;
+          uArmRX = -0.34 - audioAmp * 0.05;
+          uArmRY = -0.22 + dirBias * 0.35;
           uArmRZ = 0.42;
-          fArmRX = -0.74 + Math.sin(t * 2.6) * 0.07;
+          fArmRX = -0.74 + Math.sin(t * 2.6) * (0.07 + audioAmp * 0.06);
           fArmRY = -0.24;
           fArmRZ = 0.08;
           handRX = 0.06;
           handRY = -0.2;
-          handRZ = -0.05;
+          handRZ = -0.05 + audioAmp * 0.08;
         } else if (mode === 'TALKING') {
-          // Calm conversational hostess gestures while keeping both upper arms relaxed down
-          spineX = Math.sin(t * 2.2) * 0.012;
+          // Calm conversational hostess gestures modulated gently by live voice amplitude
+          spineX = Math.sin(t * 2.2) * (0.012 + audioAmp * 0.014);
           spineY = Math.sin(t * 1.5) * 0.03;
-          headX = Math.sin(t * 3.0) * 0.025;
+          headX = Math.sin(t * 3.0) * (0.025 + audioAmp * 0.045);
           headY = Math.sin(t * 1.8) * 0.042;
 
           uArmLX = -0.08;
           uArmLZ = -0.56;
-          fArmLX = -0.32 + Math.sin(t * 2.5) * 0.055;
+          fArmLX = -0.32 + Math.sin(t * 2.5) * (0.055 + audioAmp * 0.06);
 
           uArmRX = -0.12;
           uArmRZ = 0.54;
-          fArmRX = -0.4 + Math.sin(t * 2.5 + 1.1) * 0.075;
+          fArmRX = -0.4 + Math.sin(t * 2.5 + 1.1) * (0.075 + audioAmp * 0.07);
           handRZ = -0.06 + Math.sin(t * 2.5 + 1.1) * 0.04;
         }
 

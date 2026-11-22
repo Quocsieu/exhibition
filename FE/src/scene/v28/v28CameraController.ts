@@ -100,18 +100,19 @@ export function computeV28BoothFocusCamera(
   const signCenterY = (booth.archetypeId === 'wave_pavilion' ? 3.85 : 3.45) * instanceScale;
   const signTopY = signCenterY + 0.55 * instanceScale;
 
-  // Required distance along booth +Z to frame full width (with margin) AND full height (signage + floor, clear of top HUD bar)
-  const widthMarginFactor = isPortrait ? 0.62 : 0.58;
+  // UAT Fix 04: ~14-16% closer Focus framing so booth, products & signage fill the viewport prominently
+  // while keeping full signage, all 6 product zones, and the 3D NPC cleanly inside frame with 0 clipping.
+  const widthMarginFactor = isPortrait ? 0.57 : 0.51;
   const distForWidth = halfDepth + (effectiveWidth * widthMarginFactor) / Math.max(0.24, tanHalfFov * aspect);
 
-  // Reserve ~14% vertical headroom at top for the horizontal Focus HUD bar and floor apron below
-  const verticalHalfSpan = signTopY * (isMobileLandscape ? 0.62 : 0.58);
+  // Reserve clean headroom at top for the slim Focus HUD bar and floor apron below
+  const verticalHalfSpan = signTopY * (isMobileLandscape ? 0.56 : 0.50);
   const distForHeight = halfDepth + verticalHalfSpan / tanHalfFov;
 
-  const minSafeDist = halfDepth + 4.4 * instanceScale;
-  const maxSafeDist = isPortrait ? 27.5 : 18.5;
+  const minSafeDist = halfDepth + 4.15 * instanceScale;
+  const maxSafeDist = isPortrait ? 26.0 : 17.0;
   let localCamZ = THREE.MathUtils.clamp(
-    Math.max(distForWidth, distForHeight, 9.2 * instanceScale),
+    Math.max(distForWidth, distForHeight, 8.0 * instanceScale),
     minSafeDist,
     maxSafeDist
   );
@@ -121,8 +122,8 @@ export function computeV28BoothFocusCamera(
   // so the full booth signage, 6 products, AND the 3D NPC stay cleanly inside frame (Desktop & Landscape unchanged).
   const localCamX = isPortrait ? 0.48 * instanceScale : 0;
   const localLookX = isPortrait ? 0.45 * instanceScale : 0;
-  const localCamY = (isPortrait ? 2.75 : isMobileLandscape ? 2.35 : 2.52) * instanceScale;
-  const localLookY = (isPortrait ? 2.08 : isMobileLandscape ? 1.88 : 1.98) * instanceScale;
+  const localCamY = (isPortrait ? 2.65 : isMobileLandscape ? 2.28 : 2.38) * instanceScale;
+  const localLookY = (isPortrait ? 2.04 : isMobileLandscape ? 1.85 : 1.92) * instanceScale;
   const localLookZ = -0.32 * instanceScale;
 
   // Ensure camera position stays inside dynamic hallBounds and outside OTHER booths' colliders
