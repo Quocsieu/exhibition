@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { CompanyManagement } from './CompanyManagement';
 import { ProductCatalog } from './ProductCatalog';
-import { ExcelImportWizard } from './ExcelImportWizard';
 import { ExhibitionConfigurator } from './ExhibitionConfigurator';
 
 export const V28Phase1Workspace: React.FC = () => {
-  const [subTab, setSubTab] = useState<'companies' | 'catalog' | 'excel' | 'exhibitions'>('companies');
+  const [subTab, setSubTab] = useState<'companies' | 'catalog' | 'exhibitions'>('companies');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
 
   return (
@@ -22,7 +21,7 @@ export const V28Phase1Workspace: React.FC = () => {
         }}
       >
         <div style={{ fontSize: 13 }}>
-          <strong>V28 Phase 1 (Database cách ly `expo_v28_dev.db`):</strong> Quản lý Doanh nghiệp, Kho sản phẩm độc lập & Import Excel. Không làm thay đổi dữ liệu V27.5.
+          <strong>V28 Phase 1 (Database cách ly `expo_v28_dev.db`):</strong> Quản lý Doanh nghiệp & Kho sản phẩm độc lập. Không làm thay đổi dữ liệu V27.5.
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
@@ -38,13 +37,6 @@ export const V28Phase1Workspace: React.FC = () => {
             onClick={() => setSubTab('catalog')}
           >
             📚 Kho SP Độc lập
-          </button>
-          <button
-            type="button"
-            className={`btn ${subTab === 'excel' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setSubTab('excel')}
-          >
-            📊 Import Excel (.xlsx)
           </button>
           <button
             type="button"
@@ -65,7 +57,6 @@ export const V28Phase1Workspace: React.FC = () => {
         />
       )}
       {subTab === 'catalog' && <ProductCatalog initialCompanyId={selectedCompanyId} />}
-      {subTab === 'excel' && <ExcelImportWizard />}
       {subTab === 'exhibitions' && <ExhibitionConfigurator />}
     </div>
   );

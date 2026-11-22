@@ -734,7 +734,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           className={`dashboard-tab ${activeTab === 'v28-catalog' ? 'dashboard-tab--active' : ''}`}
           onClick={() => setActiveTab('v28-catalog')}
         >
-          🚀 V28 Doanh nghiệp, Catalog & Excel
+          🚀 V28 Doanh nghiệp & Sản phẩm
         </button>
       </nav>
 

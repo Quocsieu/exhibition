@@ -1178,7 +1178,6 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
               <span style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>Nguồn sản phẩm (bắt buộc):</span>
               {[
                 { id: 'url', label: '🔗 URL Website' },
-                { id: 'excel', label: '📊 Excel (.xlsx)' },
               ].map((opt) => (
                 <button
                   key={opt.id}
