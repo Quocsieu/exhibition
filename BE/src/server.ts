@@ -14,6 +14,7 @@ import { createApiRoutes } from './routes/apiRoutes.js';
 import { createV28ApiRoutes } from './routes/v28Routes.js';
 import { V28ExhibitionService } from './services/v28/exhibitionService.js';
 import { V28VisitorJourneyService } from './services/v28/visitorJourneyService.js';
+import { V28ProductImageService } from './services/v28ProductImageService.js';
 import { V28SpatialAoiEngine } from './realtime/v28/spatialAoiEngine.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 import type { ServerToClientEvents, ClientToServerEvents } from './schemas/expoSchemas.js';
@@ -75,7 +76,8 @@ export function createApp(
   corsOrigin: CorsOriginConfig = '*',
   onMutation?: DataMutationCallback,
   v28Db?: V28CatalogDatabase,
-  cloudSync?: CloudDbSyncManager | null
+  cloudSync?: CloudDbSyncManager | null,
+  productImageService?: V28ProductImageService
 ): Express {
   const app = express();
   // Phase 3 Hardening: Explicit env-validated trust proxy (defaults safely to false; never hardcoded true)
@@ -167,7 +169,8 @@ export function createApp(
         },
         undefined,
         undefined,
-        v28VisitorJourneyService
+        v28VisitorJourneyService,
+        productImageService
       )
     );
   }
@@ -225,7 +228,17 @@ if (isMain) {
       void cloudSync.flushAll();
     }
 
-    const app = createApp(db, CORS_ORIGIN, undefined, v28Db, cloudSync);
+    const productImageService = V28ProductImageService.fromEnv();
+    try {
+      await productImageService.init();
+      console.log(
+        `[Virtual Expo BE] Product Image Storage: ${productImageService.getStorageMode()} (dir: ${productImageService.getStorageDir() || 'remote'})`
+      );
+    } catch (err) {
+      console.error('[Virtual Expo BE] Product Image Storage init warning:', err);
+    }
+
+    const app = createApp(db, CORS_ORIGIN, undefined, v28Db, cloudSync, productImageService);
     const httpServer = http.createServer(app);
     // Phase 4.2 Hardening: Configurable HTTP timeouts compatible with Nginx/Plesk reverse proxy & long imports
     httpServer.keepAliveTimeout = Math.max(5000, Number(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 65000));
@@ -265,6 +278,7 @@ if (isMain) {
       void Promise.allSettled([
         svc ? svc.shutdown() : Promise.resolve(),
         cloudSync ? cloudSync.close() : Promise.resolve(),
+        productImageService.close(),
       ]).finally(() => {
         try {
           v28SpatialAoi?.dispose();

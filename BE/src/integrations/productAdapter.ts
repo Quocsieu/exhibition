@@ -665,6 +665,34 @@ export function extractProductFromHtml(html: string, sourceUrl: string): Extract
     }
   }
 
+  if (images.length === 0) {
+    // Phase 2: Safe fallback extraction from HTML <img> (supports lazy-load data-src/data-original/srcset, excludes logos/banners/icons)
+    const NON_PRODUCT_IMG_RE = /(logo|icon|favicon|avatar|sprite|badge|banner|payment|visa|mastercard|zalo|facebook|messenger|youtube|tiktok|placeholder|loading|spinner|blank\.gif|1x1)/i;
+    const imgTags = html.matchAll(/<img\s+([^>]+)>/gi);
+    for (const im of imgTags) {
+      if (images.length >= 4) break;
+      const attrs = im[1];
+      if (NON_PRODUCT_IMG_RE.test(attrs)) continue;
+      let rawCandidate = '';
+      const lazyMatch = /(?:data-src|data-original|data-lazy-src|data-srcset)=["']([^"']+)["']/i.exec(attrs);
+      const srcsetMatch = /\bsrcset=["']([^"']+)["']/i.exec(attrs);
+      const srcMatch = /\bsrc=["']([^"']+)["']/i.exec(attrs);
+      if (lazyMatch?.[1]) {
+        rawCandidate = lazyMatch[1].split(',')[0].trim().split(/\s+/)[0];
+      } else if (srcsetMatch?.[1]) {
+        const parts = srcsetMatch[1].split(',').map((s) => s.trim()).filter(Boolean);
+        rawCandidate = (parts[parts.length - 1] || '').split(/\s+/)[0];
+      } else if (srcMatch?.[1]) {
+        rawCandidate = srcMatch[1].trim();
+      }
+      if (!rawCandidate || rawCandidate.startsWith('data:') || NON_PRODUCT_IMG_RE.test(rawCandidate)) continue;
+      const resolved = resolveUrlMaybe(rawCandidate, sourceUrl);
+      if (resolved && !images.includes(resolved)) {
+        images.push(resolved);
+      }
+    }
+  }
+
   if (!name) {
     const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
     if (titleMatch && titleMatch[1]) {

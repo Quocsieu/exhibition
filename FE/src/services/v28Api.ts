@@ -190,6 +190,33 @@ export const v28Api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  batchCreateProducts: (payload: {
+    companyId: string;
+    duplicateStrategy?: 'skip' | 'update';
+    products: Array<{
+      name: string;
+      sku?: string;
+      price?: number;
+      currency?: string;
+      description?: string;
+      images?: string[];
+      sourceUrl?: string;
+      contactUrl?: string;
+      inStock?: boolean;
+    }>;
+  }) =>
+    v28Request<{
+      createdCount: number;
+      updatedCount: number;
+      skippedCount: number;
+      failedCount: number;
+      createdProductIds: string[];
+      productIds: string[];
+      errors: Array<{ index: number; name?: string; reason: string }>;
+    }>('/products/batch', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   updateProduct: (id: string, patch: Partial<V28Product>) =>
     v28Request<{ product: V28Product }>(`/products/${encodeURIComponent(id)}`, {
       method: 'PATCH',
@@ -399,6 +426,7 @@ export const v28Api = {
   discoverWebsiteProducts: (payload: {
     companyId?: string;
     url: string;
+    targetCount?: number;
     maxPages?: number;
     autoDetectCompany?: boolean;
   }) =>
@@ -416,15 +444,20 @@ export const v28Api = {
         matchedBy: string;
       };
       coverageReport?: {
+        targetCount?: number;
+        shortfall?: number;
+        stopReason?: 'TARGET_REACHED' | 'SOURCE_EXHAUSTED' | 'RESOURCE_LIMIT' | 'ACCESS_BLOCKED' | 'NETWORK_ERROR';
         pagesScanned: number;
+        maxPagesBudget?: number;
         productUrlsDiscovered: number;
         extractedValidCount: number;
         newCount: number;
         duplicateCount: number;
+        inCrawlDuplicatesSkipped?: number;
         errorCount: number;
         totalBytesRead: number;
         stopReasons: string[];
-        coverageStatus: 'IMPORT_COMPLETED';
+        coverageStatus: 'IMPORT_COMPLETED' | 'TARGET_REACHED' | 'PARTIAL' | 'EMPTY';
         fullCatalogVerified: boolean;
       };
       discoveredProducts: Array<{

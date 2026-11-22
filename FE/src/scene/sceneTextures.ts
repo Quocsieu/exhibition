@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { API_BASE_URL } from '../config/apiConfig';
 
 let activeCanvasTextureCount = 0;
 
@@ -2113,7 +2114,11 @@ export function createArchitecturalProductDisplayTexture(options: {
     img.crossOrigin = 'anonymous';
     img.onload = () => drawLayout(img);
     img.onerror = () => drawLayout(null);
-    img.src = options.imageUrl;
+    const resolvedImgSrc =
+      options.imageUrl.startsWith('/api/') && API_BASE_URL
+        ? `${API_BASE_URL}${options.imageUrl}`
+        : options.imageUrl;
+    img.src = resolvedImgSrc;
   }
 
   return texture;

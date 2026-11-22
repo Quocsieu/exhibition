@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import express, { Router, type Request, type Response } from 'express';
 import {
   requireAdminAuth,
@@ -29,16 +30,14 @@ import { V28VisitorJourneyService } from '../services/v28/visitorJourneyService.
 import { V28RewardRedemptionService } from '../services/v28/rewardRedemptionService.js';
 import {
   fetchExternalProductHtml,
-  fetchExternalText,
   extractProductFromHtml,
-  extractBreadcrumbCategoryFromHtml,
-  extractSellerOrganizationFromHtml,
-  extractProductBrandFromHtml,
-  createCrawlBudget,
   ExternalFetchError,
-  MAX_SITEMAP_BYTES,
-  MAX_TOTAL_CRAWL_BYTES,
 } from '../integrations/productAdapter.js';
+import {
+  crawlWebsiteForProducts,
+  validateTargetCount,
+} from '../services/v28WebsiteCrawlerService.js';
+import { V28ProductImageService } from '../services/v28ProductImageService.js';
 import { z } from 'zod';
 
 export function sanitizePlainText(raw: string, maxLen = 2000): string {
@@ -99,7 +98,8 @@ export function createV28ApiRoutes(
   onLayoutPublished?: (version: ExhibitionVersionDetail) => void,
   audioCacheService = new V28AudioCacheService(v28Db),
   aiConsultantService = new V28AiConsultantService(v28Db, exhibitionService),
-  visitorJourneyService = new V28VisitorJourneyService(v28Db, exhibitionService)
+  visitorJourneyService = new V28VisitorJourneyService(v28Db, exhibitionService),
+  productImageService = V28ProductImageService.fromEnv()
 ): Router {
   const categoryService = new V28CategoryService(v28Db);
   const rewardRedemptionService = new V28RewardRedemptionService(
@@ -252,7 +252,7 @@ export function createV28ApiRoutes(
           b.slots.some((s) => s.product?.id === product.id)
         );
         for (const b of affectedBooths) {
-          void audioCacheService.getOrPrepareBoothAudioPack(b).catch(() => {});
+          void audioCacheService.getOrPrepareBoothAudioPack(b).catch(() => { });
         }
       } catch {
         // ignore if no active exhibition yet
@@ -302,7 +302,7 @@ export function createV28ApiRoutes(
         onLayoutPublished?.(activeWorld);
         const booth = activeWorld.booths.find((b) => b.boothId === getParam(req.params.id));
         if (booth) {
-          void audioCacheService.getOrPrepareBoothAudioPack(booth).catch(() => {});
+          void audioCacheService.getOrPrepareBoothAudioPack(booth).catch(() => { });
         }
       } catch {
         // ignore if no active exhibition yet
@@ -332,32 +332,32 @@ export function createV28ApiRoutes(
     requireAdminAuth,
     excelUploadJsonParser,
     async (req: Request, res: Response) => {
-    const parsed = ExcelPreviewBodySchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message || 'Thiếu dữ liệu upload Excel.' });
-      return;
-    }
+      const parsed = ExcelPreviewBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message || 'Thiếu dữ liệu upload Excel.' });
+        return;
+      }
 
-    const base64Clean = parsed.data.fileBase64.replace(/^data:[^;]+;base64,/, '');
-    const fileBuffer = Buffer.from(base64Clean, 'base64');
-    if (fileBuffer.length > MAX_EXCEL_FILE_BYTES) {
-      res.status(413).json({ error: 'Dung lượng tệp vượt quá giới hạn tối đa 5 MB.' });
-      return;
-    }
+      const base64Clean = parsed.data.fileBase64.replace(/^data:[^;]+;base64,/, '');
+      const fileBuffer = Buffer.from(base64Clean, 'base64');
+      if (fileBuffer.length > MAX_EXCEL_FILE_BYTES) {
+        res.status(413).json({ error: 'Dung lượng tệp vượt quá giới hạn tối đa 5 MB.' });
+        return;
+      }
 
-    const adminUsername = (res.locals.adminUsername as string | undefined) || 'admin';
-    try {
-      const preview = await excelService.createPreview({
-        companyId: parsed.data.companyId,
-        adminUsername,
-        filename: parsed.data.filename,
-        fileBuffer,
-      });
-      res.json(preview);
-    } catch (err) {
-      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
-    }
-  });
+      const adminUsername = (res.locals.adminUsername as string | undefined) || 'admin';
+      try {
+        const preview = await excelService.createPreview({
+          companyId: parsed.data.companyId,
+          adminUsername,
+          filename: parsed.data.filename,
+          fileBuffer,
+        });
+        res.json(preview);
+      } catch (err) {
+        res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+      }
+    });
 
   router.post('/imports/excel/commit', requireAdminAuth, (req: Request, res: Response) => {
     const parsed = ExcelCommitBodySchema.safeParse(req.body);
@@ -498,11 +498,20 @@ export function createV28ApiRoutes(
     const body = (req.body || {}) as {
       companyId?: string;
       url?: string;
+      targetCount?: number;
       maxPages?: number;
       autoDetectCompany?: boolean;
     };
     if (!body.url) {
       res.status(400).json({ error: 'Vui lòng nhập URL website.' });
+      return;
+    }
+
+    let targetCount: number;
+    try {
+      targetCount = validateTargetCount(body.targetCount);
+    } catch (valErr) {
+      res.status(400).json({ error: (valErr as Error).message, errorCode: 'INVALID_TARGET_COUNT' });
       return;
     }
 
@@ -518,200 +527,19 @@ export function createV28ApiRoutes(
       return;
     }
 
-    const maxPages = Math.max(1, Math.min(25, Number(body.maxPages) || 15));
-    const budget = createCrawlBudget(MAX_TOTAL_CRAWL_BYTES);
-    const stopReasons: string[] = [];
-    let pageErrors = 0;
-
-    const NON_PRODUCT_PATH_RE =
-      /\/(login|signin|signup|register|cart|checkout|account|user|search|contact|lien-he|tin-tuc|news|blog|chinh-sach|policy|tuyen-dung|career|huong-dan|guide|faq|about|gioi-thieu|he-thong-cua-hang|tra-cuu|bao-hanh|sitemap)/i;
-
-    const isLikelyProductPath = (pathname: string): boolean => {
-      const p = pathname.toLowerCase();
-      if (NON_PRODUCT_PATH_RE.test(p)) return false;
-      if (
-        p.includes('/product') ||
-        p.includes('/san-pham') ||
-        p.includes('/item') ||
-        p.includes('/shop/') ||
-        p.includes('/p/') ||
-        p.includes('/sp/')
-      ) {
-        return true;
-      }
-      // E-commerce product slugs ending with .html containing a model/spec digit (avoids Vietnamese category slugs like /may-tinh-de-ban.html)
-      if (/^\/[a-z0-9]+-[a-z0-9-]+\.html$/i.test(p)) {
-        const slug = p.slice(1, -5);
-        if (/\d/.test(slug)) {
-          return true;
-        }
-      }
-      return false;
-    };
-
-    const isLikelyCategoryPath = (pathname: string): boolean => {
-      const p = pathname.toLowerCase();
-      if (NON_PRODUCT_PATH_RE.test(p)) return false;
-      return (
-        /^\/[a-z0-9-]+\.html$/i.test(p) ||
-        p.includes('/category') ||
-        p.includes('/danh-muc') ||
-        p.includes('/collections/')
-      );
-    };
-
-    const collectLinksFromHtml = (
-      html: string,
-      baseUrl: string,
-      origin: string,
-      seenLinks: Set<string>,
-      productLinks: string[],
-      categoryLinks: string[],
-      maxCollect: number
-    ) => {
-      const hrefMatches = html.matchAll(/<a[^>]+href=["']([^"']+)["']/gi);
-      for (const m of hrefMatches) {
-        if (productLinks.length >= maxCollect && categoryLinks.length >= 4) break;
-        const href = m[1].trim();
-        if (
-          !href ||
-          href.startsWith('#') ||
-          href.startsWith('mailto:') ||
-          href.startsWith('tel:') ||
-          href.startsWith('javascript:')
-        ) {
-          continue;
-        }
-        try {
-          const absUrl = new URL(href, baseUrl);
-          if (absUrl.origin !== origin) continue;
-          const cleaned = absUrl.toString().replace(/#.*$/, '');
-          if (seenLinks.has(cleaned)) continue;
-          if (isLikelyProductPath(absUrl.pathname)) {
-            if (productLinks.length < maxCollect) {
-              seenLinks.add(cleaned);
-              productLinks.push(cleaned);
-            }
-          } else if (isLikelyCategoryPath(absUrl.pathname)) {
-            if (categoryLinks.length < 4) {
-              seenLinks.add(cleaned);
-              categoryLinks.push(cleaned);
-            }
-          }
-        } catch {
-          // ignore invalid href
-        }
-      }
-    };
-
-    const discoverProductLinksFromSitemap = async (
-      origin: string,
-      seenLinks: Set<string>,
-      limit: number
-    ): Promise<string[]> => {
-      const found: string[] = [];
-      const sitemapUrls: string[] = [];
-      try {
-        const robots = await fetchExternalText(`${origin}/robots.txt`, {
-          maxBytes: 200_000,
-          budget,
-          accept: 'text/plain,*/*;q=0.5',
-          allowedContentTypes: ['text/plain', 'text/html'],
-          checkCaptcha: false,
-          resourceLabel: 'robots.txt',
-        });
-        for (const line of robots.text.split(/\r?\n/)) {
-          const sm = /^sitemap:\s*(https?:\/\/\S+)/i.exec(line.trim());
-          if (sm && sm[1]) {
-            try {
-              const smUrl = new URL(sm[1]);
-              if (smUrl.origin === origin) sitemapUrls.push(smUrl.toString());
-            } catch {}
-          }
-        }
-      } catch {
-        // robots.txt optional
-      }
-      if (sitemapUrls.length === 0) {
-        sitemapUrls.push(`${origin}/sitemap.xml`);
-      }
-
-      const inspectXml = async (xmlUrl: string, depth: number) => {
-        if (found.length >= limit || depth > 2) return;
-        try {
-          const xmlRes = await fetchExternalText(xmlUrl, {
-            maxBytes: MAX_SITEMAP_BYTES,
-            budget,
-            accept: 'application/xml,text/xml,*/*;q=0.5',
-            allowedContentTypes: ['xml', 'text/plain'],
-            checkCaptcha: false,
-            resourceLabel: 'sitemap XML',
-          });
-          const locs = [...xmlRes.text.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1].trim());
-          // Sitemap index? Prioritize product sitemaps!
-          const childSitemaps = locs.filter((u) => /\.xml(\?|$)/i.test(u));
-          if (childSitemaps.length > 0) {
-            const preferred = childSitemaps.filter((u) => /product|san-pham/i.test(u));
-            const toVisit = (preferred.length > 0 ? preferred : childSitemaps).slice(0, 3);
-            for (const child of toVisit) {
-              if (found.length >= limit) break;
-              try {
-                if (new URL(child).origin === origin) {
-                  await inspectXml(child, depth + 1);
-                }
-              } catch {}
-            }
-            return;
-          }
-          for (const loc of locs) {
-            if (found.length >= limit) break;
-            try {
-              const u = new URL(loc);
-              if (u.origin !== origin) continue;
-              const cleaned = u.toString().replace(/#.*$/, '');
-              if (seenLinks.has(cleaned)) continue;
-              if (isLikelyProductPath(u.pathname)) {
-                seenLinks.add(cleaned);
-                found.push(cleaned);
-              }
-            } catch {}
-          }
-        } catch {
-          // ignore unreachable/oversized sitemap safely
-        }
-      };
-
-      await inspectXml(sitemapUrls[0], 0);
-      return found;
-    };
-
     try {
-      let rootHtml = '';
-      let finalUrl = body.url.trim();
-      let rootOversizedFallback = false;
-      let pagesScanned = 0;
-
-      try {
-        const rootRes = await fetchExternalProductHtml(finalUrl, { budget });
-        rootHtml = rootRes.html;
-        finalUrl = rootRes.finalUrl;
-        pagesScanned = 1;
-      } catch (rootErr) {
-        // If homepage itself exceeds safe size cap, try lightweight public sitemap fallback (still strictly SSRF & size guarded!)
-        if (rootErr instanceof ExternalFetchError && rootErr.code === 'SIZE_LIMIT') {
-          rootOversizedFallback = true;
-          finalUrl = new URL(finalUrl).toString();
-        } else {
-          throw rootErr;
+      const crawlRes = await crawlWebsiteForProducts(
+        {
+          url: body.url,
+          targetCount,
+          maxPages: body.maxPages,
+        },
+        {
+          findDuplicateByUrl: (u) => Boolean(company && categoryService.findDuplicateProductBySourceUrl(company.id, u)),
+          sanitizePlainText,
         }
-      }
+      );
 
-      const rootOrigin = new URL(finalUrl).origin;
-      let detectedSeller = rootHtml
-        ? extractSellerOrganizationFromHtml(rootHtml, finalUrl)
-        : extractSellerOrganizationFromHtml('', finalUrl);
-
-      // Auto-resolve / match Seller Company by canonical domain or verified organization name (I5)
       let sellerResolution: {
         companyId: string | null;
         companyName: string;
@@ -722,306 +550,70 @@ export function createV28ApiRoutes(
         matchedBy: string;
       } = {
         companyId: company?.id ?? null,
-        companyName: detectedSeller.name || company?.name || '',
-        canonicalDomain: detectedSeller.canonicalDomain,
-        confidence: detectedSeller.confidence,
-        evidence: detectedSeller.evidence,
+        companyName: crawlRes.detectedSeller.name || company?.name || '',
+        canonicalDomain: crawlRes.detectedSeller.canonicalDomain,
+        confidence: crawlRes.detectedSeller.confidence,
+        evidence: crawlRes.detectedSeller.evidence,
         created: false,
         matchedBy: company ? 'provided' : 'none',
       };
 
-      const applySellerDetection = (htmlSample: string, sampleUrl: string) => {
-        if (detectedSeller.confidence === 'verified' && detectedSeller.name) return;
-        const next = extractSellerOrganizationFromHtml(htmlSample, sampleUrl);
-        if (next.name && (next.confidence === 'verified' || !detectedSeller.name)) {
-          detectedSeller = next;
-        }
-      };
-
-      const finalizeSellerCompany = () => {
-        if (body.autoDetectCompany || !company) {
-          const resComp = v28Db.findOrCreateCompanyByWebsite({
-            name: detectedSeller.name,
-            canonicalDomain: detectedSeller.canonicalDomain,
-            websiteUrl: detectedSeller.websiteUrl,
-            logoUrl: detectedSeller.logoUrl,
-            contactEmail: detectedSeller.contactEmail,
-            description: detectedSeller.description,
-            allowCreate: detectedSeller.confidence === 'verified',
-          });
-          if (resComp.company) {
-            company = resComp.company;
-            sellerResolution = {
-              companyId: resComp.company.id,
-              companyName: resComp.company.name,
-              canonicalDomain: detectedSeller.canonicalDomain,
-              confidence: detectedSeller.confidence,
-              evidence: detectedSeller.evidence,
-              created: resComp.created,
-              matchedBy: resComp.matchedBy,
-            };
-          } else {
-            sellerResolution = {
-              companyId: company?.id ?? null,
-              companyName: detectedSeller.name || company?.name || '',
-              canonicalDomain: detectedSeller.canonicalDomain,
-              confidence: 'needs_confirmation',
-              evidence: detectedSeller.evidence,
-              created: false,
-              matchedBy: company ? 'fallback_selected' : 'none',
-            };
-          }
-        }
-      };
-
-      if (rootHtml) {
-        finalizeSellerCompany();
-      }
-      if (rootOversizedFallback) {
-        stopReasons.push('homepage_oversized_sitemap_fallback');
-      }
-
-      const discovered: Array<{
-        name: string;
-        brand: string;
-        sku: string;
-        price: number;
-        currency: string;
-        description: string;
-        images: string[];
-        category: string;
-        sourceUrl: string;
-        inStock: boolean;
-        alreadyInCatalog: boolean;
-      }> = [];
-      const seenUrls = new Set<string>();
-      const seenNames = new Set<string>();
-
-      const pushCandidate = (
-        draft: ReturnType<typeof extractProductFromHtml>,
-        urlKey: string,
-        categoryHint = '',
-        brandHint = ''
-      ) => {
-        const cleanName = sanitizePlainText(draft.name || '', 180);
-        if (!cleanName || cleanName.length < 2) return;
-        const normUrl = urlKey.replace(/#.*$/, '').replace(/\/+$/, '');
-        const normName = cleanName.toLowerCase();
-        if (seenUrls.has(normUrl) || seenNames.has(normName)) return;
-        seenUrls.add(normUrl);
-        seenNames.add(normName);
-        const dup = company ? categoryService.findDuplicateProductBySourceUrl(company.id, normUrl) : null;
-        discovered.push({
-          name: cleanName,
-          brand: sanitizePlainText(brandHint, 80),
-          sku: sanitizePlainText(draft.sku || '', 80),
-          price: typeof draft.price === 'number' && Number.isFinite(draft.price) && draft.price > 0 ? draft.price : 0,
-          currency: draft.currency || 'VND',
-          description: sanitizePlainText(draft.description || '', 1200),
-          images: Array.isArray(draft.images) ? draft.images.slice(0, 4) : [],
-          category: sanitizePlainText(categoryHint, 80),
-          sourceUrl: normUrl,
-          inStock: draft.inStock ?? true,
-          alreadyInCatalog: Boolean(dup),
+      if (body.autoDetectCompany || !company) {
+        const resComp = v28Db.findOrCreateCompanyByWebsite({
+          name: crawlRes.detectedSeller.name,
+          canonicalDomain: crawlRes.detectedSeller.canonicalDomain,
+          websiteUrl: crawlRes.detectedSeller.websiteUrl,
+          logoUrl: crawlRes.detectedSeller.logoUrl,
+          contactEmail: crawlRes.detectedSeller.contactEmail,
+          description: crawlRes.detectedSeller.description,
+          allowCreate: crawlRes.detectedSeller.confidence === 'verified',
         });
-      };
-
-      const candidateLinks: string[] = [];
-      const categoryLinks: string[] = [];
-      const seenLinks = new Set<string>([finalUrl.replace(/#.*$/, '')]);
-
-      // 1. Parse JSON-LD Product / ItemList directly on landing page if present
-      if (rootHtml) {
-        const rootCat = extractBreadcrumbCategoryFromHtml(rootHtml);
-        const ldMatches = rootHtml.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
-        for (const m of ldMatches) {
-          try {
-            const parsedLd = JSON.parse(m[1].trim());
-            const nodes: Array<Record<string, unknown>> = Array.isArray(parsedLd)
-              ? parsedLd
-              : Array.isArray(parsedLd?.['@graph'])
-                ? parsedLd['@graph']
-                : [parsedLd];
-            for (const node of nodes) {
-              if (!node || typeof node !== 'object') continue;
-              if (node['@type'] === 'Product' && typeof node.name === 'string') {
-                const offers = Array.isArray(node.offers) ? node.offers[0] : node.offers;
-                const rawPrice = Number((offers as Record<string, unknown> | undefined)?.price || 0);
-                const rawImg = Array.isArray(node.image) ? node.image[0] : node.image;
-                const imgUrl = typeof rawImg === 'string' ? rawImg : (rawImg as { url?: string } | undefined)?.url || '';
-                let itemUrl = finalUrl;
-                if (typeof node.url === 'string') {
-                  try {
-                    const parsedItem = new URL(node.url, finalUrl);
-                    if (parsedItem.protocol === 'http:' || parsedItem.protocol === 'https:') {
-                      itemUrl = parsedItem.toString();
-                    }
-                  } catch {
-                    itemUrl = finalUrl;
-                  }
-                }
-                const nodeCat = typeof node.category === 'string' ? node.category : rootCat;
-                pushCandidate(
-                  {
-                    name: node.name,
-                    sku: typeof node.sku === 'string' ? node.sku : '',
-                    price: Number.isFinite(rawPrice) ? rawPrice : 0,
-                    currency:
-                      typeof (offers as Record<string, unknown> | undefined)?.priceCurrency === 'string'
-                        ? String((offers as Record<string, unknown>).priceCurrency)
-                        : 'VND',
-                    description: typeof node.description === 'string' ? node.description : '',
-                    images: imgUrl && /^https?:\/\//i.test(imgUrl) ? [imgUrl] : [],
-                    videoUrl: '',
-                    sourceUrl: itemUrl,
-                    inStock: true,
-                    extractionMethod: 'json-ld',
-                    warnings: [],
-                  },
-                  itemUrl,
-                  nodeCat
-                );
-              } else if (node['@type'] === 'ItemList' && Array.isArray(node.itemListElement)) {
-                for (const el of node.itemListElement) {
-                  const u = typeof el?.url === 'string' ? el.url : typeof el?.item?.url === 'string' ? el.item.url : '';
-                  if (u) {
-                    try {
-                      const abs = new URL(u, finalUrl).toString().replace(/#.*$/, '');
-                      if (new URL(abs).origin === rootOrigin && !seenLinks.has(abs)) {
-                        seenLinks.add(abs);
-                        candidateLinks.push(abs);
-                      }
-                    } catch {}
-                  }
-                }
-              }
-            }
-          } catch {
-            // ignore malformed JSON-LD block
-          }
-        }
-
-        // 2. Discover same-origin public product & category links on landing page
-        collectLinksFromHtml(rootHtml, finalUrl, rootOrigin, seenLinks, candidateLinks, categoryLinks, maxPages * 2);
-      }
-
-      // 3. If landing page is a homepage with category links (or oversized), expand via up to 2 category pages OR public sitemap
-      if (candidateLinks.length < Math.min(4, maxPages) && categoryLinks.length > 0 && pagesScanned < maxPages) {
-        for (const catUrl of categoryLinks.slice(0, 2)) {
-          if (pagesScanned >= maxPages - 1 || candidateLinks.length >= maxPages) break;
-          try {
-            const catRes = await fetchExternalProductHtml(catUrl, { budget });
-            pagesScanned++;
-            collectLinksFromHtml(
-              catRes.html,
-              catRes.finalUrl,
-              rootOrigin,
-              seenLinks,
-              candidateLinks,
-              [],
-              maxPages * 2
-            );
-          } catch {
-            // skip unreachable category page safely
-          }
+        if (resComp.company) {
+          company = resComp.company;
+          sellerResolution = {
+            companyId: resComp.company.id,
+            companyName: resComp.company.name,
+            canonicalDomain: crawlRes.detectedSeller.canonicalDomain,
+            confidence: crawlRes.detectedSeller.confidence,
+            evidence: crawlRes.detectedSeller.evidence,
+            created: resComp.created,
+            matchedBy: resComp.matchedBy,
+          };
+        } else {
+          sellerResolution = {
+            companyId: company?.id ?? null,
+            companyName: crawlRes.detectedSeller.name || company?.name || '',
+            canonicalDomain: crawlRes.detectedSeller.canonicalDomain,
+            confidence: 'needs_confirmation',
+            evidence: crawlRes.detectedSeller.evidence,
+            created: false,
+            matchedBy: company ? 'fallback_selected' : 'none',
+          };
         }
       }
 
-      if (candidateLinks.length < Math.min(4, maxPages)) {
-        const sitemapProducts = await discoverProductLinksFromSitemap(rootOrigin, seenLinks, maxPages);
-        for (const smLink of sitemapProducts) {
-          if (candidateLinks.length >= maxPages * 2) break;
-          candidateLinks.push(smLink);
-        }
-      }
-
-      // 4. Fetch bounded candidate product pages and extract real structured product data
-      for (const link of candidateLinks) {
-        if (pagesScanned >= maxPages) {
-          stopReasons.push(`max_pages_limit:${maxPages}`);
-          break;
-        }
-        if (budget.totalBytesRead >= budget.maxTotalBytes) {
-          stopReasons.push(`byte_budget_limit:${budget.maxTotalBytes}`);
-          break;
-        }
-        try {
-          const sub = await fetchExternalProductHtml(link, { budget });
-          pagesScanned++;
-          applySellerDetection(sub.html, sub.finalUrl);
-          if (!company && detectedSeller.name) {
-            finalizeSellerCompany();
-          }
-          const subDraft = extractProductFromHtml(sub.html, sub.finalUrl);
-          const subCat = extractBreadcrumbCategoryFromHtml(sub.html);
-          const subBrand = extractProductBrandFromHtml(sub.html);
-          // Only accept genuine product pages (JSON-LD Product, priced item, or OpenGraph with image on non-root path)
-          const subPath = new URL(sub.finalUrl).pathname.replace(/\/+$/, '');
-          const isRootLanding = !subPath || subPath === '/';
-          if (
-            subDraft.extractionMethod === 'json-ld' ||
-            subDraft.price > 0 ||
-            (!isRootLanding && subDraft.extractionMethod === 'opengraph' && subDraft.images.length > 0)
-          ) {
-            pushCandidate(subDraft, sub.finalUrl, subCat, subBrand);
-          }
-        } catch {
-          pageErrors++;
-        }
-      }
-
-      finalizeSellerCompany();
-
-      // 5. Fallback: if landing page itself is a single product page (has real product signal, not a generic homepage)
-      if (discovered.length === 0 && rootHtml) {
-        const rootDraft = extractProductFromHtml(rootHtml, finalUrl);
-        const rootCat = extractBreadcrumbCategoryFromHtml(rootHtml);
-        const rootBrand = extractProductBrandFromHtml(rootHtml);
-        if (
-          rootDraft.name &&
-          rootDraft.name.trim().length >= 2 &&
-          (rootDraft.extractionMethod === 'json-ld' || rootDraft.price > 0)
-        ) {
-          pushCandidate(rootDraft, finalUrl, rootCat, rootBrand);
-        }
-      }
-
-      if (discovered.length === 0 && rootOversizedFallback) {
-        res.status(413).json({
-          error:
-            'Trang chủ vượt quá giới hạn dung lượng an toàn (3.5 MB) và không tìm thấy sản phẩm công khai trong sitemap. Vui lòng nhập URL trang danh mục, URL sản phẩm cụ thể hoặc dùng Excel.',
-          errorCode: 'SIZE_LIMIT',
-        });
-        return;
-      }
-
+      // Re-check DB duplicates if company was auto-created/matched after crawl
+      const discovered = crawlRes.discoveredProducts.map((item) => ({
+        ...item,
+        alreadyInCatalog: company
+          ? Boolean(categoryService.findDuplicateProductBySourceUrl(company.id, item.sourceUrl))
+          : item.alreadyInCatalog,
+      }));
       const duplicateCount = discovered.filter((d) => d.alreadyInCatalog).length;
       const newCount = discovered.length - duplicateCount;
-      const uniqueStopReasons = Array.from(new Set(stopReasons));
-      const coverageReport = {
-        pagesScanned,
-        productUrlsDiscovered: candidateLinks.length,
-        extractedValidCount: discovered.length,
-        newCount,
-        duplicateCount,
-        errorCount: pageErrors,
-        totalBytesRead: budget.totalBytesRead,
-        stopReasons: uniqueStopReasons,
-        coverageStatus: 'IMPORT_COMPLETED' as const,
-        fullCatalogVerified: false,
-      };
 
       res.json({
-        siteUrl: finalUrl,
-        pagesScanned,
-        totalBytesRead: budget.totalBytesRead,
+        siteUrl: crawlRes.siteUrl,
+        pagesScanned: crawlRes.pagesScanned,
+        totalBytesRead: crawlRes.totalBytesRead,
         detectedCompany: sellerResolution,
-        coverageReport,
+        coverageReport: {
+          ...crawlRes.coverageReport,
+          newCount,
+          duplicateCount,
+        },
         discoveredProducts: discovered,
-        note:
-          discovered.length > 0
-            ? `Đã quét ${pagesScanned} trang (phát hiện ${candidateLinks.length} URL sản phẩm, trích xuất hợp lệ ${discovered.length} SP: ${newCount} mới, ${duplicateCount} đã có, ${pageErrors} trang lỗi · ${(budget.totalBytesRead / (1024 * 1024)).toFixed(2)} MB). Trạng thái: IMPORT COMPLETED (có giới hạn crawl an toàn).`
-            : 'Không tìm thấy dữ liệu sản phẩm công khai có cấu trúc trên trang này. Bạn có thể nhập URL trang danh mục, URL sản phẩm cụ thể hoặc dùng tệp Excel.',
+        note: crawlRes.note,
       });
     } catch (err) {
       const errorCode = err instanceof ExternalFetchError ? err.code : 'HTTP_ERROR';
@@ -1037,6 +629,176 @@ export function createV28ApiRoutes(
                 : getHttpStatus(err, 400);
       res.status(status).json({ error: (err as Error).message, errorCode });
     }
+  });
+
+  // Phase 2 — Safe Content-Addressed Product Image Serving (CORS-enabled for WebGL, strict regex, NO open proxy)
+  // Phase 3 — Atomic Batch Product Create/Upsert in a single SQLite transaction (replaces non-atomic FE POST loops)
+  router.post('/products/batch', requireAdminAuth, (req: Request, res: Response) => {
+    const body = (req.body || {}) as {
+      companyId?: string;
+      duplicateStrategy?: 'skip' | 'update';
+      products?: Array<{
+        name?: string;
+        sku?: string;
+        price?: number;
+        currency?: string;
+        description?: string;
+        images?: string[];
+        sourceUrl?: string;
+        contactUrl?: string;
+        inStock?: boolean;
+      }>;
+    };
+    const companyId = typeof body.companyId === 'string' ? body.companyId.trim() : '';
+    const strategy = body.duplicateStrategy === 'update' ? 'update' : 'skip';
+    const items = Array.isArray(body.products) ? body.products : [];
+
+    if (!companyId) {
+      res.status(400).json({ error: 'Thiếu companyId.' });
+      return;
+    }
+    const company = v28Db.getCompanyById(companyId);
+    if (!company || company.status !== 'active') {
+      res.status(404).json({ error: 'Doanh nghiệp không tồn tại hoặc đang bị vô hiệu hóa.' });
+      return;
+    }
+    if (items.length === 0 || items.length > 150) {
+      res.status(400).json({ error: 'Số lượng sản phẩm mỗi batch phải từ 1 đến 150.' });
+      return;
+    }
+
+    let createdCount = 0;
+    let updatedCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+    const createdProductIds: string[] = [];
+    const productIds: string[] = [];
+    const errors: Array<{ index: number; name?: string; reason: string }> = [];
+
+    try {
+      v28Db.runInTransaction(() => {
+        for (let i = 0; i < items.length; i++) {
+          const raw = items[i];
+          const cleanName = sanitizePlainText(raw?.name || '', 180);
+          if (cleanName.length < 2) {
+            failedCount++;
+            errors.push({ index: i, name: raw?.name, reason: 'Tên sản phẩm quá ngắn (<2 ký tự).' });
+            continue;
+          }
+          const cleanSku = sanitizePlainText(raw?.sku || '', 80);
+          const cleanSourceUrl = typeof raw?.sourceUrl === 'string' ? raw.sourceUrl.trim() : '';
+          const cleanPrice = typeof raw?.price === 'number' && Number.isFinite(raw.price) && raw.price >= 0 ? raw.price : 0;
+          const cleanCurrency = (raw?.currency || 'VND').trim().toUpperCase().slice(0, 10) || 'VND';
+          const cleanDesc = sanitizePlainText(raw?.description || '', 2000);
+          const cleanImages = Array.isArray(raw?.images)
+            ? raw.images.filter((u): u is string => typeof u === 'string' && u.trim().length > 0).slice(0, 6)
+            : [];
+
+          // Stable duplicate lookup: SKU -> Source URL -> Exact Name within company
+          const existingBySku = cleanSku ? v28Db.findProductByCompanyAndSku(companyId, cleanSku) : null;
+          const existingByUrl = !existingBySku && cleanSourceUrl
+            ? categoryService.findDuplicateProductBySourceUrl(companyId, cleanSourceUrl)
+            : null;
+          const existing = existingBySku || existingByUrl;
+
+          if (existing) {
+            if (strategy === 'update') {
+              const patch: Record<string, unknown> = {
+                name: cleanName,
+                price: cleanPrice,
+                currency: cleanCurrency,
+              };
+              if (cleanDesc) patch.description = cleanDesc;
+              if (cleanImages.length > 0) patch.images = cleanImages;
+              if (cleanSourceUrl) patch.sourceUrl = cleanSourceUrl;
+              if (typeof raw?.inStock === 'boolean') patch.inStock = raw.inStock;
+              v28Db.updateProduct(existing.id, patch);
+              updatedCount++;
+              productIds.push(existing.id);
+            } else {
+              skippedCount++;
+              productIds.push(existing.id);
+            }
+            continue;
+          }
+
+          const created = v28Db.createProduct({
+            companyId,
+            boothId: null,
+            name: cleanName,
+            sku: cleanSku,
+            price: cleanPrice,
+            currency: cleanCurrency,
+            description: cleanDesc,
+            images: cleanImages,
+            videoUrl: '',
+            modelUrl: '',
+            sourceUrl: cleanSourceUrl,
+            contactUrl: typeof raw?.contactUrl === 'string' ? raw.contactUrl.trim() : '',
+            inStock: raw?.inStock ?? true,
+            status: 'active',
+          });
+          createdCount++;
+          createdProductIds.push(created.id);
+          productIds.push(created.id);
+        }
+      });
+
+      res.status(201).json({
+        createdCount,
+        updatedCount,
+        skippedCount,
+        failedCount,
+        createdProductIds,
+        productIds,
+        errors,
+      });
+    } catch (err) {
+      res.status(getHttpStatus(err, 500)).json({
+        error: `Lỗi transaction khi lưu batch sản phẩm (đã rollback toàn bộ): ${(err as Error).message}`,
+      });
+    }
+  });
+
+  router.get('/product-images/:filename', async (req: Request, res: Response) => {
+    const filename = getParam(req.params.filename);
+    try {
+      const record = await productImageService.getStoredImage(filename);
+      if (!record) {
+        res.status(404).json({ error: 'Không tìm thấy ảnh sản phẩm.' });
+        return;
+      }
+      res.setHeader('Content-Type', record.mimeType);
+      res.setHeader('Content-Length', String(record.bytes));
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.send(record.data);
+    } catch {
+      res.status(500).json({ error: 'Lỗi khi đọc ảnh sản phẩm từ kho lưu trữ.' });
+    }
+  });
+
+  router.post('/images/ingest', requireAdminAuth, async (req: Request, res: Response) => {
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    if (!url) {
+      res.status(400).json({ error: 'Thiếu URL hình ảnh cần tải về.' });
+      return;
+    }
+    const result = await productImageService.ingestImageUrl(url);
+    if (!result.ok) {
+      const status =
+        result.errorCode === 'SIZE_LIMIT'
+          ? 413
+          : result.errorCode === 'TIMEOUT'
+            ? 504
+            : result.errorCode === 'HTTP_403' || result.errorCode === 'SSRF_BLOCKED'
+              ? 403
+              : 400;
+      res.status(status).json(result);
+      return;
+    }
+    res.status(201).json(result);
   });
 
   // ============================================================================
@@ -1423,7 +1185,7 @@ export function createV28ApiRoutes(
         invalidatePublishedWorldCache();
         onLayoutPublished?.(version);
         // Incremental non-blocking audio cache check/warm on publish (reuses unchanged content hashes)
-        void audioCacheService.syncVersionAudioIncremental(version, 20).catch(() => {});
+        void audioCacheService.syncVersionAudioIncremental(version, 20).catch(() => { });
         res.json({ version });
       } catch (err) {
         res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });

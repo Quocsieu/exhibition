@@ -70,15 +70,20 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
       matchedBy: string;
     };
     coverageReport?: {
+      targetCount?: number;
+      shortfall?: number;
+      stopReason?: 'TARGET_REACHED' | 'SOURCE_EXHAUSTED' | 'RESOURCE_LIMIT' | 'ACCESS_BLOCKED' | 'NETWORK_ERROR';
       pagesScanned: number;
+      maxPagesBudget?: number;
       productUrlsDiscovered: number;
       extractedValidCount: number;
       newCount: number;
       duplicateCount: number;
+      inCrawlDuplicatesSkipped?: number;
       errorCount: number;
       totalBytesRead: number;
       stopReasons: string[];
-      coverageStatus: 'IMPORT_COMPLETED';
+      coverageStatus: 'IMPORT_COMPLETED' | 'TARGET_REACHED' | 'PARTIAL' | 'EMPTY';
       fullCatalogVerified: boolean;
     };
     zoneDecisions?: Array<{
@@ -108,6 +113,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
   const [sourceMode, setSourceMode] = useState<'url' | 'excel'>('url');
   const [sourceCompanyId, setSourceCompanyId] = useState<string>('');
   const [sourceWebsiteUrl, setSourceWebsiteUrl] = useState<string>('');
+  const [targetProductCountInput, setTargetProductCountInput] = useState<string>('15');
   const [sourceExcelFile, setSourceExcelFile] = useState<{ name: string; base64: string } | null>(null);
   const [autoAllocateProducts, setAutoAllocateProducts] = useState<boolean>(true);
   const [showCreateConfirm, setShowCreateConfirm] = useState<boolean>(false);
@@ -418,10 +424,13 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
       let coverageReportMeta: NonNullable<typeof lastImportSummary>['coverageReport'] | undefined;
 
       if (sourceMode === 'url') {
+        const parsedTargetCount = /^\d+$/.test(targetProductCountInput.trim())
+          ? Math.max(1, Math.min(120, Number(targetProductCountInput.trim())))
+          : 15;
         const disc = await v28Api.discoverWebsiteProducts({
           companyId: undefined,
           url: sourceWebsiteUrl.trim(),
-          maxPages: 15,
+          targetCount: parsedTargetCount,
           autoDetectCompany: true,
         });
         detectedCompanyMeta = disc.detectedCompany;
@@ -445,11 +454,9 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
               'Không tìm thấy sản phẩm công khai có cấu trúc từ URL này. Bạn có thể nhập URL trang danh mục, URL sản phẩm cụ thể hoặc dùng Excel.'
           );
         }
-        for (const item of disc.discoveredProducts) {
-          if (item.alreadyInCatalog || item.name.trim().length < 2) continue;
-          const created = await v28Api.createProduct({
-            companyId: targetCompanyId,
-            boothId: null,
+        const batchPayload = disc.discoveredProducts
+          .filter((item) => !item.alreadyInCatalog && item.name.trim().length >= 2)
+          .map((item) => ({
             name: item.name.trim(),
             sku: item.sku.trim(),
             price: Math.max(0, Number(item.price) || 0),
@@ -458,12 +465,19 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
             images: item.images,
             sourceUrl: item.sourceUrl,
             inStock: item.inStock,
+          }));
+        if (batchPayload.length > 0) {
+          const batchRes = await v28Api.batchCreateProducts({
+            companyId: targetCompanyId,
+            duplicateStrategy: 'skip',
+            products: batchPayload,
           });
-          importedProductIds.push(created.product.id);
-          if (item.category) {
-            categoryHints[created.product.id] = item.category;
-          }
-          importedCount++;
+          importedCount = batchRes.createdCount;
+          batchRes.productIds.forEach((pid, idx) => {
+            importedProductIds.push(pid);
+            const cat = disc.discoveredProducts[idx]?.category;
+            if (cat) categoryHints[pid] = cat;
+          });
         }
         const skippedExisting = disc.discoveredProducts.filter((i) => i.alreadyInCatalog).length;
         const sizeLabel =
@@ -1228,24 +1242,50 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
               )}
             </div>
             {sourceMode === 'url' ? (
-              <input
-                type="url"
-                aria-label="URL Website doanh nghiệp"
-                value={sourceWebsiteUrl}
-                onChange={(e) => {
-                  setSourceWebsiteUrl(e.target.value);
-                  setShowCreateConfirm(false);
-                }}
-                placeholder="https://example-business.com"
-                style={{
-                  width: '100%',
-                  padding: '9px 11px',
-                  borderRadius: 10,
-                  border: !isSourceValid ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
-                  fontSize: 13.5,
-                  boxSizing: 'border-box',
-                }}
-              />
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input
+                  type="url"
+                  aria-label="URL Website doanh nghiệp"
+                  value={sourceWebsiteUrl}
+                  onChange={(e) => {
+                    setSourceWebsiteUrl(e.target.value);
+                    setShowCreateConfirm(false);
+                  }}
+                  placeholder="https://example-business.com"
+                  style={{
+                    flex: '1 1 220px',
+                    padding: '9px 11px',
+                    borderRadius: 10,
+                    border: !isSourceValid ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
+                    fontSize: 13.5,
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
+                  <span>Số SP cần lấy:</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    aria-label="Số lượng sản phẩm cần lấy"
+                    value={targetProductCountInput}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^\d]/g, '').slice(0, 3);
+                      setTargetProductCountInput(v);
+                      setShowCreateConfirm(false);
+                    }}
+                    placeholder="15"
+                    style={{
+                      width: 64,
+                      padding: '8px 8px',
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      textAlign: 'center',
+                    }}
+                  />
+                </label>
+              </div>
             ) : (
               <input
                 type="file"

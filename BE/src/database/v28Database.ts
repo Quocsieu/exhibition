@@ -1207,7 +1207,7 @@ export class V28CatalogDatabase {
     totalPages: number;
   } {
     const page = Math.max(1, Math.floor(query?.page || 1));
-    const limit = Math.min(100, Math.max(1, Math.floor(query?.limit || 20)));
+    const limit = Math.min(250, Math.max(1, Math.floor(query?.limit || 20)));
     const offset = (page - 1) * limit;
 
     const where: string[] = [];

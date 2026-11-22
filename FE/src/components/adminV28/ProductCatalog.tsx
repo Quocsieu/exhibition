@@ -17,6 +17,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ initialCompanyId
   const [companies, setCompanies] = useState<V28Company[]>([]);
   const [companyId, setCompanyId] = useState(initialCompanyId);
   const [booths, setBooths] = useState<V28BoothSummary[]>([]);
+  const [slotAssignments, setSlotAssignments] = useState<Array<{ boothId: string; slotId: string; productId: string }>>([]);
   const [products, setProducts] = useState<V28Product[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -83,6 +84,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ initialCompanyId
       setTotal(prodRes.total);
       setTotalPages(prodRes.totalPages);
       setBooths(boothRes.booths.filter((b) => b.status === 'active'));
+      setSlotAssignments(boothRes.slots || []);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -183,6 +185,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ initialCompanyId
       await v28Api.assignSlot(assignBoothId, assignSlotId, assigningProduct.id);
       setNotice(`Đã gắn "${assigningProduct.name}" vào ${assignSlotId} của gian hàng ${assignBoothId}.`);
       setAssigningProduct(null);
+      await loadCatalog();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -447,35 +450,50 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ initialCompanyId
             </div>
           </form>
 
-          {assigningProduct && (
-            <div style={{ marginTop: 16, padding: 12, borderRadius: 10, border: '1px solid #0ea5e9' }}>
-              <h4 style={{ margin: '0 0 8px' }}>
-                Gắn "{assigningProduct.name}" vào Slot 3D
-              </h4>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <select value={assignBoothId} onChange={(e) => setAssignBoothId(e.target.value)}>
-                  {booths.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} ({b.id})
-                    </option>
-                  ))}
-                </select>
-                <select value={assignSlotId} onChange={(e) => setAssignSlotId(e.target.value)}>
-                  {SLOT_IDS.map((sid) => (
-                    <option key={sid} value={sid}>
-                      {sid}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" className="btn btn-primary" onClick={() => void handleAssignToSlot()}>
-                  Xác nhận gắn
-                </button>
-                <button type="button" className="btn btn-secondary" onClick={() => setAssigningProduct(null)}>
-                  Đóng
-                </button>
+          {assigningProduct && (() => {
+            const occupiedSlot = slotAssignments.find(
+              (s) => s.boothId === assignBoothId && s.slotId === assignSlotId
+            );
+            return (
+              <div style={{ marginTop: 16, padding: 12, borderRadius: 10, border: '1px solid #0ea5e9' }}>
+                <h4 style={{ margin: '0 0 8px' }}>
+                  Gắn "{assigningProduct.name}" vào Slot 3D
+                </h4>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <select value={assignBoothId} onChange={(e) => setAssignBoothId(e.target.value)}>
+                    {booths.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.id})
+                      </option>
+                    ))}
+                  </select>
+                  <select value={assignSlotId} onChange={(e) => setAssignSlotId(e.target.value)}>
+                    {SLOT_IDS.map((sid) => {
+                      const isTaken = slotAssignments.some(
+                        (s) => s.boothId === assignBoothId && s.slotId === sid
+                      );
+                      return (
+                        <option key={sid} value={sid}>
+                          {sid}{isTaken ? ' (đã có SP)' : ' (trống)'}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <button type="button" className="btn btn-primary" onClick={() => void handleAssignToSlot()}>
+                    {occupiedSlot ? 'Ghi đè slot này' : 'Xác nhận gắn'}
+                  </button>
+                  <button type="button" className="btn btn-secondary" onClick={() => setAssigningProduct(null)}>
+                    Đóng
+                  </button>
+                </div>
+                {occupiedSlot && (
+                  <p style={{ margin: '8px 0 0', fontSize: 12, color: '#b45309' }}>
+                    Cảnh báo: {assignSlotId} của gian hàng {assignBoothId} đang chứa sản phẩm ({occupiedSlot.productId}). Xác nhận sẽ thay thế sản phẩm hiện tại trên kệ 3D.
+                  </p>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
         </section>
       </div>
     </div>
