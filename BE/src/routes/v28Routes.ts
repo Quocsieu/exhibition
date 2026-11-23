@@ -173,6 +173,92 @@ export function createV28ApiRoutes(
     });
   });
 
+  router.post('/company/select-owner', requireAdminAuth, (req: Request, res: Response) => {
+    const body = (req.body || {}) as { companyId?: string; exhibitionId?: string };
+    const companyId = typeof body.companyId === 'string' ? body.companyId.trim() : '';
+    if (!companyId) {
+      res.status(400).json({ error: 'Thiếu companyId để chọn doanh nghiệp chủ sở hữu.' });
+      return;
+    }
+    const chosen = v28Db.getCompanyById(companyId);
+    if (!chosen || chosen.status !== 'active') {
+      res.status(404).json({ error: 'Doanh nghiệp không tồn tại hoặc đang bị vô hiệu hóa.' });
+      return;
+    }
+    const activeCompanies = v28Db.listCompanies({ status: 'active' });
+    let activeWorld: ReturnType<typeof exhibitionService.getActiveExhibitionWorld> | null = null;
+    try {
+      activeWorld = exhibitionService.getActiveExhibitionWorld();
+    } catch {
+      activeWorld = null;
+    }
+    const chosenWithCounts = activeCompanies.find((c) => c.id === chosen.id);
+    res.json({
+      state: 'bound',
+      exhibitionId: activeWorld?.exhibitionId || body.exhibitionId || null,
+      exhibitionName: activeWorld?.exhibitionName || null,
+      company: {
+        ...chosen,
+        boothCount: chosenWithCounts?.boothCount ?? 0,
+        productCount: chosenWithCounts?.productCount ?? 0,
+      },
+      currentPublishedOwnerId: chosen.id,
+      candidateCompanies: activeCompanies.map((c) => ({
+        ...c,
+        boothCount: c.boothCount ?? 0,
+        productCount: c.productCount ?? 0,
+      })),
+    });
+  });
+
+  router.post('/company/replace', requireAdminAuth, (req: Request, res: Response) => {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const parsed = CreateCompanyInputSchema.safeParse({
+      name: body.name,
+      slug: body.slug,
+      category: body.category || 'General',
+      description: body.description || '',
+      contactEmail: body.contactEmail || '',
+      contactUrl: body.contactUrl || '',
+      logoUrl: body.logoUrl || '',
+    });
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message || 'Thông tin doanh nghiệp không hợp lệ.' });
+      return;
+    }
+    try {
+      const created = v28Db.createCompany(parsed.data);
+      const activeCompanies = v28Db.listCompanies({ status: 'active' });
+      let activeWorld: ReturnType<typeof exhibitionService.getActiveExhibitionWorld> | null = null;
+      try {
+        activeWorld = exhibitionService.getActiveExhibitionWorld();
+      } catch {
+        activeWorld = null;
+      }
+      const createdWithCounts = activeCompanies.find((c) => c.id === created.id);
+      res.status(201).json({
+        state: 'bound',
+        exhibitionId:
+          activeWorld?.exhibitionId ||
+          (typeof body.exhibitionId === 'string' ? body.exhibitionId : null),
+        exhibitionName: activeWorld?.exhibitionName || null,
+        company: {
+          ...created,
+          boothCount: createdWithCounts?.boothCount ?? 0,
+          productCount: createdWithCounts?.productCount ?? 0,
+        },
+        currentPublishedOwnerId: created.id,
+        candidateCompanies: activeCompanies.map((c) => ({
+          ...c,
+          boothCount: c.boothCount ?? 0,
+          productCount: c.productCount ?? 0,
+        })),
+      });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
   router.get('/companies', (req: Request, res: Response) => {
     const q = typeof req.query.q === 'string' ? req.query.q : undefined;
     const rawStatus = typeof req.query.status === 'string' ? req.query.status : 'all';
@@ -653,8 +739,32 @@ export function createV28ApiRoutes(
       const duplicateCount = discovered.filter((d) => d.alreadyInCatalog).length;
       const newCount = discovered.length - duplicateCount;
 
+      const discoveryStatus =
+        discovered.length === 0
+          ? 'empty'
+          : crawlRes.coverageReport.stopReason === 'RESOURCE_LIMIT'
+            ? 'partial'
+            : 'complete';
+
       res.json({
         siteUrl: crawlRes.siteUrl,
+        entryPageType: discovered.length === 1 && crawlRes.pagesScanned === 1 ? 'product' : 'catalog',
+        discoveryStatus,
+        discoveryStats: {
+          pagesScanned: crawlRes.pagesScanned,
+          productUrlsDiscovered: crawlRes.coverageReport.productUrlsDiscovered,
+          extractedValidCount: discovered.length,
+          newCount,
+          duplicateCount,
+          errorCount: crawlRes.coverageReport.errorCount,
+          totalBytesRead: crawlRes.totalBytesRead,
+          limitOrErrorReason:
+            discovered.length === 0
+              ? crawlRes.note
+              : crawlRes.coverageReport.stopReason === 'RESOURCE_LIMIT'
+                ? crawlRes.note
+                : undefined,
+        },
         pagesScanned: crawlRes.pagesScanned,
         totalBytesRead: crawlRes.totalBytesRead,
         detectedCompany: sellerResolution,
