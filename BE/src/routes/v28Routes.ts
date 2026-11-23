@@ -625,6 +625,7 @@ export function createV28ApiRoutes(
 
     const body = (req.body || {}) as {
       companyId?: string;
+      exhibitionId?: string;
       url?: string;
       discoveryMode?: string;
       targetCount?: number;
@@ -729,12 +730,18 @@ export function createV28ApiRoutes(
         }
       }
 
-      // Re-check DB duplicates if company was auto-created/matched after crawl
+      // Re-check DB duplicates if company was auto-created/matched after crawl.
+      // When called from the Create Exhibition wizard (exhibitionId provided), mark alreadyInCatalog=false
+      // so the FE always forwards the crawled batch to /products/batch, allowing the backend to cleanly
+      // overwrite old products from previous websites instead of skipping the batch.
+      const isExhibitionReplaceFlow = Boolean(body.exhibitionId && String(body.exhibitionId).trim());
       const discovered = crawlRes.discoveredProducts.map((item) => ({
         ...item,
-        alreadyInCatalog: company
-          ? Boolean(categoryService.findDuplicateProductBySourceUrl(company.id, item.sourceUrl))
-          : item.alreadyInCatalog,
+        alreadyInCatalog: isExhibitionReplaceFlow
+          ? false
+          : company
+            ? Boolean(categoryService.findDuplicateProductBySourceUrl(company.id, item.sourceUrl))
+            : item.alreadyInCatalog,
       }));
       const duplicateCount = discovered.filter((d) => d.alreadyInCatalog).length;
       const newCount = discovered.length - duplicateCount;
@@ -852,6 +859,8 @@ export function createV28ApiRoutes(
   router.post('/products/batch', requireAdminAuth, async (req: Request, res: Response) => {
     const body = (req.body || {}) as {
       companyId?: string;
+      exhibitionId?: string;
+      replaceCompanyCatalog?: boolean;
       duplicateStrategy?: 'skip' | 'update';
       products?: Array<{
         name?: string;
@@ -866,7 +875,10 @@ export function createV28ApiRoutes(
       }>;
     };
     const companyId = typeof body.companyId === 'string' ? body.companyId.trim() : '';
-    const strategy = body.duplicateStrategy === 'update' ? 'update' : 'skip';
+    const replaceCompanyCatalog =
+      body.replaceCompanyCatalog === true ||
+      Boolean(typeof body.exhibitionId === 'string' && body.exhibitionId.trim());
+    const strategy = body.duplicateStrategy === 'update' || replaceCompanyCatalog ? 'update' : 'skip';
     const items = Array.isArray(body.products) ? body.products : [];
 
     if (!companyId) {
@@ -954,6 +966,7 @@ export function createV28ApiRoutes(
                 name: cleanName,
                 price: cleanPrice,
                 currency: cleanCurrency,
+                status: 'active',
               };
               if (cleanDesc) patch.description = cleanDesc;
               if (cleanImages.length > 0) patch.images = cleanImages;
@@ -995,6 +1008,22 @@ export function createV28ApiRoutes(
           createdCount++;
           createdProductIds.push(created.id);
           productIds.push(created.id);
+        }
+
+        // When replacing catalog for a new exhibition import, deactivate all old products from previous websites
+        if (replaceCompanyCatalog && productIds.length > 0) {
+          const keepIds = new Set(productIds);
+          const currentActive = v28Db.listProducts({
+            companyId,
+            status: 'active',
+            page: 1,
+            limit: 1000,
+          }).items;
+          for (const oldProd of currentActive) {
+            if (!keepIds.has(oldProd.id)) {
+              v28Db.updateProduct(oldProd.id, { status: 'inactive' });
+            }
+          }
         }
       });
 
