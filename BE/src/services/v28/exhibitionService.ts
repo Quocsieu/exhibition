@@ -1905,6 +1905,7 @@ export class V28ExhibitionService {
       productIds?: string[];
       categoryHints?: Record<string, string>;
       organizeZonesByCategory?: boolean;
+      replaceExisting?: boolean;
       expectedExhibitionId?: string;
     }
   ): {
@@ -1947,6 +1948,7 @@ export class V28ExhibitionService {
     // Load candidate products grouped by company
     const targetCompanyId = detail.ownerCompanyId || requestedCompanyId || null;
     const priorityIds = new Set((options?.productIds || []).filter(Boolean));
+    const shouldOverwriteExisting = options?.replaceExisting === true || priorityIds.size > 0;
     const categoryHints = options?.categoryHints || {};
     const organizeZonesByCategory = options?.organizeZonesByCategory !== false;
 
@@ -1974,6 +1976,9 @@ export class V28ExhibitionService {
 
     this.v28Db.runInTransaction(() => {
       this.ensureVersionSnapshot(versionId);
+      if (shouldOverwriteExisting) {
+        this.db.prepare('DELETE FROM exhibition_version_booth_slots WHERE version_id = ?').run(versionId);
+      }
       const upsertDraftSlotStmt = this.db.prepare(
         `INSERT INTO exhibition_version_booth_slots (version_id, booth_id, slot_id, product_id, updated_at)
          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -2125,9 +2130,11 @@ export class V28ExhibitionService {
         // Allocate each category's products into booths inside THAT category's zone (ensuring owning company on Draft-only booths!)
         if (targetCompanyObj) {
           const alreadyPlacedIds = new Set<string>();
-          for (const b of detail.booths) {
-            for (const s of b.slots) {
-              if (s.product?.id) alreadyPlacedIds.add(s.product.id);
+          if (!shouldOverwriteExisting) {
+            for (const b of detail.booths) {
+              for (const s of b.slots) {
+                if (s.product?.id) alreadyPlacedIds.add(s.product.id);
+              }
             }
           }
 
@@ -2140,7 +2147,10 @@ export class V28ExhibitionService {
             const candidateBooths = [
               ...zoneBooths.filter((b) => b.companyId === targetCompanyObj.id),
               ...zoneBooths.filter(
-                (b) => b.companyId !== targetCompanyObj.id && b.assignedSlotCount === 0 && b.boothId.startsWith('v28-booth-')
+                (b) =>
+                  b.companyId !== targetCompanyObj.id &&
+                  (shouldOverwriteExisting || b.assignedSlotCount === 0) &&
+                  b.boothId.startsWith('v28-booth-')
               ),
             ];
 
@@ -2152,7 +2162,9 @@ export class V28ExhibitionService {
               if (b.companyId !== targetCompanyObj.id) {
                 updateBoothCompanyStmt.run(targetCompanyObj.id, targetCompanyObj.name, versionId, b.boothId);
               }
-              const occupied = new Set(b.slots.filter((s) => s.product?.id).map((s) => s.slotId));
+              const occupied = shouldOverwriteExisting
+                ? new Set<string>()
+                : new Set(b.slots.filter((s) => s.product?.id).map((s) => s.slotId));
               const freeSlots = SLOT_KEYS.filter((k) => !occupied.has(k));
               let placedInThisBooth = 0;
               for (const slotId of freeSlots) {
@@ -2183,17 +2195,19 @@ export class V28ExhibitionService {
 
       // 3. Allocate any remaining unplaced products (including uncertain-category products) strictly within owning company's booths
       const placedNow = new Set<string>(assignedProductIds);
-      for (const b of detail.booths) {
-        for (const s of b.slots) {
-          if (s.product?.id) placedNow.add(s.product.id);
+      if (!shouldOverwriteExisting) {
+        for (const b of detail.booths) {
+          for (const s of b.slots) {
+            if (s.product?.id) placedNow.add(s.product.id);
+          }
         }
       }
 
       for (const [compId, compProducts] of productsByCompany.entries()) {
-        const orderedProducts = [
-          ...compProducts.filter((p) => priorityIds.has(p.id) && !placedNow.has(p.id)),
-          ...compProducts.filter((p) => !priorityIds.has(p.id) && !placedNow.has(p.id)),
-        ];
+        const orderedProducts =
+          priorityIds.size > 0
+            ? compProducts.filter((p) => priorityIds.has(p.id) && !placedNow.has(p.id))
+            : compProducts.filter((p) => !placedNow.has(p.id));
         if (orderedProducts.length === 0) continue;
 
         const compBooths = detail.booths.filter((b) => b.companyId === compId);

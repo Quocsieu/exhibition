@@ -793,6 +793,61 @@ export function createV28ApiRoutes(
   });
 
   // Phase 2 — Safe Content-Addressed Product Image Serving (CORS-enabled for WebGL, strict regex, NO open proxy)
+  let backgroundImageMirrorRunning = false;
+  const mirrorMissingProductImagesInBackground = async (): Promise<{
+    scanned: number;
+    mirrored: number;
+    failed: number;
+  }> => {
+    if (backgroundImageMirrorRunning) {
+      return { scanned: 0, mirrored: 0, failed: 0 };
+    }
+    backgroundImageMirrorRunning = true;
+    let scanned = 0;
+    let mirrored = 0;
+    let failed = 0;
+    try {
+      const productsRes = v28Db.listProducts({ status: 'active', page: 1, limit: 1000 });
+      const candidates = productsRes.items.filter(
+        (p) => Array.isArray(p.images) && p.images[0] && /^https?:\/\//i.test(p.images[0].trim())
+      );
+      scanned = candidates.length;
+      const CONCURRENCY = 12;
+      for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+        const wave = candidates.slice(i, i + CONCURRENCY);
+        await Promise.allSettled(
+          wave.map(async (prod) => {
+            const rawUrl = prod.images[0].trim();
+            try {
+              const ingested = await productImageService.ingestImageUrl(rawUrl);
+              if (ingested.ok && ingested.storedUrl) {
+                const nextImages = [ingested.storedUrl, ...prod.images.slice(1)];
+                v28Db.updateProduct(prod.id, { images: nextImages });
+                mirrored++;
+              } else {
+                failed++;
+              }
+            } catch {
+              failed++;
+            }
+          })
+        );
+      }
+      if (mirrored > 0) {
+        invalidatePublishedWorldCache();
+      }
+    } finally {
+      backgroundImageMirrorRunning = false;
+    }
+    return { scanned, mirrored, failed };
+  };
+
+  if (!process.env.VITEST) {
+    setTimeout(() => {
+      void mirrorMissingProductImagesInBackground().catch(() => {});
+    }, 3_000).unref();
+  }
+
   // Phase 3 — Atomic Batch Product Create/Upsert in a single SQLite transaction (replaces non-atomic FE POST loops)
   router.post('/products/batch', requireAdminAuth, async (req: Request, res: Response) => {
     const body = (req.body || {}) as {
@@ -837,8 +892,8 @@ export function createV28ApiRoutes(
           .filter((u) => /^https?:\/\//i.test(u))
       )
     );
-    const mirrorDeadline = Date.now() + 25_000;
-    const MIRROR_CONCURRENCY = 8;
+    const mirrorDeadline = Date.now() + 35_000;
+    const MIRROR_CONCURRENCY = 16;
     for (let i = 0; i < uniqueExternalPrimaryUrls.length; i += MIRROR_CONCURRENCY) {
       if (Date.now() >= mirrorDeadline) break;
       const wave = uniqueExternalPrimaryUrls.slice(i, i + MIRROR_CONCURRENCY);
@@ -952,6 +1007,9 @@ export function createV28ApiRoutes(
         productIds,
         errors,
       });
+      if (!process.env.VITEST && uniqueExternalPrimaryUrls.length > mirroredPrimaryUrl.size) {
+        void mirrorMissingProductImagesInBackground().catch(() => {});
+      }
     } catch (err) {
       res.status(getHttpStatus(err, 500)).json({
         error: `Lỗi transaction khi lưu batch sản phẩm (đã rollback toàn bộ): ${(err as Error).message}`,
@@ -1376,29 +1434,82 @@ export function createV28ApiRoutes(
         return;
       }
       try {
+        const exhibitionId = getParam(req.params.id);
+        const versionId = getParam(req.params.versionId);
         const result = exhibitionService.removeEmptyBooths(
-          getParam(req.params.id),
-          getParam(req.params.versionId),
+          exhibitionId,
+          versionId,
           parsed.data
         );
-        if (result.isPublishedVersion && result.publicActiveWorld && result.removedCount > 0) {
+        // Automatically consolidate sparse zones (<= 3 booths per zone) so Admin never ends up with 7 single-booth zones
+        const consolidated = exhibitionService.consolidateSparseZones(exhibitionId, versionId, {
+          sparseThreshold: 3,
+          maxBoothsPerZone: 10,
+        });
+        const finalVersion = consolidated.consolidated ? consolidated.version : result.version;
+        const finalPublicWorld = consolidated.consolidated
+          ? consolidated.publicActiveWorld
+          : result.publicActiveWorld;
+        if (result.isPublishedVersion && finalPublicWorld && (result.removedCount > 0 || consolidated.consolidated)) {
           invalidatePublishedWorldCache();
-          onLayoutPublished?.(result.publicActiveWorld);
+          onLayoutPublished?.(finalPublicWorld);
         }
         res.json({
-          version: result.version,
+          version: finalVersion,
           removedBoothIds: result.removedBoothIds,
           removedCount: result.removedCount,
-          removedZoneCodes: result.removedZoneCodes,
-          compacted: result.compacted,
-          remainingBoothCount: result.remainingBoothCount,
-          remainingZoneCount: result.remainingZoneCount,
+          removedZoneCodes: Array.from(new Set([...result.removedZoneCodes, ...consolidated.mergedZoneCodes])),
+          compacted: result.compacted || consolidated.consolidated,
+          consolidated: consolidated.consolidated,
+          mergedZoneCodes: consolidated.mergedZoneCodes,
+          remainingBoothCount: finalVersion.booths.length,
+          remainingZoneCount: finalVersion.zones.length,
         });
       } catch (err) {
         res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
       }
     }
   );
+
+  router.post(
+    '/exhibitions/:id/versions/:versionId/consolidate-sparse-zones',
+    requireAdminAuth,
+    (req: Request, res: Response) => {
+      try {
+        const body = (req.body || {}) as { sparseThreshold?: number; maxBoothsPerZone?: number };
+        const result = exhibitionService.consolidateSparseZones(
+          getParam(req.params.id),
+          getParam(req.params.versionId),
+          {
+            sparseThreshold:
+              typeof body.sparseThreshold === 'number' && Number.isFinite(body.sparseThreshold)
+                ? body.sparseThreshold
+                : 3,
+            maxBoothsPerZone:
+              typeof body.maxBoothsPerZone === 'number' && Number.isFinite(body.maxBoothsPerZone)
+                ? body.maxBoothsPerZone
+                : 10,
+          }
+        );
+        if (result.isPublishedVersion && result.publicActiveWorld && result.consolidated) {
+          invalidatePublishedWorldCache();
+          onLayoutPublished?.(result.publicActiveWorld);
+        }
+        res.json(result);
+      } catch (err) {
+        res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+      }
+    }
+  );
+
+  router.post('/products/mirror-missing-images', requireAdminAuth, async (_req: Request, res: Response) => {
+    try {
+      const report = await mirrorMissingProductImagesInBackground();
+      res.json({ status: 'ok', ...report });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
 
   router.post(
     '/exhibitions/:id/versions/:versionId/publish',
@@ -1493,13 +1604,27 @@ export function createV28ApiRoutes(
           res.status(404).json({ error: 'Không tìm thấy phiên bản triển lãm.' });
           return;
         }
+        // Automatically consolidate sparse zones (<= 3 booths/zone) before publishing
+        try {
+          exhibitionService.consolidateSparseZones(exhibitionId, targetVersionId, {
+            sparseThreshold: 3,
+            maxBoothsPerZone: 10,
+          });
+        } catch {
+          // ignore if consolidation not applicable
+        }
+        const refreshedBeforePublish =
+          exhibitionService.getVersionDetail(targetVersionId, { includeHidden: true }) || currentDetail;
         const version =
-          currentDetail.status === 'published'
-            ? currentDetail
+          refreshedBeforePublish.status === 'published'
+            ? refreshedBeforePublish
             : exhibitionService.publishVersion(exhibitionId, targetVersionId);
         invalidatePublishedWorldCache();
         onLayoutPublished?.(version);
         void audioCacheService.syncVersionAudioIncremental(version, 20).catch(() => { });
+        if (!process.env.VITEST) {
+          void mirrorMissingProductImagesInBackground().catch(() => { });
+        }
         res.json({ version });
       } catch (err) {
         res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
