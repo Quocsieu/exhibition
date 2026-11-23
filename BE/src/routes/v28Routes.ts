@@ -35,6 +35,7 @@ import {
 } from '../integrations/productAdapter.js';
 import {
   crawlWebsiteForProducts,
+  MAX_TARGET_PRODUCTS,
   validateTargetCount,
 } from '../services/v28WebsiteCrawlerService.js';
 import { V28ProductImageService } from '../services/v28ProductImageService.js';
@@ -143,6 +144,35 @@ export function createV28ApiRoutes(
   // ============================================================================
   // A. COMPANY MANAGEMENT
   // ============================================================================
+  router.get('/company', (req: Request, res: Response) => {
+    const requestedExhId = typeof req.query.exhibitionId === 'string' ? req.query.exhibitionId.trim() : '';
+    const activeCompanies = v28Db.listCompanies({ status: 'active' });
+    let activeWorld: ReturnType<typeof exhibitionService.getActiveExhibitionWorld> | null = null;
+    try {
+      activeWorld = exhibitionService.getActiveExhibitionWorld();
+    } catch {
+      activeWorld = null;
+    }
+    const ownerId =
+      activeWorld?.ownerCompanyId ||
+      activeWorld?.booths.find((b) => b.companyId)?.companyId ||
+      activeCompanies[0]?.id ||
+      null;
+    const ownerCompany = activeCompanies.find((c) => c.id === ownerId) || activeCompanies[0] || null;
+    res.json({
+      state: ownerCompany ? 'bound' : 'empty',
+      exhibitionId: activeWorld?.exhibitionId || requestedExhId || null,
+      exhibitionName: activeWorld?.exhibitionName || null,
+      company: ownerCompany ? { ...ownerCompany, boothCount: ownerCompany.boothCount ?? 0, productCount: ownerCompany.productCount ?? 0 } : null,
+      currentPublishedOwnerId: ownerCompany?.id || null,
+      candidateCompanies: activeCompanies.map((c) => ({
+        ...c,
+        boothCount: c.boothCount ?? 0,
+        productCount: c.productCount ?? 0,
+      })),
+    });
+  });
+
   router.get('/companies', (req: Request, res: Response) => {
     const q = typeof req.query.q === 'string' ? req.query.q : undefined;
     const rawStatus = typeof req.query.status === 'string' ? req.query.status : 'all';
@@ -444,11 +474,23 @@ export function createV28ApiRoutes(
       }
       const { html, finalUrl } = await fetchExternalProductHtml(parsed.data.url);
       const rawDraft = extractProductFromHtml(html, finalUrl);
+      const draftImages = Array.isArray(rawDraft.images) ? [...rawDraft.images] : [];
+      if (draftImages[0] && /^https?:\/\//i.test(draftImages[0])) {
+        try {
+          const ingested = await productImageService.ingestImageUrl(draftImages[0]);
+          if (ingested.ok && ingested.storedUrl) {
+            draftImages[0] = ingested.storedUrl;
+          }
+        } catch {
+          // Keep original URL as fallback
+        }
+      }
       const draft = {
         ...rawDraft,
         name: sanitizePlainText(rawDraft.name, 180),
         description: sanitizePlainText(rawDraft.description || '', 2000),
         sku: sanitizePlainText(rawDraft.sku || '', 80),
+        images: draftImages,
       };
 
       if (!parsed.data.saveToCatalog) {
@@ -498,6 +540,7 @@ export function createV28ApiRoutes(
     const body = (req.body || {}) as {
       companyId?: string;
       url?: string;
+      discoveryMode?: string;
       targetCount?: number;
       maxPages?: number;
       autoDetectCompany?: boolean;
@@ -509,7 +552,15 @@ export function createV28ApiRoutes(
 
     let targetCount: number;
     try {
-      targetCount = validateTargetCount(body.targetCount);
+      const hasExplicitTarget =
+        body.targetCount !== undefined &&
+        body.targetCount !== null &&
+        (body.targetCount as unknown) !== '';
+      const effectiveTarget =
+        !hasExplicitTarget && String(body.discoveryMode || '').toLowerCase() === 'full'
+          ? MAX_TARGET_PRODUCTS
+          : body.targetCount;
+      targetCount = validateTargetCount(effectiveTarget);
     } catch (valErr) {
       res.status(400).json({ error: (valErr as Error).message, errorCode: 'INVALID_TARGET_COUNT' });
       return;
@@ -633,7 +684,7 @@ export function createV28ApiRoutes(
 
   // Phase 2 — Safe Content-Addressed Product Image Serving (CORS-enabled for WebGL, strict regex, NO open proxy)
   // Phase 3 — Atomic Batch Product Create/Upsert in a single SQLite transaction (replaces non-atomic FE POST loops)
-  router.post('/products/batch', requireAdminAuth, (req: Request, res: Response) => {
+  router.post('/products/batch', requireAdminAuth, async (req: Request, res: Response) => {
     const body = (req.body || {}) as {
       companyId?: string;
       duplicateStrategy?: 'skip' | 'update';
@@ -662,9 +713,37 @@ export function createV28ApiRoutes(
       res.status(404).json({ error: 'Doanh nghiệp không tồn tại hoặc đang bị vô hiệu hóa.' });
       return;
     }
-    if (items.length === 0 || items.length > 150) {
-      res.status(400).json({ error: 'Số lượng sản phẩm mỗi batch phải từ 1 đến 150.' });
+    if (items.length === 0 || items.length > 1800) {
+      res.status(400).json({ error: 'Số lượng sản phẩm mỗi batch phải từ 1 đến 1800.' });
       return;
+    }
+
+    // Mirror external primary images into CORS-safe persistent product-images storage (bounded concurrency & time budget)
+    const mirroredPrimaryUrl = new Map<string, string>();
+    const uniqueExternalPrimaryUrls = Array.from(
+      new Set(
+        items
+          .map((raw) => (Array.isArray(raw?.images) ? String(raw.images[0] || '').trim() : ''))
+          .filter((u) => /^https?:\/\//i.test(u))
+      )
+    );
+    const mirrorDeadline = Date.now() + 25_000;
+    const MIRROR_CONCURRENCY = 8;
+    for (let i = 0; i < uniqueExternalPrimaryUrls.length; i += MIRROR_CONCURRENCY) {
+      if (Date.now() >= mirrorDeadline) break;
+      const wave = uniqueExternalPrimaryUrls.slice(i, i + MIRROR_CONCURRENCY);
+      await Promise.allSettled(
+        wave.map(async (url) => {
+          try {
+            const ingested = await productImageService.ingestImageUrl(url);
+            if (ingested.ok && ingested.storedUrl) {
+              mirroredPrimaryUrl.set(url, ingested.storedUrl);
+            }
+          } catch {
+            // Keep original URL as fallback
+          }
+        })
+      );
     }
 
     let createdCount = 0;
@@ -690,9 +769,12 @@ export function createV28ApiRoutes(
           const cleanPrice = typeof raw?.price === 'number' && Number.isFinite(raw.price) && raw.price >= 0 ? raw.price : 0;
           const cleanCurrency = (raw?.currency || 'VND').trim().toUpperCase().slice(0, 10) || 'VND';
           const cleanDesc = sanitizePlainText(raw?.description || '', 2000);
-          const cleanImages = Array.isArray(raw?.images)
+          const rawImages = Array.isArray(raw?.images)
             ? raw.images.filter((u): u is string => typeof u === 'string' && u.trim().length > 0).slice(0, 6)
             : [];
+          const cleanImages = rawImages.map((u, idx) =>
+            idx === 0 ? mirroredPrimaryUrl.get(u.trim()) || u.trim() : u.trim()
+          );
 
           // Stable duplicate lookup: SKU -> Source URL -> Exact Name within company
           const existingBySku = cleanSku ? v28Db.findProductByCompanyAndSku(companyId, cleanSku) : null;
@@ -716,6 +798,13 @@ export function createV28ApiRoutes(
               updatedCount++;
               productIds.push(existing.id);
             } else {
+              // Even when skipping duplicates, upgrade legacy raw external image URL to mirrored CORS-safe URL if available
+              if (cleanImages.length > 0 && cleanImages[0].startsWith('/api/v28/product-images/')) {
+                const fullExisting = v28Db.getProductById(existing.id);
+                if (!fullExisting?.images?.[0] || !fullExisting.images[0].startsWith('/api/v28/product-images/')) {
+                  v28Db.updateProduct(existing.id, { images: cleanImages });
+                }
+              }
               skippedCount++;
               productIds.push(existing.id);
             }
@@ -960,6 +1049,8 @@ export function createV28ApiRoutes(
           companyId?: string;
           productIds?: string[];
           categoryHints?: Record<string, string>;
+          organizeZonesByCategory?: boolean;
+          replaceExisting?: boolean;
         };
         const result = exhibitionService.autoAllocateDraftProducts(getParam(req.params.versionId), {
           companyId: typeof body.companyId === 'string' ? body.companyId : undefined,
@@ -968,6 +1059,7 @@ export function createV28ApiRoutes(
             : undefined,
           categoryHints:
             body.categoryHints && typeof body.categoryHints === 'object' ? body.categoryHints : undefined,
+          organizeZonesByCategory: body.organizeZonesByCategory !== false,
           expectedExhibitionId: getParam(req.params.id),
         });
         res.json(result);
@@ -1004,6 +1096,10 @@ export function createV28ApiRoutes(
         parsed.data,
         getParam(req.params.id)
       );
+      if (version.status === 'published') {
+        invalidatePublishedWorldCache();
+        onLayoutPublished?.(version);
+      }
       res.json({ version });
     } catch (err) {
       res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
@@ -1071,6 +1167,19 @@ export function createV28ApiRoutes(
           productId,
           getParam(req.params.id)
         );
+        if (version.status === 'published') {
+          invalidatePublishedWorldCache();
+          try {
+            const activeWorld = exhibitionService.getActiveExhibitionWorld();
+            onLayoutPublished?.(activeWorld);
+            const booth = activeWorld.booths.find((b) => b.boothId === getParam(req.params.boothId));
+            if (booth) {
+              void audioCacheService.getOrPrepareBoothAudioPack(booth).catch(() => { });
+            }
+          } catch {
+            // ignore if no active exhibition yet
+          }
+        }
         res.json({ version });
       } catch (err) {
         res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
@@ -1090,6 +1199,14 @@ export function createV28ApiRoutes(
           null,
           getParam(req.params.id)
         );
+        if (version.status === 'published') {
+          invalidatePublishedWorldCache();
+          try {
+            onLayoutPublished?.(exhibitionService.getActiveExhibitionWorld());
+          } catch {
+            // ignore if no active exhibition yet
+          }
+        }
         res.json({ version });
       } catch (err) {
         res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
@@ -1185,6 +1302,93 @@ export function createV28ApiRoutes(
         invalidatePublishedWorldCache();
         onLayoutPublished?.(version);
         // Incremental non-blocking audio cache check/warm on publish (reuses unchanged content hashes)
+        void audioCacheService.syncVersionAudioIncremental(version, 20).catch(() => { });
+        res.json({ version });
+      } catch (err) {
+        res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+      }
+    }
+  );
+
+  router.post(
+    '/exhibitions/:id/working-draft',
+    requireAdminAuth,
+    (req: Request, res: Response) => {
+      try {
+        const exhibitionId = getParam(req.params.id);
+        const summary = exhibitionService.getExhibitionSummary(exhibitionId);
+        if (!summary) {
+          res.status(404).json({ error: 'Không tìm thấy triển lãm.' });
+          return;
+        }
+        if (summary.latestDraftVersionId) {
+          const existingDraft = exhibitionService.getVersionDetail(
+            summary.latestDraftVersionId,
+            { includeHidden: true }
+          );
+          if (existingDraft && existingDraft.exhibitionId === exhibitionId) {
+            res.json({ version: existingDraft, created: false });
+            return;
+          }
+        }
+        const baseVersionId = summary.activeVersionId || summary.versions[0]?.id;
+        const baseDetail = baseVersionId
+          ? exhibitionService.getVersionDetail(baseVersionId, { includeHidden: true })
+          : null;
+        const targetBoothCount = Math.max(
+          1,
+          baseDetail?.booths.length || summary.activeBoothCount || 12
+        );
+        const zoneCount = Math.max(1, baseDetail?.zones.length || summary.activeZoneCount || 1);
+        const boothsPerZone = Math.max(1, Math.ceil(targetBoothCount / zoneCount));
+        const version = exhibitionService.createDraftVersion(exhibitionId, {
+          targetBoothCount,
+          zoneCount,
+          boothsPerZone,
+          preferredZoneCapacity: boothsPerZone,
+          baseVersionId: baseVersionId || undefined,
+          ownerCompanyId: baseDetail?.ownerCompanyId || undefined,
+        });
+        res.json({ version, created: true });
+      } catch (err) {
+        res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+      }
+    }
+  );
+
+  router.post(
+    '/exhibitions/:id/save-and-publish',
+    requireAdminAuth,
+    (req: Request, res: Response) => {
+      try {
+        const exhibitionId = getParam(req.params.id);
+        const body = (req.body || {}) as { versionId?: string };
+        const summary = exhibitionService.getExhibitionSummary(exhibitionId);
+        if (!summary) {
+          res.status(404).json({ error: 'Không tìm thấy triển lãm.' });
+          return;
+        }
+        const targetVersionId =
+          (typeof body.versionId === 'string' && body.versionId.trim()) ||
+          summary.latestDraftVersionId ||
+          summary.activeVersionId;
+        if (!targetVersionId) {
+          res.status(404).json({ error: 'Không tìm thấy phiên bản triển lãm để xuất bản.' });
+          return;
+        }
+        const currentDetail = exhibitionService.getVersionDetail(targetVersionId, {
+          includeHidden: true,
+        });
+        if (!currentDetail || currentDetail.exhibitionId !== exhibitionId) {
+          res.status(404).json({ error: 'Không tìm thấy phiên bản triển lãm.' });
+          return;
+        }
+        const version =
+          currentDetail.status === 'published'
+            ? currentDetail
+            : exhibitionService.publishVersion(exhibitionId, targetVersionId);
+        invalidatePublishedWorldCache();
+        onLayoutPublished?.(version);
         void audioCacheService.syncVersionAudioIncremental(version, 20).catch(() => { });
         res.json({ version });
       } catch (err) {

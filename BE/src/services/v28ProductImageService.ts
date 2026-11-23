@@ -181,8 +181,10 @@ export class V28ProductImageService {
           redirect: 'manual',
           signal: AbortSignal.timeout(IMAGE_FETCH_TIMEOUT_MS),
           headers: {
-            'User-Agent': 'VirtualExpo25D-ProductImporter/1.0 (+https://example.com)',
-            Accept: 'image/webp,image/png,image/jpeg,*/*;q=0.5',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            Accept: 'image/webp,image/png,image/jpeg,*/*;q=0.8',
+            Referer: `${validatedUrl.origin}/`,
           },
         });
       } catch (err) {

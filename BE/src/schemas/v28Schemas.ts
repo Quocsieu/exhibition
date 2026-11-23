@@ -228,6 +228,7 @@ export interface ImportJobReport {
   failedCount: number;
   durationMs: number;
   errors: Array<{ rowNumber: number; sku?: string; reason: string }>;
+  productIds?: string[];
   createdAt: string;
 }
 
@@ -275,6 +276,7 @@ export const CreateDraftLayoutInputSchema = z.object({
   sourceUrl: z.string().trim().max(1000).optional(),
   sourceFilename: z.string().trim().max(240).optional(),
   ownerCompanyId: z.string().trim().min(1).optional(),
+  clearExistingSlots: z.boolean().optional().default(false),
 });
 
 export const UpdateZoneInputSchema = z.object({

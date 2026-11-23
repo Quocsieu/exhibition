@@ -564,3 +564,168 @@ export function computeZoneAwareCompactedLayout<TBooth extends CompactableBoothI
     booths: compactedBooths,
   };
 }
+
+export interface PlannedConsolidatedZone<TBooth extends CompactableBoothInput> {
+  displayName: string;
+  categoryTag: string;
+  categoryId: string | null;
+  isMerged: boolean;
+  sourceZoneCodes: string[];
+  booths: TBooth[];
+}
+
+export interface SparseZoneConsolidationPlan<TBooth extends CompactableBoothInput> {
+  canConsolidate: boolean;
+  sparseThreshold: number;
+  maxBoothsPerZone: number;
+  previousZoneCount: number;
+  nextZoneCount: number;
+  mergedZoneCodes: string[];
+  movedBoothCount: number;
+  plannedZones: PlannedConsolidatedZone<TBooth>[];
+}
+
+/**
+ * Option A — Sparse Zone Consolidation Planner:
+ * Keeps dense zones (boothCount > sparseThreshold) intact, while merging
+ * sparse zones (1 <= boothCount <= sparseThreshold) into consolidated zone(s)
+ * capped at `maxBoothsPerZone` booths per zone.
+ */
+export function planSparseZoneConsolidation<TBooth extends CompactableBoothInput>(
+  zones: CompactableZoneInput[],
+  booths: TBooth[],
+  options?: {
+    sparseThreshold?: number;
+    maxBoothsPerZone?: number;
+  }
+): SparseZoneConsolidationPlan<TBooth> {
+  const boothsByZoneId = new Map<string, TBooth[]>();
+  for (const b of booths) {
+    const list = boothsByZoneId.get(b.zoneId) || [];
+    list.push(b);
+    boothsByZoneId.set(b.zoneId, list);
+  }
+  for (const list of boothsByZoneId.values()) {
+    list.sort((a, b) => a.slotIndex - b.slotIndex);
+  }
+
+  const activeZones = [...zones]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .filter((z) => (boothsByZoneId.get(z.id)?.length || 0) > 0);
+
+  const largestZoneCount = activeZones.reduce(
+    (max, z) => Math.max(max, boothsByZoneId.get(z.id)?.length || 0),
+    0
+  );
+  const sparseThreshold = Math.max(
+    1,
+    Math.min(12, Math.floor(options?.sparseThreshold ?? 3))
+  );
+  const maxBoothsPerZone = Math.max(
+    4,
+    Math.min(24, Math.floor(options?.maxBoothsPerZone ?? Math.max(10, largestZoneCount)))
+  );
+
+  const sparseZones = activeZones.filter(
+    (z) => (boothsByZoneId.get(z.id)?.length || 0) <= sparseThreshold
+  );
+
+  if (sparseZones.length < 2) {
+    return {
+      canConsolidate: false,
+      sparseThreshold,
+      maxBoothsPerZone,
+      previousZoneCount: activeZones.length,
+      nextZoneCount: activeZones.length,
+      mergedZoneCodes: [],
+      movedBoothCount: 0,
+      plannedZones: activeZones.map((z) => ({
+        displayName: z.displayName,
+        categoryTag: z.categoryTag,
+        categoryId: z.categoryId,
+        isMerged: false,
+        sourceZoneCodes: [z.code],
+        booths: boothsByZoneId.get(z.id) || [],
+      })),
+    };
+  }
+
+  const sparseBoothPool: TBooth[] = [];
+  for (const z of sparseZones) {
+    sparseBoothPool.push(...(boothsByZoneId.get(z.id) || []));
+  }
+
+  const chunkCount = Math.max(1, Math.ceil(sparseBoothPool.length / maxBoothsPerZone));
+  if (chunkCount >= sparseZones.length) {
+    return {
+      canConsolidate: false,
+      sparseThreshold,
+      maxBoothsPerZone,
+      previousZoneCount: activeZones.length,
+      nextZoneCount: activeZones.length,
+      mergedZoneCodes: [],
+      movedBoothCount: 0,
+      plannedZones: activeZones.map((z) => ({
+        displayName: z.displayName,
+        categoryTag: z.categoryTag,
+        categoryId: z.categoryId,
+        isMerged: false,
+        sourceZoneCodes: [z.code],
+        booths: boothsByZoneId.get(z.id) || [],
+      })),
+    };
+  }
+
+  const mergedChunks: PlannedConsolidatedZone<TBooth>[] = [];
+  const baseSize = Math.floor(sparseBoothPool.length / chunkCount);
+  let remainder = sparseBoothPool.length % chunkCount;
+  let offset = 0;
+  for (let i = 0; i < chunkCount; i++) {
+    const take = baseSize + (remainder > 0 ? 1 : 0);
+    if (remainder > 0) remainder--;
+    const chunkBooths = sparseBoothPool.slice(offset, offset + take);
+    offset += take;
+    const sourceCodes = Array.from(new Set(chunkBooths.map((b) => b.zoneCode)));
+    mergedChunks.push({
+      displayName: chunkCount === 1 ? 'Khu Tổng hợp' : `Khu Tổng hợp ${i + 1}`,
+      categoryTag: 'Tổng hợp',
+      categoryId: null,
+      isMerged: true,
+      sourceZoneCodes: sourceCodes,
+      booths: chunkBooths,
+    });
+  }
+
+  const sparseIdSet = new Set(sparseZones.map((z) => z.id));
+  const plannedZones: PlannedConsolidatedZone<TBooth>[] = [];
+  let insertedMerged = false;
+
+  for (const z of activeZones) {
+    if (sparseIdSet.has(z.id)) {
+      if (!insertedMerged) {
+        plannedZones.push(...mergedChunks);
+        insertedMerged = true;
+      }
+    } else {
+      plannedZones.push({
+        displayName: z.displayName,
+        categoryTag: z.categoryTag,
+        categoryId: z.categoryId,
+        isMerged: false,
+        sourceZoneCodes: [z.code],
+        booths: boothsByZoneId.get(z.id) || [],
+      });
+    }
+  }
+
+  return {
+    canConsolidate: true,
+    sparseThreshold,
+    maxBoothsPerZone,
+    previousZoneCount: activeZones.length,
+    nextZoneCount: plannedZones.length,
+    mergedZoneCodes: sparseZones.map((z) => z.code),
+    movedBoothCount: sparseBoothPool.length,
+    plannedZones,
+  };
+}

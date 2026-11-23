@@ -13,11 +13,12 @@ import {
 } from '../integrations/productAdapter.js';
 
 export const MIN_TARGET_PRODUCTS = 1;
-export const MAX_TARGET_PRODUCTS = 120;
+export const MAX_TARGET_PRODUCTS = 1800;
 export const DEFAULT_TARGET_PRODUCTS = 15;
-export const MAX_CRAWL_PAGES_CAP = 130;
-export const MAX_TARGET_CRAWL_BYTES = 24_000_000; // 24 MB safe decompressed total budget
-export const MAX_CRAWL_DURATION_MS = 60_000; // 60s hard wall-clock budget
+export const MAX_CRAWL_PAGES_CAP = 300;
+export const MAX_TARGET_CRAWL_BYTES = 36_000_000; // 36 MB safe decompressed total budget
+export const MAX_CRAWL_DURATION_MS = 50_000; // 50s safe wall-clock budget (leaves 10s margin inside Render 60s HTTP timeout)
+const DETAIL_FETCH_CONCURRENCY = 8;
 
 export type CrawlStopReason =
   | 'TARGET_REACHED'
@@ -276,6 +277,9 @@ export async function crawlWebsiteForProducts(
   const paginationLinks: string[] = [];
   const seenLinks = new Set<string>();
 
+  const maxPaginationLinks = Math.min(50, Math.max(15, Math.ceil(targetCount / 8)));
+  const maxCategoryLinks = 15;
+
   const collectLinksFromHtml = (html: string, baseUrl: string, origin: string, maxCollect: number) => {
     // Check <link rel="next" href="..."> first
     const linkNextMatches = html.matchAll(/<link[^>]+rel=["'][^"']*next[^"']*["'][^>]+href=["']([^"']+)["']/gi);
@@ -284,7 +288,7 @@ export async function crawlWebsiteForProducts(
         const absUrl = new URL(m[1].trim(), baseUrl);
         if (absUrl.origin !== origin) continue;
         const cleaned = normalizeDiscoveryUrl(absUrl.toString());
-        if (!seenLinks.has(cleaned) && paginationLinks.length < 15) {
+        if (!seenLinks.has(cleaned) && paginationLinks.length < maxPaginationLinks) {
           seenLinks.add(cleaned);
           paginationLinks.push(cleaned);
         }
@@ -293,7 +297,7 @@ export async function crawlWebsiteForProducts(
 
     const aTagMatches = html.matchAll(/<a\s+([^>]+)>/gi);
     for (const m of aTagMatches) {
-      if (candidateLinks.length >= maxCollect && categoryLinks.length >= 6 && paginationLinks.length >= 15) break;
+      if (candidateLinks.length >= maxCollect && categoryLinks.length >= maxCategoryLinks && paginationLinks.length >= maxPaginationLinks) break;
       const attrs = m[1];
       const hrefMatch = /href=["']([^"']+)["']/i.exec(attrs);
       if (!hrefMatch) continue;
@@ -309,7 +313,7 @@ export async function crawlWebsiteForProducts(
         if (seenLinks.has(cleaned)) continue;
 
         if (isLikelyPaginationUrl(absUrl, relMatch?.[1] || '')) {
-          if (paginationLinks.length < 15) {
+          if (paginationLinks.length < maxPaginationLinks) {
             seenLinks.add(cleaned);
             paginationLinks.push(cleaned);
           }
@@ -319,7 +323,7 @@ export async function crawlWebsiteForProducts(
             candidateLinks.push(cleaned);
           }
         } else if (isLikelyCategoryPath(absUrl.pathname)) {
-          if (categoryLinks.length < 6) {
+          if (categoryLinks.length < maxCategoryLinks) {
             seenLinks.add(cleaned);
             categoryLinks.push(cleaned);
           }
@@ -557,7 +561,7 @@ export async function crawlWebsiteForProducts(
 
   // 3. Expand category pages if we still don't have enough candidate URLs to reach targetCount
   if (discovered.length < targetCount && candidateLinks.length + discovered.length < targetCount && categoryLinks.length > 0) {
-    for (const catUrl of categoryLinks.slice(0, 6)) {
+    for (const catUrl of categoryLinks.slice(0, maxCategoryLinks)) {
       if (discovered.length >= targetCount || candidateLinks.length + discovered.length >= targetCount + 10) break;
       if (pagesScanned >= maxPages - 1) {
         hitResourceLimit = true;
@@ -591,9 +595,9 @@ export async function crawlWebsiteForProducts(
     }
   }
 
-  // 5. Fetch candidate product detail pages until targetCount is reached or budget/links exhausted
+  // 5. Fetch candidate product detail pages with bounded concurrency (5x faster on Render cross-region latency)
   let processedCandidates = 0;
-  for (const link of candidateLinks) {
+  for (let idx = 0; idx < candidateLinks.length; ) {
     if (discovered.length >= targetCount) break;
     if (pagesScanned >= maxPages) {
       hitResourceLimit = true;
@@ -610,29 +614,44 @@ export async function crawlWebsiteForProducts(
       stopReasons.push(`duration_limit:${maxDurationMs}`);
       break;
     }
-    processedCandidates++;
-    try {
-      const sub = await fetchHtml(link, { budget });
-      pagesScanned++;
-      applySellerDetection(sub.html, sub.finalUrl);
-      const subDraft = extractProductFromHtml(sub.html, sub.finalUrl);
-      const subCat = extractBreadcrumbCategoryFromHtml(sub.html);
-      const subBrand = extractProductBrandFromHtml(sub.html);
-      const subPath = new URL(sub.finalUrl).pathname.replace(/\/+$/, '');
-      const isRootLanding = !subPath || subPath === '/';
-      if (
-        subDraft.extractionMethod === 'json-ld' ||
-        subDraft.price > 0 ||
-        (!isRootLanding && subDraft.extractionMethod === 'opengraph' && subDraft.images.length > 0)
-      ) {
-        pushCandidate(subDraft, sub.finalUrl, subCat, subBrand);
-      }
-    } catch (err) {
-      pageErrors++;
-      if (err instanceof ExternalFetchError && (err.code === 'HTTP_403' || err.code === 'HTTP_429' || err.code === 'CAPTCHA_BLOCKED')) {
-        blockedErrors++;
+
+    const remainingTarget = targetCount - discovered.length;
+    const remainingPages = maxPages - pagesScanned;
+    const waveSize = Math.max(1, Math.min(DETAIL_FETCH_CONCURRENCY, remainingTarget, remainingPages));
+    const wave = candidateLinks.slice(idx, idx + waveSize);
+    idx += wave.length;
+    processedCandidates += wave.length;
+
+    const results = await Promise.allSettled(
+      wave.map((link) => fetchHtml(link, { budget }))
+    );
+
+    for (const r of results) {
+      if (discovered.length >= targetCount) break;
+      if (r.status === 'fulfilled') {
+        const sub = r.value;
+        pagesScanned++;
+        applySellerDetection(sub.html, sub.finalUrl);
+        const subDraft = extractProductFromHtml(sub.html, sub.finalUrl);
+        const subCat = extractBreadcrumbCategoryFromHtml(sub.html);
+        const subBrand = extractProductBrandFromHtml(sub.html);
+        const subPath = new URL(sub.finalUrl).pathname.replace(/\/+$/, '');
+        const isRootLanding = !subPath || subPath === '/';
+        if (
+          subDraft.extractionMethod === 'json-ld' ||
+          subDraft.price > 0 ||
+          (!isRootLanding && subDraft.extractionMethod === 'opengraph' && subDraft.images.length > 0)
+        ) {
+          pushCandidate(subDraft, sub.finalUrl, subCat, subBrand);
+        }
       } else {
-        networkErrors++;
+        pageErrors++;
+        const err = r.reason;
+        if (err instanceof ExternalFetchError && (err.code === 'HTTP_403' || err.code === 'HTTP_429' || err.code === 'CAPTCHA_BLOCKED')) {
+          blockedErrors++;
+        } else {
+          networkErrors++;
+        }
       }
     }
   }

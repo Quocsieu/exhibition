@@ -586,13 +586,15 @@ export function extractProductFromHtml(html: string, sourceUrl: string): Extract
             if (typeof item === 'string') {
               const resolved = resolveUrlMaybe(item, sourceUrl);
               if (resolved) images.push(resolved);
-            } else if (item && typeof item === 'object' && 'url' in item) {
-              const resolved = resolveUrlMaybe(String((item as { url: unknown }).url), sourceUrl);
+            } else if (item && typeof item === 'object' && ('url' in item || 'contentUrl' in item)) {
+              const obj = item as { url?: unknown; contentUrl?: unknown };
+              const resolved = resolveUrlMaybe(String(obj.url || obj.contentUrl || ''), sourceUrl);
               if (resolved) images.push(resolved);
             }
           }
-        } else if (rawImg && typeof rawImg === 'object' && 'url' in rawImg) {
-          const resolved = resolveUrlMaybe(String((rawImg as { url: unknown }).url), sourceUrl);
+        } else if (rawImg && typeof rawImg === 'object' && ('url' in rawImg || 'contentUrl' in rawImg)) {
+          const obj = rawImg as { url?: unknown; contentUrl?: unknown };
+          const resolved = resolveUrlMaybe(String(obj.url || obj.contentUrl || ''), sourceUrl);
           if (resolved) images.push(resolved);
         }
 

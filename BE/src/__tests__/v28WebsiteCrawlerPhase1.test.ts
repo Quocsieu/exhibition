@@ -54,14 +54,15 @@ function createMockSite(routes: Record<string, string>) {
 }
 
 describe('Phase 1 — Target-Based Website Crawler (Quality Gate 1)', () => {
-  it('validates targetCount positive integer bounds [1..120]', () => {
+  it('validates targetCount positive integer bounds [1..1800]', () => {
     expect(validateTargetCount(undefined)).toBe(15);
     expect(validateTargetCount(6)).toBe(6);
     expect(validateTargetCount(60)).toBe(60);
     expect(validateTargetCount(120)).toBe(120);
+    expect(validateTargetCount(1800)).toBe(1800);
     expect(() => validateTargetCount(0)).toThrow();
     expect(() => validateTargetCount(-5)).toThrow();
-    expect(() => validateTargetCount(121)).toThrow();
+    expect(() => validateTargetCount(1801)).toThrow();
     expect(() => validateTargetCount(3.5)).toThrow();
   });
 

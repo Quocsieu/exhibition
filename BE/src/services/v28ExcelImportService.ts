@@ -468,6 +468,7 @@ export class V28ExcelImportService {
     let updatedCount = 0;
     let skippedCount = 0;
     let failedCount = 0;
+    const committedProductIds: string[] = [];
     const errors: Array<{ rowNumber: number; sku?: string; reason: string }> = [];
 
     this.db.runInTransaction(() => {
@@ -501,6 +502,7 @@ export class V28ExcelImportService {
         if (liveExisting) {
           if (options.duplicateStrategy === 'skip') {
             skippedCount++;
+            committedProductIds.push(liveExisting.id);
             continue;
           }
           if (options.duplicateStrategy === 'update') {
@@ -515,6 +517,7 @@ export class V28ExcelImportService {
               inStock: row.data.inStock,
             });
             updatedCount++;
+            committedProductIds.push(liveExisting.id);
             continue;
           }
           // Strategy === 'create': unique SKU constraint MUST NOT be bypassed by fabricating fake SKUs
@@ -527,7 +530,7 @@ export class V28ExcelImportService {
           continue;
         }
 
-        this.db.createProduct({
+        const createdProd = this.db.createProduct({
           companyId,
           boothId: null,
           name: row.data.name,
@@ -544,6 +547,7 @@ export class V28ExcelImportService {
           status: 'active',
         });
         createdCount++;
+        committedProductIds.push(createdProd.id);
       }
 
       const report: ImportJobReport = {
@@ -566,7 +570,8 @@ export class V28ExcelImportService {
     });
 
     job.committed = true;
-    return this.db.getImportJobReport(jobId)!;
+    const saved = this.db.getImportJobReport(jobId)!;
+    return { ...saved, productIds: committedProductIds };
   }
 
   formatErrorsCsv(report: ImportJobReport): string {

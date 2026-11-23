@@ -17,7 +17,10 @@ import {
 import { VALID_BOOTH_SLOT_IDS } from '../../schemas/expoSchemas.js';
 import type { ExhibitionVersionStatus, V28Product } from '../../schemas/v28Schemas.js';
 import { V28CategoryService } from './categoryService.js';
-import { computeZoneAwareCompactedLayout } from './zoneCompaction.js';
+import {
+  computeZoneAwareCompactedLayout,
+  planSparseZoneConsolidation,
+} from './zoneCompaction.js';
 
 export interface ExhibitionSummary {
   id: string;
@@ -136,7 +139,7 @@ function httpError(statusCode: number, message: string): Error & { statusCode: n
 }
 
 export class V28ExhibitionService {
-  constructor(private readonly v28Db: V28CatalogDatabase) {}
+  constructor(private readonly v28Db: V28CatalogDatabase) { }
 
   private get db() {
     return this.v28Db.getConnection();
@@ -336,8 +339,8 @@ export class V28ExhibitionService {
       input.baseVersionId ||
       (
         this.db.prepare('SELECT active_version_id FROM exhibitions WHERE id = ?').get(exhibitionId) as
-          | { active_version_id: string | null }
-          | undefined
+        | { active_version_id: string | null }
+        | undefined
       )?.active_version_id;
     if (refVersionId) {
       const prevZones = this.db
@@ -361,18 +364,18 @@ export class V28ExhibitionService {
       //    so ZERO demo/other-company booths ever leak into this exhibition!
       const existingBoothRows = explicitOwnerCompany
         ? (this.db
-            .prepare(
-              `SELECT id, company_id, name FROM booths
+          .prepare(
+            `SELECT id, company_id, name FROM booths
                WHERE company_id = ?
                ORDER BY id ASC`
-            )
-            .all(explicitOwnerCompany.id) as Array<{ id: string; company_id: string | null; name: string }>)
+          )
+          .all(explicitOwnerCompany.id) as Array<{ id: string; company_id: string | null; name: string }>)
         : (this.db
-            .prepare(
-              `SELECT id, company_id, name FROM booths
+          .prepare(
+            `SELECT id, company_id, name FROM booths
                ORDER BY CASE WHEN id LIKE 'v28-booth-%' THEN 1 ELSE 0 END ASC, id ASC`
-            )
-            .all() as Array<{ id: string; company_id: string | null; name: string }>);
+          )
+          .all() as Array<{ id: string; company_id: string | null; name: string }>);
 
       const boothIdsToUse: string[] = [];
       for (const b of existingBoothRows) {
@@ -551,28 +554,28 @@ export class V28ExhibitionService {
         const boothInBaseSnap =
           baseHasSnap && baseSnapshotId
             ? Boolean(
-                this.db
-                  .prepare('SELECT 1 FROM exhibition_version_booths WHERE version_id = ? AND booth_id = ? LIMIT 1')
-                  .get(baseSnapshotId, bId)
-              )
+              this.db
+                .prepare('SELECT 1 FROM exhibition_version_booths WHERE version_id = ? AND booth_id = ? LIMIT 1')
+                .get(baseSnapshotId, bId)
+            )
             : false;
         const existingSlots = boothInBaseSnap && baseSnapshotId
           ? (this.db
-              .prepare(
-                `SELECT s.slot_id, s.product_id, p.company_id
+            .prepare(
+              `SELECT s.slot_id, s.product_id, p.company_id
                  FROM exhibition_version_booth_slots s
                  JOIN products p ON p.id = s.product_id
                  WHERE s.version_id = ? AND s.booth_id = ? AND p.status = 'active'`
-              )
-              .all(baseSnapshotId, bId) as Array<{ slot_id: string; product_id: string; company_id: string }>)
+            )
+            .all(baseSnapshotId, bId) as Array<{ slot_id: string; product_id: string; company_id: string }>)
           : (this.db
-              .prepare(
-                `SELECT s.slot_id, s.product_id, p.company_id
+            .prepare(
+              `SELECT s.slot_id, s.product_id, p.company_id
                  FROM booth_slot_assignments s
                  JOIN products p ON p.id = s.product_id
                  WHERE s.booth_id = ? AND p.status = 'active'`
-              )
-              .all(bId) as Array<{ slot_id: string; product_id: string; company_id: string }>);
+            )
+            .all(bId) as Array<{ slot_id: string; product_id: string; company_id: string }>);
         for (const s of existingSlots) {
           if (!bRow?.company_id || s.company_id === bRow.company_id) {
             insertDraftSlot.run(versionId, bId, s.slot_id, s.product_id);
@@ -738,21 +741,21 @@ export class V28ExhibitionService {
     // Batch-load all slot assignments + products for booths in this version (isolated by version_id when snapshotted!)
     const slotRows = hasSnap
       ? (this.db
-          .prepare(
-            `SELECT evbs.booth_id AS assigned_booth_id, evbs.slot_id, p.*
+        .prepare(
+          `SELECT evbs.booth_id AS assigned_booth_id, evbs.slot_id, p.*
              FROM exhibition_version_booth_slots evbs
              JOIN products p ON p.id = evbs.product_id
              WHERE evbs.version_id = ?`
-          )
-          .all(versionId) as Array<Record<string, unknown>>)
+        )
+        .all(versionId) as Array<Record<string, unknown>>)
       : (this.db
-          .prepare(
-            `SELECT bsa.booth_id AS assigned_booth_id, bsa.slot_id, p.*
+        .prepare(
+          `SELECT bsa.booth_id AS assigned_booth_id, bsa.slot_id, p.*
              FROM booth_slot_assignments bsa
              JOIN products p ON p.id = bsa.product_id
              WHERE bsa.booth_id IN (SELECT booth_id FROM exhibition_version_booths WHERE version_id = ?)`
-          )
-          .all(versionId) as Array<Record<string, unknown>>);
+        )
+        .all(versionId) as Array<Record<string, unknown>>);
 
     const slotsByBooth = new Map<string, Map<string, V28Product>>();
     for (const r of slotRows) {
@@ -762,7 +765,7 @@ export class V28ExhibitionService {
       try {
         const parsed = JSON.parse(String(r.images_json || '[]'));
         if (Array.isArray(parsed)) images = parsed.map(String);
-      } catch {}
+      } catch { }
       slotsByBooth.get(bId)!.set(String(r.slot_id), {
         id: String(r.id),
         companyId: String(r.company_id),
@@ -906,7 +909,7 @@ export class V28ExhibitionService {
 
     const explicitOwnerId =
       typeof (layoutMeta as { ownerCompanyId?: unknown }).ownerCompanyId === 'string' &&
-      (layoutMeta as { ownerCompanyId?: string }).ownerCompanyId
+        (layoutMeta as { ownerCompanyId?: string }).ownerCompanyId
         ? (layoutMeta as { ownerCompanyId: string }).ownerCompanyId
         : null;
     const distinctBoothOwners = Array.from(
@@ -916,12 +919,12 @@ export class V28ExhibitionService {
     const resolvedOwnerRow = resolvedOwnerId ? this.v28Db.getCompanyById(resolvedOwnerId) : null;
     const ownerCompany = resolvedOwnerRow
       ? {
-          id: resolvedOwnerRow.id,
-          name: resolvedOwnerRow.name,
-          logoUrl: resolvedOwnerRow.logoUrl || '',
-          contactUrl: resolvedOwnerRow.contactUrl || '',
-          contactEmail: resolvedOwnerRow.contactEmail || '',
-        }
+        id: resolvedOwnerRow.id,
+        name: resolvedOwnerRow.name,
+        logoUrl: resolvedOwnerRow.logoUrl || '',
+        contactUrl: resolvedOwnerRow.contactUrl || '',
+        contactEmail: resolvedOwnerRow.contactEmail || '',
+      }
       : null;
 
     return {
@@ -1229,6 +1232,202 @@ export class V28ExhibitionService {
     };
   }
 
+  /**
+   * Option A — Consolidate Sparse Zones:
+   * Keeps dense zones (> sparseThreshold booths) intact, while merging sparse zones
+   * (<= sparseThreshold booths) into consolidated zone(s) capped at maxBoothsPerZone,
+   * and regenerates a clean U-shaped layout via generateDynamicExhibitionLayout.
+   * Preserves all booth IDs, product slots, booth metadata, and archetypes.
+   */
+  public consolidateSparseZones(
+    exhibitionId: string,
+    versionId: string,
+    options?: {
+      sparseThreshold?: number;
+      maxBoothsPerZone?: number;
+    }
+  ): {
+    version: ExhibitionVersionDetail;
+    publicActiveWorld: ExhibitionVersionDetail | null;
+    isPublishedVersion: boolean;
+    consolidated: boolean;
+    mergedZoneCodes: string[];
+    movedBoothCount: number;
+    previousZoneCount: number;
+    remainingZoneCount: number;
+    totalBoothCount: number;
+  } {
+    const verRow = this.db
+      .prepare('SELECT id, exhibition_id, status, layout_config_json FROM exhibition_versions WHERE id = ? AND exhibition_id = ?')
+      .get(versionId, exhibitionId) as
+      | { id: string; exhibition_id: string; status: string; layout_config_json: string | null }
+      | undefined;
+    if (!verRow?.id) {
+      throw httpError(404, 'Không tìm thấy phiên bản triển lãm.');
+    }
+    if (verRow.status === 'archived') {
+      throw httpError(409, 'Không thể gộp phân khu trên phiên bản đã lưu trữ (Archived).');
+    }
+
+    const current = this.getVersionDetail(versionId, { includeHidden: false });
+    if (!current) {
+      throw httpError(404, 'Không tìm thấy chi tiết phiên bản triển lãm.');
+    }
+
+    const plan = planSparseZoneConsolidation(current.zones, current.booths, options);
+    const isPublishedVersion = verRow.status === 'published';
+
+    if (!plan.canConsolidate) {
+      return {
+        version: current,
+        publicActiveWorld: isPublishedVersion ? current : null,
+        isPublishedVersion,
+        consolidated: false,
+        mergedZoneCodes: [],
+        movedBoothCount: 0,
+        previousZoneCount: current.zones.length,
+        remainingZoneCount: current.zones.length,
+        totalBoothCount: current.booths.length,
+      };
+    }
+
+    const existingMeta = JSON.parse(String(verRow.layout_config_json || '{}')) as {
+      ownerCompanyId?: string | null;
+      config?: Partial<LayoutGeneratorInput>;
+    };
+    const prevCfg = existingMeta.config || {};
+    const totalBoothCount = plan.plannedZones.reduce((sum, z) => sum + z.booths.length, 0);
+
+    const layout = generateDynamicExhibitionLayout({
+      targetBoothCount: totalBoothCount,
+      preferredZoneCapacity: plan.maxBoothsPerZone,
+      hallStyle: prevCfg.hallStyle ?? 'grand_expo',
+      mainAvenueWidth: prevCfg.mainAvenueWidth,
+      aisleWidth: prevCfg.aisleWidth,
+      perimeterWidth: prevCfg.perimeterWidth,
+      boothGap: prevCfg.boothGap,
+      layoutSeed: prevCfg.layoutSeed ?? 28,
+      categoryZones: plan.plannedZones.map((pz, idx) => ({
+        categoryId: pz.categoryId || `merged-zone-${idx + 1}`,
+        categoryName: pz.displayName,
+        boothCount: pz.booths.length,
+      })),
+    });
+
+    if (layout.zones.length !== plan.plannedZones.length || layout.placements.length !== totalBoothCount) {
+      throw httpError(500, 'Không thể tính toán lại sơ đồ chữ U sau khi gộp các khu thưa.');
+    }
+
+    this.v28Db.runInTransaction(() => {
+      // Preserve existing per-booth category_id from exhibition_version_booths
+      const existingCatRows = this.db
+        .prepare('SELECT booth_id, category_id FROM exhibition_version_booths WHERE version_id = ?')
+        .all(versionId) as Array<{ booth_id: string; category_id: string | null }>;
+      const boothCategoryById = new Map<string, string | null>();
+      for (const r of existingCatRows) {
+        boothCategoryById.set(r.booth_id, r.category_id || null);
+      }
+
+      // Remove old placements first (satisfies FK to zones), then replace zones
+      this.db.prepare('DELETE FROM exhibition_version_booths WHERE version_id = ?').run(versionId);
+      this.db.prepare('DELETE FROM zones WHERE version_id = ?').run(versionId);
+
+      const insertZone = this.db.prepare(`
+        INSERT INTO zones (id, version_id, code, display_name, category_tag, bounds_json, sort_order, category_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const zoneIdByCode = new Map<string, string>();
+      for (let i = 0; i < layout.zones.length; i++) {
+        const genZone = layout.zones[i];
+        const planned = plan.plannedZones[i];
+        const zId = `zone-${versionId}-${genZone.code}`;
+        insertZone.run(
+          zId,
+          versionId,
+          genZone.code,
+          planned.displayName,
+          planned.categoryTag || genZone.categoryTag,
+          JSON.stringify(genZone.bounds),
+          genZone.sortOrder,
+          planned.categoryId || null
+        );
+        zoneIdByCode.set(genZone.code, zId);
+      }
+
+      const insertPlacement = this.db.prepare(`
+        INSERT INTO exhibition_version_booths (
+          version_id, booth_id, zone_id, slot_index,
+          position_x, position_z, rotation_y, archetype_id, placement_status, category_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'placed', ?)
+      `);
+
+      const orderedBooths = plan.plannedZones.flatMap((pz) => pz.booths);
+      for (let i = 0; i < layout.placements.length; i++) {
+        const p = layout.placements[i];
+        const b = orderedBooths[i];
+        const zId = zoneIdByCode.get(p.zoneCode)!;
+        insertPlacement.run(
+          versionId,
+          b.boothId,
+          zId,
+          p.slotIndex,
+          p.positionX,
+          p.positionZ,
+          p.rotationY,
+          b.archetypeId || p.archetypeId,
+          boothCategoryById.get(b.boothId) ?? null
+        );
+      }
+
+      this.db
+        .prepare(
+          `UPDATE exhibition_versions
+           SET target_booth_count = ?,
+               layout_config_json = ?,
+               roof_config_json = ?
+           WHERE id = ?`
+        )
+        .run(
+          totalBoothCount,
+          JSON.stringify({
+            ownerCompanyId: existingMeta.ownerCompanyId ?? null,
+            config: layout.config,
+            hallWidth: layout.hallWidth,
+            hallDepth: layout.hallDepth,
+            hallBounds: layout.hallBounds,
+            walkableBounds: layout.walkableBounds,
+            walkableRegions: layout.walkableRegions,
+            centralAvenueBounds: layout.centralAvenueBounds,
+            welcomeAreaBounds: layout.welcomeAreaBounds,
+            spawnPoint: layout.spawnPoint,
+            directoryPoint: layout.directoryPoint,
+            cameraOverviewBounds: layout.cameraOverviewBounds,
+            walkwayGraph: layout.walkwayGraph,
+            clusters: layout.clusters,
+          }),
+          JSON.stringify(layout.roofBounds),
+          versionId
+        );
+    });
+
+    const updatedVersion = this.getVersionDetail(versionId, { includeHidden: false });
+    if (!updatedVersion) {
+      throw httpError(500, 'Không thể tải lại phiên bản triển lãm sau khi gộp khu thưa.');
+    }
+
+    return {
+      version: updatedVersion,
+      publicActiveWorld: isPublishedVersion ? updatedVersion : null,
+      isPublishedVersion,
+      consolidated: true,
+      mergedZoneCodes: plan.mergedZoneCodes,
+      movedBoothCount: plan.movedBoothCount,
+      previousZoneCount: plan.previousZoneCount,
+      remainingZoneCount: updatedVersion.zones.length,
+      totalBoothCount: updatedVersion.booths.length,
+    };
+  }
+
   private assertDraftVersion(versionId: string, expectedExhibitionId?: string): { exhibitionId: string } {
     const row = this.db
       .prepare('SELECT exhibition_id, status FROM exhibition_versions WHERE id = ?')
@@ -1254,12 +1453,20 @@ export class V28ExhibitionService {
     patch: { displayName?: string; categoryTag?: string },
     expectedExhibitionId?: string
   ): ExhibitionVersionDetail {
-    this.assertDraftVersion(versionId, expectedExhibitionId);
+    const versionRow = this.db
+      .prepare('SELECT id, exhibition_id, status FROM exhibition_versions WHERE id = ?')
+      .get(versionId) as { id: string; exhibition_id: string; status: string } | undefined;
+    if (!versionRow || (expectedExhibitionId && versionRow.exhibition_id !== expectedExhibitionId)) {
+      throw httpError(404, 'Không tìm thấy phiên bản triển lãm.');
+    }
+    if (versionRow.status === 'archived') {
+      throw httpError(409, 'Không thể đổi tên phân khu trên phiên bản đã lưu trữ (Archived).');
+    }
     const existing = this.db
       .prepare('SELECT id, display_name, category_tag FROM zones WHERE id = ? AND version_id = ?')
       .get(zoneId, versionId) as { id: string; display_name: string; category_tag: string } | undefined;
     if (!existing) {
-      throw httpError(404, 'Không tìm thấy phân khu trong bản Draft.');
+      throw httpError(404, 'Không tìm thấy phân khu trong phiên bản triển lãm.');
     }
     this.db
       .prepare('UPDATE zones SET display_name = ?, category_tag = ? WHERE id = ?')
@@ -1392,7 +1599,9 @@ export class V28ExhibitionService {
   }
 
   /**
-   * Assign or clear a product slot strictly inside a Draft version's isolated snapshot (V28-AUDIT-001).
+   * Assign or clear a product slot inside a Draft version's isolated snapshot (V28-AUDIT-001)
+   * OR directly on the active Published version (syncing live `booth_slot_assignments` + snapshot).
+   * Archived versions remain strictly immutable.
    */
   public assignDraftBoothSlot(
     versionId: string,
@@ -1401,14 +1610,25 @@ export class V28ExhibitionService {
     productId: string | null,
     expectedExhibitionId?: string
   ): ExhibitionVersionDetail {
-    this.assertDraftVersion(versionId, expectedExhibitionId);
+    const verRow = this.db
+      .prepare('SELECT id, exhibition_id, status FROM exhibition_versions WHERE id = ?')
+      .get(versionId) as { id: string; exhibition_id: string; status: string } | undefined;
+    if (!verRow) throw httpError(404, 'Không tìm thấy phiên bản triển lãm.');
+    if (expectedExhibitionId && verRow.exhibition_id !== expectedExhibitionId) {
+      throw httpError(404, 'Phiên bản không thuộc triển lãm này.');
+    }
+    if (verRow.status === 'archived') {
+      throw httpError(400, 'Phiên bản đã Archived là bất biến. Vui lòng tạo bản Draft mới để chỉnh sửa.');
+    }
+    const isPublished = verRow.status === 'published';
+
     if (!VALID_BOOTH_SLOT_IDS.has(slotId)) {
       throw httpError(400, `Slot '${slotId}' không hợp lệ (chỉ chấp nhận slot_01..slot_06).`);
     }
     const detail = this.getVersionDetail(versionId);
-    if (!detail) throw httpError(404, 'Không tìm thấy phiên bản Draft.');
+    if (!detail) throw httpError(404, 'Không tìm thấy phiên bản triển lãm.');
     const target = detail.booths.find((b) => b.boothId === boothId);
-    if (!target) throw httpError(404, 'Gian hàng không thuộc phiên bản Draft này.');
+    if (!target) throw httpError(404, 'Gian hàng không thuộc phiên bản này.');
 
     if (productId) {
       const prod = this.v28Db.getProductById(productId);
@@ -1427,6 +1647,9 @@ export class V28ExhibitionService {
         this.db
           .prepare('DELETE FROM exhibition_version_booth_slots WHERE version_id = ? AND booth_id = ? AND slot_id = ?')
           .run(versionId, boothId, slotId);
+        if (isPublished) {
+          this.v28Db.clearBoothSlot(boothId, slotId);
+        }
       } else {
         this.db
           .prepare(
@@ -1437,6 +1660,9 @@ export class V28ExhibitionService {
                updated_at = CURRENT_TIMESTAMP`
           )
           .run(versionId, boothId, slotId, productId);
+        if (isPublished) {
+          this.v28Db.assignBoothSlot(boothId, slotId, productId);
+        }
       }
     });
 
