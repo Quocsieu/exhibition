@@ -1,0 +1,14 @@
+Voice Model Attribution (Browser Client-Side TTS)
+=================================================
+
+Model ID: vi_VN-vais1000-medium
+Architecture: Piper VITS (22,050 Hz, Vietnamese Northern Female Voice)
+Source Repository: https://huggingface.co/rhasspy/piper-voices/tree/main/vi/vi_VN/vais1000/medium
+Training Corpus: VAIS-1000 Vietnamese Speech Synthesis Corpus (Vietnam Artificial Intelligence System - VAIS)
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License URL: https://creativecommons.org/licenses/by/4.0/
+
+Runtime Libraries:
+- onnxruntime-web@1.18.0 (MIT License, Microsoft Corporation)
+- @mintplex-labs/piper-tts-web@1.0.5 (MIT License, Mintplex Labs)
+- @diffusionstudio/piper-wasm@1.0.0 / piper-phonemize (MIT License)
