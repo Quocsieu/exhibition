@@ -13,16 +13,22 @@ import { CharacterNavigationRing3D } from './CharacterNavigationRing3D';
 import { getV28BoothSlotSpec } from './v28ProductSlotLayouts';
 import type { V28NpcAnimState } from './DynamicBoothNpc3D';
 import type { HighlightedBoothProduct, NpcSessionState } from '../../hooks/useNpcConsultationSession';
-import type { GuidedRouteResult } from '../../services/v28NavigationEngine';
+import {
+  advanceAutoWalkWaypoints,
+  type GuidedRouteResult,
+  type RoutePoint,
+} from '../../services/v28NavigationEngine';
 import { getTextureCacheStats } from './v28BoothAssets';
 import { V27VisualKitLayer, useV27TerrazzoFloorTexture } from './V27VisualKit';
 import { YouthEntranceArch3D } from './YouthEntranceArch3D';
+import type { V28OnboardingGuideSignal } from '../../services/v28OnboardingStateMachine';
 import {
   clampCameraPosition,
   clampPointToWalkable,
   computeRotatedBoothCollider,
   deriveWalkableRegions,
   isPointWalkable,
+  stepSeamlessFreeMove,
 } from './v28NavigationBounds';
 import {
   computeV28BoothFocusCamera,
@@ -44,7 +50,7 @@ import {
   TOUCH_PITCH_SENSITIVITY,
   MIN_CAMERA_PITCH,
   MAX_CAMERA_PITCH,
-} from '../ExhibitionScene';
+} from '../cameraConstants';
 import {
   resolveV28GraphicsProfile,
   V28MultiTouchGestureController,
@@ -102,8 +108,11 @@ export interface DynamicExhibitionSceneProps {
   cameraMode: V28CameraMode;
   focusedBooth: V28BoothPlacementView | null;
   playerTarget: { x: number; z: number } | null;
+  autoWalkRequest?: { nonce: number; waypoints: RoutePoint[] } | null;
+  activeTargetBoothId?: string | null;
+  activeTargetZoneId?: string | null;
   teleportNonce: number;
-  teleportPos: { x: number; z: number; rotationY: number } | null;
+  teleportPos: { x: number; z: number; rotationY: number; alignCamera?: boolean } | null;
   joystickVector: { x: number; y: number };
   joystickVectorRef?: React.MutableRefObject<{ x: number; y: number }>;
   zoomRequest?: { delta: number; nonce: number };
@@ -118,14 +127,24 @@ export interface DynamicExhibitionSceneProps {
   activeNpcBoothId?: string | null;
   highlightedProduct?: HighlightedBoothProduct | null;
   guidedRoute?: GuidedRouteResult | null;
+  activeNavWaypoints?: RoutePoint[] | null;
   onCameraYawChange?: (yaw: number) => void;
   playerName?: string;
   playerColor?: string;
   onPlayerMove?: (pos: V28PlayerState) => void;
   onFloorClick: (x: number, z: number) => void;
+  onClickBoothIndicator?: (booth: V28BoothPlacementView) => void;
+  onClickZoneIndicator?: (zoneId: string) => void;
+  onAutoWalkComplete?: () => void;
+  onAutoWalkCancel?: () => void;
   onFocusBooth: (booth: V28BoothPlacementView) => void;
   onSelectProduct: (booth: V28BoothPlacementView, product: V28Product, slotId: string) => void;
+  visitedBoothIds?: ReadonlySet<string>;
+  favoriteBoothIds?: ReadonlySet<string>;
+  onToggleFavoriteBooth?: (booth: V28BoothPlacementView) => void;
   onClickNpc?: (booth: V28BoothPlacementView) => void;
+  onboardingGuideSignal?: V28OnboardingGuideSignal | null;
+  onClickWelcomeGuide?: () => void;
   onOpenDirectoryMap?: () => void;
   onFloatingJoystickVisual?: (state: FloatingJoystickVisualState) => void;
   renderRoof?: (props: { cameraMode: V28CameraMode; isMobilePortrait: boolean }) => React.ReactNode;
@@ -195,6 +214,9 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   cameraMode,
   focusedBooth,
   playerTarget,
+  autoWalkRequest = null,
+  activeTargetBoothId = null,
+  activeTargetZoneId = null,
   teleportNonce,
   teleportPos,
   joystickVector,
@@ -211,14 +233,24 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   activeNpcBoothId = null,
   highlightedProduct = null,
   guidedRoute = null,
+  activeNavWaypoints = null,
   onCameraYawChange,
   playerName = 'Khách V28',
   playerColor = '#0ea5e9',
   onPlayerMove,
   onFloorClick,
+  onClickBoothIndicator,
+  onClickZoneIndicator,
+  onAutoWalkComplete,
+  onAutoWalkCancel,
   onFocusBooth,
   onSelectProduct,
+  visitedBoothIds,
+  favoriteBoothIds,
+  onToggleFavoriteBooth,
   onClickNpc,
+  onboardingGuideSignal = null,
+  onClickWelcomeGuide,
   onOpenDirectoryMap,
   onFloatingJoystickVisual,
   renderRoof,
@@ -243,6 +275,11 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   });
   const keysRef = useRef<Record<string, boolean>>({});
   const moveTargetRef = useRef<{ x: number; z: number } | null>(null);
+  const autoWalkQueueRef = useRef<RoutePoint[]>([]);
+  const onAutoWalkCompleteRef = useRef(onAutoWalkComplete);
+  onAutoWalkCompleteRef.current = onAutoWalkComplete;
+  const onAutoWalkCancelRef = useRef(onAutoWalkCancel);
+  onAutoWalkCancelRef.current = onAutoWalkCancel;
   const lastReportRef = useRef<number>(0);
   const cameraModeRef = useRef<V28CameraMode>(cameraMode);
   cameraModeRef.current = cameraMode;
@@ -351,16 +388,34 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walkableRegions, boothColliders]);
 
-  // Apply click/tap target ONLY when inside valid walkable regions
+  // Apply click/tap target clamped to valid walkable space (cancels any active Auto-Walk)
   useEffect(() => {
     if (playerTarget) {
-      if (isPointWalkable(playerTarget.x, playerTarget.z, walkableRegions, boothColliders)) {
-        moveTargetRef.current = { ...playerTarget };
-      } else {
-        moveTargetRef.current = null;
-      }
+      autoWalkQueueRef.current = [];
+      const safe = clampPointToWalkable(
+        playerTarget.x,
+        playerTarget.z,
+        walkableRegions,
+        boothColliders,
+        playerPosRef.current
+      );
+      moveTargetRef.current = { x: safe.x, z: safe.z };
     }
   }, [playerTarget, walkableRegions, boothColliders]);
+
+  // H3: Apply multi-waypoint Auto-Walk request (strictly walk-to-target along walkwayGraph, never teleport)
+  useEffect(() => {
+    if (!autoWalkRequest || !autoWalkRequest.waypoints || autoWalkRequest.waypoints.length === 0) {
+      autoWalkQueueRef.current = [];
+      return;
+    }
+    moveTargetRef.current = null;
+    const p = playerPosRef.current;
+    const cleaned = autoWalkRequest.waypoints.filter(
+      (pt, idx) => idx > 0 || Math.hypot(pt.x - p.x, pt.z - p.z) > 0.55
+    );
+    autoWalkQueueRef.current = cleaned;
+  }, [autoWalkRequest]);
 
   // Apply instant teleport (strictly validated & clamped into valid walkable regions)
   useEffect(() => {
@@ -374,6 +429,10 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       );
       playerPosRef.current = { x: safe.x, z: safe.z, rotationY: teleportPos.rotationY, state: 'idle' };
       moveTargetRef.current = null;
+      autoWalkQueueRef.current = [];
+      if (teleportPos.alignCamera) {
+        camOrbitRef.current.exploreYaw = teleportPos.rotationY;
+      }
       if (avatarRef.current) {
         avatarRef.current.position.set(safe.x, 0, safe.z);
         avatarRef.current.rotation.y = teleportPos.rotationY;
@@ -590,6 +649,10 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
     let moved = false;
     if (moveVec.magnitude > 0.05) {
       moveTargetRef.current = null;
+      if (autoWalkQueueRef.current.length > 0) {
+        autoWalkQueueRef.current = [];
+        onAutoWalkCancelRef.current?.();
+      }
       const nx = p.x + moveVec.moveX * speed * dt;
       const nz = p.z + moveVec.moveZ * speed * dt;
       if (isWalkable(nx, p.z)) {
@@ -601,24 +664,33 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
         moved = true;
       }
       p.rotationY = Math.atan2(moveVec.moveX, moveVec.moveZ);
+    } else if (cameraMode !== 'focus' && autoWalkQueueRef.current.length > 0) {
+      const stepRes = advanceAutoWalkWaypoints(p, autoWalkQueueRef.current, speed * dt, isWalkable, 0.55);
+      autoWalkQueueRef.current = stepRes.remainingWaypoints;
+      if (stepRes.moved) {
+        p.x = stepRes.x;
+        p.z = stepRes.z;
+        p.rotationY = stepRes.rotationY;
+        moved = true;
+      }
+      if (stepRes.completed) {
+        autoWalkQueueRef.current = [];
+        onAutoWalkCompleteRef.current?.();
+      } else if (stepRes.stalled) {
+        autoWalkQueueRef.current = [];
+        onAutoWalkCancelRef.current?.();
+      }
     } else if (cameraMode !== 'focus' && moveTargetRef.current) {
-      const tx = moveTargetRef.current.x - p.x;
-      const tz = moveTargetRef.current.z - p.z;
-      const dist = Math.hypot(tx, tz);
-      if (dist < 0.35) {
+      const stepRes = stepSeamlessFreeMove(p, moveTargetRef.current, speed * dt, isWalkable);
+      if (stepRes.reached || stepRes.blocked) {
         moveTargetRef.current = null;
-      } else {
-        const step = Math.min(dist, speed * dt);
-        const nx = p.x + (tx / dist) * step;
-        const nz = p.z + (tz / dist) * step;
-        if (isWalkable(nx, nz)) {
-          p.x = nx;
-          p.z = nz;
-          p.rotationY = Math.atan2(tx, tz);
-          moved = true;
-        } else {
-          moveTargetRef.current = null;
+      } else if (stepRes.moved) {
+        p.x = stepRes.x;
+        p.z = stepRes.z;
+        if (Math.hypot(stepRes.moveX, stepRes.moveZ) > 1e-4) {
+          p.rotationY = Math.atan2(stepRes.moveX, stepRes.moveZ);
         }
+        moved = true;
       }
     }
 
@@ -682,9 +754,9 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
           smoothedLookAtRef.current.copy(initTp.lookAtTarget);
           hasInitializedCamRef.current = true;
         } else {
-          // Smoothly align yaw behind avatar during click-to-move auto-walk when not manually orbiting
+          // Smoothly align yaw behind avatar during click-to-move / H3 Auto-Walk when not manually orbiting
           if (
-            moveTargetRef.current &&
+            (moveTargetRef.current || autoWalkQueueRef.current.length > 0) &&
             moved &&
             !camOrbitRef.current.isDragging &&
             performance.now() - camOrbitRef.current.lastManualOrbitAt > 1600
@@ -826,6 +898,8 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
       lodCounts,
       walkableRegionCount: walkableRegions.length,
       player: { x: Math.round(p.x * 10) / 10, z: Math.round(p.z * 10) / 10 },
+      autoWalkActive: autoWalkQueueRef.current.length > 0,
+      autoWalkRemainingWaypoints: autoWalkQueueRef.current.length,
       cameraPos: {
         x: Math.round(camera.position.x * 10) / 10,
         y: Math.round(camera.position.y * 10) / 10,
@@ -859,8 +933,18 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
         onClick={(e) => {
           if (shouldSuppressInteractionClick()) return;
           e.stopPropagation();
-          if (cameraMode !== 'focus' && !isWalkable(e.point.x, e.point.z)) return;
-          onFloorClick(e.point.x, e.point.z);
+          if (cameraMode === 'focus') {
+            onFloorClick(e.point.x, e.point.z);
+            return;
+          }
+          const safe = clampPointToWalkable(
+            e.point.x,
+            e.point.z,
+            walkableRegions,
+            boothColliders,
+            playerPosRef.current
+          );
+          onFloorClick(safe.x, safe.z);
         }}
       >
         <planeGeometry args={[world.hallWidth, world.hallDepth]} />
@@ -903,6 +987,8 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
             booth={booth}
             lodTier={boothLodMap ? (boothLodMap[booth.boothId] ?? 0) : 0}
             isFocused={focusedBooth?.boothId === booth.boothId}
+            isVisited={Boolean(visitedBoothIds?.has(booth.boothId))}
+            isFavorite={Boolean(favoriteBoothIds?.has(booth.boothId))}
             highlightedSlotId={isBoothHighlighted ? highlightedProduct?.slotId : null}
             highlightedProductId={isBoothHighlighted ? highlightedProduct?.productId : null}
             onFocusBooth={(b) => {
@@ -913,6 +999,14 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
               if (shouldSuppressInteractionClick()) return;
               onSelectProduct(b, prod, sId);
             }}
+            onToggleFavorite={
+              onToggleFavoriteBooth
+                ? (b) => {
+                    if (shouldSuppressInteractionClick()) return;
+                    onToggleFavoriteBooth(b);
+                  }
+                : undefined
+            }
           />
         );
       })}
@@ -959,15 +1053,26 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
           );
         })}
 
-      {/* Phase 2.3: Intelligent 3D Walkway Guided Path & Arrival Beacon */}
-      <NavigationPath3D route={guidedRoute} />
+      {/* Phase 2.3 & H3: Intelligent 3D Walkway Guided Path & Arrival Beacon (supports Booth & Zone Auto-Walk) */}
+      <NavigationPath3D
+        route={
+          activeNavWaypoints && activeNavWaypoints.length >= 2
+            ? { waypoints: activeNavWaypoints }
+            : guidedRoute
+        }
+      />
 
-      {/* UAT Fix 01: Character-Anchored 3D World-Space Navigation Indicators (around avatar feet, hidden in Focus Mode) */}
+      {/* UAT Fix 01 & H3: Clickable Character-Anchored 3D World-Space Navigation Indicators */}
       <CharacterNavigationRing3D
         world={world}
         liveTransform={() => playerPosRef.current}
         visible={cameraMode !== 'focus'}
         guidedRoute={guidedRoute}
+        activeTargetBoothId={activeTargetBoothId}
+        activeTargetZoneId={activeTargetZoneId}
+        shouldSuppressClick={shouldSuppressInteractionClick}
+        onClickBoothIndicator={onClickBoothIndicator}
+        onClickZoneIndicator={onClickZoneIndicator}
       />
 
       {/* Optional Phase 3 Far Instanced Proxies & Parametric Roof */}

@@ -9,7 +9,7 @@ export type ResolvedActiveTtsProvider = 'local-korvatts' | 'browser-piper';
 export const PIPER_VOICE_DISPLAY_NAME = 'VAIS-1000 (Piper WASM)';
 export const PIPER_VOICE_ATTRIBUTION_NOTICE =
   'Mô hình giọng đọc vi_VN-vais1000-medium (VAIS-1000 Corpus · Rhasspy Piper Voices, giấy phép CC BY 4.0)';
-export const DEFAULT_PIPER_LENGTH_SCALE = 1.06;
+export const DEFAULT_PIPER_LENGTH_SCALE = 0.90;
 
 const MAX_WAV_CACHE_ENTRIES = 36;
 const MAX_WAV_CACHE_BYTES = 16 * 1024 * 1024; // 16 MB bounded RAM cache

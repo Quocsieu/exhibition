@@ -16,6 +16,26 @@ export interface GuidedRouteResult {
   waypoints: RoutePoint[];
   totalDistanceM: number;
   usesWalkwayGraph: boolean;
+  reachable?: boolean;
+}
+
+export interface GuidedZoneRouteResult {
+  targetZone: V28ZoneRecord;
+  destinationPoint: RoutePoint;
+  waypoints: RoutePoint[];
+  totalDistanceM: number;
+  usesWalkwayGraph: boolean;
+  reachable: boolean;
+}
+
+export interface AutoWalkStepResult {
+  x: number;
+  z: number;
+  rotationY: number;
+  moved: boolean;
+  remainingWaypoints: RoutePoint[];
+  completed: boolean;
+  stalled: boolean;
 }
 
 export interface DirectionIndicator {
@@ -58,26 +78,35 @@ export interface V28NavigationWorldInput {
   walkwayGraph?: V28WalkwayGraph;
 }
 
-export function computeGuidedRoute(
+export function computeWalkwayPathToPoint(
   world: V28NavigationWorldInput,
   fromPos: RoutePoint,
-  targetBooth: V28BoothPlacementView
-): GuidedRouteResult {
-  const dest: RoutePoint = {
-    x: targetBooth.approachPoint?.x ?? targetBooth.positionX,
-    z: targetBooth.approachPoint?.z ?? targetBooth.positionZ,
-  };
+  dest: RoutePoint
+): {
+  waypoints: RoutePoint[];
+  totalDistanceM: number;
+  usesWalkwayGraph: boolean;
+  reachable: boolean;
+} {
+  if (!Number.isFinite(dest.x) || !Number.isFinite(dest.z)) {
+    return {
+      waypoints: [],
+      totalDistanceM: 0,
+      usesWalkwayGraph: false,
+      reachable: false,
+    };
+  }
 
   const nodes = world.walkwayGraph?.nodes || [];
   const edges = world.walkwayGraph?.edges || [];
 
-  if (nodes.length === 0 || edges.length === 0) {
+  if (!world.walkwayGraph || nodes.length === 0) {
     const d = Math.hypot(dest.x - fromPos.x, dest.z - fromPos.z);
     return {
-      targetBooth,
       waypoints: [fromPos, dest],
       totalDistanceM: Math.round(d * 10) / 10,
       usesWalkwayGraph: false,
+      reachable: true,
     };
   }
 
@@ -95,6 +124,24 @@ export function computeGuidedRoute(
     const w = Math.hypot(nb.x - na.x, nb.z - na.z);
     adj.get(a)!.push({ to: b, w });
     adj.get(b)!.push({ to: a, w });
+  }
+
+  // H3 Optimization: If the graph has existing edges connecting a spine/avenue chain,
+  // also link consecutive collinear avenue/spawn spine nodes sorted by Z so spawn (+Z)
+  // enters the nearest south avenue node instead of detouring to the north end (-Z) and U-turning.
+  if (edges.length > 0) {
+    const spineNodes = nodes
+      .filter((n) => n.kind === 'avenue' || n.kind === 'spawn')
+      .sort((a, b) => a.z - b.z);
+    for (let i = 1; i < spineNodes.length; i += 1) {
+      const a = spineNodes[i - 1];
+      const b = spineNodes[i];
+      if (Math.abs(a.x - b.x) <= 2.0) {
+        const w = Math.hypot(b.x - a.x, b.z - a.z);
+        adj.get(a.id)!.push({ to: b.id, w });
+        adj.get(b.id)!.push({ to: a.id, w });
+      }
+    }
   }
 
   // Find nearest graph node to start and destination
@@ -145,16 +192,23 @@ export function computeGuidedRoute(
     }
   }
 
-  const graphPath: RoutePoint[] = [];
-  if (dist.get(endId) !== Infinity) {
-    let cur: string | null | undefined = endId;
-    while (cur) {
-      const node = nodeMap.get(cur);
-      if (node) graphPath.push({ x: node.x, z: node.z });
-      cur = prev.get(cur);
-    }
-    graphPath.reverse();
+  if (dist.get(endId) === Infinity) {
+    return {
+      waypoints: [],
+      totalDistanceM: 0,
+      usesWalkwayGraph: false,
+      reachable: false,
+    };
   }
+
+  const graphPath: RoutePoint[] = [];
+  let cur: string | null | undefined = endId;
+  while (cur) {
+    const node = nodeMap.get(cur);
+    if (node) graphPath.push({ x: node.x, z: node.z });
+    cur = prev.get(cur);
+  }
+  graphPath.reverse();
 
   const rawPoints: RoutePoint[] = [fromPos, ...graphPath, dest];
 
@@ -176,10 +230,204 @@ export function computeGuidedRoute(
   }
 
   return {
-    targetBooth,
     waypoints,
     totalDistanceM: Math.round(totalDistanceM * 10) / 10,
     usesWalkwayGraph: graphPath.length > 0,
+    reachable: true,
+  };
+}
+
+export function computeGuidedRoute(
+  world: V28NavigationWorldInput,
+  fromPos: RoutePoint,
+  targetBooth: V28BoothPlacementView
+): GuidedRouteResult {
+  const dest: RoutePoint = {
+    x: targetBooth.approachPoint?.x ?? targetBooth.positionX,
+    z: targetBooth.approachPoint?.z ?? targetBooth.positionZ,
+  };
+  const solved = computeWalkwayPathToPoint(world, fromPos, dest);
+  return {
+    targetBooth,
+    waypoints: solved.waypoints,
+    totalDistanceM: solved.totalDistanceM,
+    usesWalkwayGraph: solved.usesWalkwayGraph,
+    reachable: solved.reachable,
+  };
+}
+
+/**
+ * H3: Computes a collision-free Dijkstra route along `world.walkwayGraph` from `fromPos`
+ * to a valid walkable entrance point of `targetZone` (never inside a booth collider).
+ */
+export function computeGuidedZoneRoute(
+  world: V28NavigationWorldInput,
+  fromPos: RoutePoint,
+  targetZone: V28ZoneRecord
+): GuidedZoneRouteResult {
+  const bounds = targetZone.bounds;
+  const fallbackCenter: RoutePoint = bounds
+    ? { x: (bounds.minX + bounds.maxX) / 2, z: (bounds.minZ + bounds.maxZ) / 2 }
+    : { x: Number.NaN, z: Number.NaN };
+
+  let dest: RoutePoint = fallbackCenter;
+  const nodes = world.walkwayGraph?.nodes || [];
+
+  if (bounds && nodes.length > 0) {
+    // Prefer a walkway node inside the zone bounds closest to the visitor (zone entrance)
+    const insideNodes = nodes.filter((n) => isPointInRect(n.x, n.z, bounds));
+    if (insideNodes.length > 0) {
+      let best = insideNodes[0];
+      let bestD = Math.hypot(best.x - fromPos.x, best.z - fromPos.z);
+      for (const n of insideNodes) {
+        const d = Math.hypot(n.x - fromPos.x, n.z - fromPos.z);
+        if (d < bestD) {
+          bestD = d;
+          best = n;
+        }
+      }
+      dest = { x: best.x, z: best.z };
+    } else {
+      // Nearest walkway node to zone center
+      let best = nodes[0];
+      let bestD = Math.hypot(best.x - fallbackCenter.x, best.z - fallbackCenter.z);
+      for (const n of nodes) {
+        const d = Math.hypot(n.x - fallbackCenter.x, n.z - fallbackCenter.z);
+        if (d < bestD) {
+          bestD = d;
+          best = n;
+        }
+      }
+      dest = { x: best.x, z: best.z };
+    }
+  } else {
+    // Fallback to nearest booth approachPoint belonging to this zone
+    const zoneBooths = world.booths.filter(
+      (b) => (b.zoneId === targetZone.id || b.zoneCode === targetZone.code) && b.approachPoint
+    );
+    if (zoneBooths.length > 0) {
+      zoneBooths.sort(
+        (a, b) =>
+          Math.hypot(a.approachPoint.x - fromPos.x, a.approachPoint.z - fromPos.z) -
+          Math.hypot(b.approachPoint.x - fromPos.x, b.approachPoint.z - fromPos.z)
+      );
+      dest = { x: zoneBooths[0].approachPoint.x, z: zoneBooths[0].approachPoint.z };
+    }
+  }
+
+  const solved = computeWalkwayPathToPoint(world, fromPos, dest);
+  return {
+    targetZone,
+    destinationPoint: dest,
+    waypoints: solved.waypoints,
+    totalDistanceM: solved.totalDistanceM,
+    usesWalkwayGraph: solved.usesWalkwayGraph,
+    reachable: solved.reachable,
+  };
+}
+
+/**
+ * H3: Pure multi-waypoint Auto-Walk stepper used by `DynamicExhibitionScene.useFrame`.
+ * Steps smoothly along `waypoints` at `stepDistM` with collision-safe axis sliding;
+ * never teleports and never penetrates booth colliders.
+ */
+export function advanceAutoWalkWaypoints(
+  currentPos: { x: number; z: number; rotationY: number },
+  waypoints: readonly RoutePoint[],
+  stepDistM: number,
+  isWalkableFn: (x: number, z: number) => boolean,
+  arrivalThresholdM = 0.55
+): AutoWalkStepResult {
+  if (waypoints.length === 0) {
+    return {
+      x: currentPos.x,
+      z: currentPos.z,
+      rotationY: currentPos.rotationY,
+      moved: false,
+      remainingWaypoints: [],
+      completed: true,
+      stalled: false,
+    };
+  }
+
+  let idx = 0;
+  while (
+    idx < waypoints.length &&
+    Math.hypot(waypoints[idx].x - currentPos.x, waypoints[idx].z - currentPos.z) <= arrivalThresholdM
+  ) {
+    idx += 1;
+  }
+
+  if (idx >= waypoints.length) {
+    return {
+      x: currentPos.x,
+      z: currentPos.z,
+      rotationY: currentPos.rotationY,
+      moved: false,
+      remainingWaypoints: [],
+      completed: true,
+      stalled: false,
+    };
+  }
+
+  const target = waypoints[idx];
+  const dx = target.x - currentPos.x;
+  const dz = target.z - currentPos.z;
+  const dist = Math.hypot(dx, dz);
+  const step = Math.min(dist, Math.max(0.01, stepDistM));
+  const nx = currentPos.x + (dx / dist) * step;
+  const nz = currentPos.z + (dz / dist) * step;
+  const rotY = Math.atan2(dx, dz);
+
+  let nextX = currentPos.x;
+  let nextZ = currentPos.z;
+  let moved = false;
+
+  if (isWalkableFn(nx, nz)) {
+    nextX = nx;
+    nextZ = nz;
+    moved = true;
+  } else {
+    // Axis-aligned corner slide so avatar glides smoothly past booth corners
+    if (Math.abs(nx - currentPos.x) > 1e-4 && isWalkableFn(nx, currentPos.z)) {
+      nextX = nx;
+      moved = true;
+    }
+    if (Math.abs(nz - currentPos.z) > 1e-4 && isWalkableFn(nextX, nz)) {
+      nextZ = nz;
+      moved = true;
+    }
+  }
+
+  if (!moved) {
+    return {
+      x: currentPos.x,
+      z: currentPos.z,
+      rotationY: currentPos.rotationY,
+      moved: false,
+      remainingWaypoints: [],
+      completed: false,
+      stalled: true,
+    };
+  }
+
+  let nextIdx = idx;
+  while (
+    nextIdx < waypoints.length &&
+    Math.hypot(waypoints[nextIdx].x - nextX, waypoints[nextIdx].z - nextZ) <= arrivalThresholdM
+  ) {
+    nextIdx += 1;
+  }
+
+  const remaining = waypoints.slice(nextIdx);
+  return {
+    x: nextX,
+    z: nextZ,
+    rotationY: rotY,
+    moved: true,
+    remainingWaypoints: remaining,
+    completed: remaining.length === 0,
+    stalled: false,
   };
 }
 
@@ -431,37 +679,49 @@ export function formatZoneNavigationSubtitle(
   return stripped;
 }
 
+export const MAX_NAV_LABEL_RADIUS_M = 50;
+
 /**
- * Computes world-space character-anchored booth & zone directional indicators (UAT Fix 01).
+ * Computes world-space character-anchored booth & zone directional indicators (UAT Fix 01 + Phase 1 50m cap).
  * Directions strictly reflect true world-space bearings from avatar feet to destinations
- * (independent of camera rotation), with anti-overlap spacing and max-3 booth cap.
+ * (independent of camera rotation), capped strictly within `maxRadiusM` (default 50m).
  */
 export function computeWorldAnchoredIndicators(
   playerPos: RoutePoint,
   booths: readonly V28BoothPlacementView[],
   zones: readonly V28ZoneRecord[],
   maxBooths = 3,
-  maxZones = 3
+  maxZones = 3,
+  maxRadiusM = MAX_NAV_LABEL_RADIUS_M
 ): {
   booths: WorldAnchoredBoothIndicator[];
   zones: WorldAnchoredZoneIndicator[];
 } {
-  // 1. Select up to `maxBooths` nearest populated booths (fallback to nearest booths if none populated)
+  // 1. Select up to `maxBooths` nearest populated booths within 50m (fallback to nearest booths within 50m if none populated)
   const populated = booths.filter((b) => b.assignedSlotCount > 0);
-  const pool = populated.length > 0 ? populated : booths;
-  const sortedBooths = [...pool]
-    .map((b) => {
-      const tx = b.approachPoint?.x ?? b.positionX;
-      const tz = b.approachPoint?.z ?? b.positionZ;
-      const dx = tx - playerPos.x;
-      const dz = tz - playerPos.z;
-      return {
-        booth: b,
-        distanceM: Math.round(Math.hypot(dx, dz) * 10) / 10,
-        worldBearingRad: Math.atan2(dx, dz),
-      };
-    })
-    .filter((item) => item.distanceM >= 2.2) // don't point at booth already standing inside
+  const measureBooth = (b: V28BoothPlacementView) => {
+    const tx = b.approachPoint?.x ?? b.positionX;
+    const tz = b.approachPoint?.z ?? b.positionZ;
+    const dx = tx - playerPos.x;
+    const dz = tz - playerPos.z;
+    return {
+      booth: b,
+      distanceM: Math.round(Math.hypot(dx, dz) * 10) / 10,
+      worldBearingRad: Math.atan2(dx, dz),
+    };
+  };
+
+  const populatedInRange = populated
+    .map(measureBooth)
+    .filter((item) => item.distanceM >= 2.2 && item.distanceM <= maxRadiusM);
+  const poolMeasured =
+    populatedInRange.length > 0
+      ? populatedInRange
+      : booths
+          .map(measureBooth)
+          .filter((item) => item.distanceM >= 2.2 && item.distanceM <= maxRadiusM);
+
+  const sortedBooths = [...poolMeasured]
     .sort((a, b) => a.distanceM - b.distanceM)
     .slice(0, maxBooths);
 
@@ -483,7 +743,7 @@ export function computeWorldAnchoredIndicators(
     booth: item.booth,
   }));
 
-  // 2. Select up to `maxZones` nearest real zones outside current zone, avoiding overlap with booth labels
+  // 2. Select up to `maxZones` nearest real zones outside current zone within `maxRadiusM` (50m)
   const validZones = (zones || [])
     .filter((z) => z.bounds && !isPointInRect(playerPos.x, playerPos.z, z.bounds))
     .map((z) => {
@@ -491,12 +751,18 @@ export function computeWorldAnchoredIndicators(
       const cz = (z.bounds.minZ + z.bounds.maxZ) / 2;
       const dx = cx - playerPos.x;
       const dz = cz - playerPos.z;
+      // Measure distance to nearest edge of zone bounds so adjacent zones within 50m show cleanly
+      const clampedX = Math.max(z.bounds.minX, Math.min(z.bounds.maxX, playerPos.x));
+      const clampedZ = Math.max(z.bounds.minZ, Math.min(z.bounds.maxZ, playerPos.z));
+      const edgeDistM = Math.round(Math.hypot(clampedX - playerPos.x, clampedZ - playerPos.z));
       return {
         zone: z,
-        distanceM: Math.round(Math.hypot(dx, dz)),
+        distanceM: Math.max(1, edgeDistM),
+        centerDistM: Math.round(Math.hypot(dx, dz)),
         worldBearingRad: Math.atan2(dx, dz),
       };
     })
+    .filter((item) => item.distanceM <= maxRadiusM)
     .sort((a, b) => a.distanceM - b.distanceM)
     .slice(0, maxZones);
 

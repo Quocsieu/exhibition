@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  resolveV28ProductImageUrl,
   v28Api,
   type V28AiStatusResponse,
   type V28AudioClip,
@@ -66,8 +67,13 @@ export function setCachedLiveTtsConfigured(enabled: boolean): void {
  * for unauthenticated visitor GET requests even when `liveGeminiTtsEnabled` is true.
  * NEVER play `:local-fallback` chime WAVs as NPC speech; always route to Hybrid / Piper Vietnamese voice!
  */
-export function isRealBackendSpeechClip(clip: Pick<V28AudioClip, 'status' | 'modelId'> | null | undefined): boolean {
+export function isRealBackendSpeechClip(
+  clip: (Pick<V28AudioClip, 'status' | 'modelId'> & { needsUpdate?: boolean; provider?: string }) | null | undefined
+): boolean {
   if (!clip || clip.status !== 'ready') return false;
+  if (clip.needsUpdate) return false;
+  const provider = String(clip.provider || '').trim().toLowerCase();
+  if (provider === 'local-fallback') return false;
   const modelId = String(clip.modelId || '').trim().toLowerCase();
   if (!modelId || modelId.includes('local-fallback') || modelId.includes('fallback')) {
     return false;
@@ -973,7 +979,7 @@ export const V28NpcConsultantPanel: React.FC<V28NpcConsultantPanelProps> = ({
             <div className="npc-assistant-panel__product-card">
               {activeProduct.images?.[0] ? (
                 <img
-                  src={activeProduct.images[0]}
+                  src={resolveV28ProductImageUrl(activeProduct.images[0])}
                   alt={activeProduct.name}
                   className="npc-assistant-panel__product-img"
                   onError={(e) => {

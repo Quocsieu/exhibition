@@ -11,6 +11,25 @@ export const MOBILE_AVATAR_BUDGET = 15;
 export const MAX_MOVE_EVENTS_PER_SEC = 20;
 export const MAX_TELEPORTS_PER_SEC = 3;
 
+export const VISITOR_AVATAR_COLOR_PALETTE = [
+  '#0ea5e9', // Sky Blue
+  '#10b981', // Emerald
+  '#f59e0b', // Amber
+  '#8b5cf6', // Violet
+  '#ec4899', // Pink
+  '#ef4444', // Red
+  '#14b8a6', // Teal
+  '#6366f1', // Indigo
+  '#f97316', // Orange
+  '#84cc16', // Lime
+  '#06b6d4', // Cyan
+  '#d946ef', // Fuchsia
+  '#3b82f6', // Blue
+  '#eab308', // Yellow
+  '#f43f5e', // Rose
+  '#22c55e', // Green
+] as const;
+
 export interface InMemoryCollisionIndex {
   versionId: string;
   versionNumber: number;
@@ -282,7 +301,7 @@ export class V28SpatialAoiEngine {
       sessionId: v.sessionId,
       versionId: this.collisionIndex.versionId,
       serverTs: Date.now(),
-      self: { x: v.x, z: v.z, rotationY: v.rotationY },
+      self: { x: v.x, z: v.z, rotationY: v.rotationY, color: v.color },
       onlineCount: this.visitorsBySocket.size,
       nearbyCount: nearbyTotal,
       overflowCount,
@@ -290,12 +309,41 @@ export class V28SpatialAoiEngine {
     });
   }
 
+  private pickDistinctVisitorColor(requestedColor: string | null, isCustomColor: boolean): string {
+    if (isCustomColor && requestedColor) {
+      return requestedColor;
+    }
+
+    const usageCounts = new Map<string, number>();
+    for (const existing of this.visitorsBySocket.values()) {
+      const key = existing.color.toLowerCase();
+      usageCounts.set(key, (usageCounts.get(key) ?? 0) + 1);
+    }
+
+    if (requestedColor && (usageCounts.get(requestedColor.toLowerCase()) ?? 0) === 0) {
+      return requestedColor;
+    }
+
+    let minCount = Infinity;
+    for (const c of VISITOR_AVATAR_COLOR_PALETTE) {
+      const count = usageCounts.get(c.toLowerCase()) ?? 0;
+      if (count < minCount) minCount = count;
+    }
+
+    const candidates = VISITOR_AVATAR_COLOR_PALETTE.filter(
+      (c) => (usageCounts.get(c.toLowerCase()) ?? 0) === minCount
+    );
+    return candidates[crypto.randomInt(0, candidates.length)] ?? VISITOR_AVATAR_COLOR_PALETTE[0];
+  }
+
   private bindNamespaceEvents(): void {
     this.nsp.on('connection', (socket: Socket) => {
       const auth = (socket.handshake.auth || {}) as Record<string, unknown>;
       const rawName = typeof auth.name === 'string' && auth.name.trim() ? auth.name.trim().slice(0, 40) : 'Khách V28';
-      const rawColor =
-        typeof auth.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(auth.color) ? auth.color : '#0ea5e9';
+      const requestedColor =
+        typeof auth.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(auth.color) ? auth.color : null;
+      const colorCustomized = auth.colorCustomized === true;
+      const assignedColor = this.pickDistinctVisitorColor(requestedColor, colorCustomized);
       // Server-side render budget clamp: client-reported deviceTier can NEVER exceed MAX_SERVER_AVATAR_BUDGET
       const isMobileHint = auth.deviceTier === 'mobile';
       const renderBudget = isMobileHint ? MOBILE_AVATAR_BUDGET : MAX_SERVER_AVATAR_BUDGET;
@@ -314,7 +362,7 @@ export class V28SpatialAoiEngine {
         socketId: socket.id,
         visitorId: resolvedVisitorId,
         name: rawName,
-        color: rawColor,
+        color: assignedColor,
         x: spawn.x,
         z: spawn.z,
         rotationY: spawn.rotationY,

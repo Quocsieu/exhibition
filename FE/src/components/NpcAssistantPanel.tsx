@@ -7,6 +7,7 @@ import type {
   NpcSessionStatus,
 } from '../services/npcPresentationService';
 import { formatCurrency } from './ProductPanel';
+import { resolveV28ProductImageUrl } from '../services/v28Api';
 
 export interface NpcAssistantPanelProps {
   plan: NpcPresentationPlan | null;
@@ -272,7 +273,7 @@ export const NpcAssistantPanel: React.FC<NpcAssistantPanelProps> = React.memo(
           <div className="npc-assistant-panel__product-card">
             {activeProduct.images?.[0] ? (
               <img
-                src={activeProduct.images[0]}
+                src={resolveV28ProductImageUrl(activeProduct.images[0])}
                 alt={activeProduct.name}
                 className="npc-assistant-panel__product-img"
                 onError={(e) => {

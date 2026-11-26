@@ -886,7 +886,7 @@ export function generateDynamicExhibitionLayout(
     }
   }
 
-  // 4d. Inter-U-Zone Walkways between consecutive U-zones in the same column
+  // 4d. Inter-U-Zone Walkways between consecutive U-zones in the same column (overlapping cleanly with zone bounds)
   const addColInterWalkways = (colZones: GeneratedZoneSpec[]) => {
     const sorted = [...colZones].sort((a, b) => a.bounds.minZ - b.bounds.minZ);
     for (let i = 0; i < sorted.length - 1; i++) {
@@ -894,16 +894,19 @@ export function generateDynamicExhibitionLayout(
       const bot = sorted[i + 1];
       if (bot.bounds.minZ > top.bounds.maxZ) {
         walkableRegions.push({
-          minX: round2(Math.max(top.bounds.minX, bot.bounds.minX)),
-          maxX: round2(Math.min(top.bounds.maxX, bot.bounds.maxX)),
-          minZ: round2(top.bounds.maxZ - 0.5),
-          maxZ: round2(bot.bounds.minZ + 0.5),
+          minX: round2(Math.min(top.bounds.minX, bot.bounds.minX) - 1.5),
+          maxX: round2(Math.max(top.bounds.maxX, bot.bounds.maxX) + 1.5),
+          minZ: round2(top.bounds.maxZ - 1.5),
+          maxZ: round2(bot.bounds.minZ + 1.5),
         });
       }
     }
   };
   addColInterWalkways(zones.filter((z) => z.openingDirection === 'east'));
   addColInterWalkways(zones.filter((z) => z.openingDirection === 'west'));
+
+  // 4e. Continuous full-hall free-roam floor (enables seamless movement across the entire space & between all zones)
+  walkableRegions.push({ ...walkableBounds });
 
   const radius = round2(Math.hypot(halfHallWidth, halfHallDepth));
   const cameraOverviewBounds = {

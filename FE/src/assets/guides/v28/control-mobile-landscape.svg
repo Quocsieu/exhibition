@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 210" role="img" aria-label="Minh họa điều khiển điện thoại ngang: kéo nửa trái để di chuyển, vuốt nửa phải để xoay góc nhìn">
+  <rect width="420" height="210" rx="16" fill="#0f172a"/>
+  <rect x="1" y="1" width="418" height="208" rx="15" fill="none" stroke="#334155" stroke-width="1.5"/>
+
+  <!-- Phone Landscape Frame -->
+  <rect x="34" y="22" width="352" height="166" rx="22" fill="#1e293b" stroke="#64748b" stroke-width="2.5"/>
+  <rect x="44" y="85" width="5" height="40" rx="2.5" fill="#475569"/>
+
+  <!-- Left half: Movement Joystick Zone -->
+  <rect x="58" y="34" width="150" height="142" rx="10" fill="rgba(52,211,153,0.16)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <circle cx="133" cy="92" r="28" fill="rgba(15,23,42,0.55)" stroke="#34d399" stroke-width="2"/>
+  <circle cx="143" cy="84" r="11" fill="#34d399"/>
+  <text x="133" y="142" text-anchor="middle" fill="#d1fae5" font-family="system-ui, sans-serif" font-size="11.5" font-weight="700">KÉO NỬA TRÁI</text>
+  <text x="133" y="159" text-anchor="middle" fill="#6ee7b7" font-family="system-ui, sans-serif" font-size="10.5">Joystick 360° di chuyển</text>
+
+  <!-- Right half: Camera Rotate Zone -->
+  <rect x="218" y="34" width="156" height="142" rx="10" fill="rgba(56,189,248,0.16)" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <path d="M262 94 C280 74, 312 74, 330 94" fill="none" stroke="#38bdf8" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M323 86 l8 9 l-11 1" fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M269 86 l-8 9 l11 1" fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="296" y="142" text-anchor="middle" fill="#e0f2fe" font-family="system-ui, sans-serif" font-size="11.5" font-weight="700">VUỐT NỬA PHẢI</text>
+  <text x="296" y="159" text-anchor="middle" fill="#7dd3fc" font-family="system-ui, sans-serif" font-size="10.5">Xoay góc nhìn 3D</text>
+</svg>

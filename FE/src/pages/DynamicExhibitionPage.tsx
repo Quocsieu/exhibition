@@ -16,7 +16,7 @@ import {
   type V28PlayerState,
 } from '../scene/v28/DynamicExhibitionScene';
 import { DynamicWorldHud } from '../components/v28/DynamicWorldHud';
-import { setCachedLiveTtsConfigured } from '../components/v28/V28NpcConsultantPanel';
+import { setCachedLiveTtsConfigured } from '../services/npcAudioClipGuard';
 import {
   FloatingJoystickOverlay,
   type FloatingJoystickOverlayHandle,
@@ -35,14 +35,37 @@ import {
 import { ParametricExpoRoof } from '../scene/v28/ParametricExpoRoof';
 import { useV28SpatialRealtime } from '../hooks/useV28SpatialRealtime';
 import { piperBrowserTts, shouldAllowPiperBackgroundPrewarm } from '../services/hybridTtsAdapter';
-import { resolveNpcTtsMode } from '../services/npcTtsConfig';
+import {
+  resolveNpcTtsMode,
+  resolveNpcTtsProvider,
+  resolveSupertonicSpeed,
+  resolveSupertonicVoicePreset,
+} from '../services/npcTtsConfig';
 import { npcHybridTtsEngine, shouldAllowHybridPreload } from '../services/npcHybridTtsEngine';
-import { extractBoothConsultationChunks } from '../services/npcConsultationScript';
+import {
+  buildSupertonicStepChunks,
+  supertonicTtsAdapter,
+} from '../services/supertonicTtsAdapter';
+import {
+  buildBoothConsultationSteps,
+  extractBoothConsultationChunks,
+} from '../services/npcConsultationScript';
 import { findSimilarBooths } from '../services/similarBooths';
 import { applyAgriDemoShowcaseOverlay } from '../services/v28AgriDemoShowcase';
-import { computeGuidedRoute } from '../services/v28NavigationEngine';
+import {
+  computeGuidedRoute,
+  computeGuidedZoneRoute,
+  type RoutePoint,
+} from '../services/v28NavigationEngine';
+import type { V28ZoneRecord } from '../services/v28Api';
 import { useNpcConsultationSession } from '../hooks/useNpcConsultationSession';
 import type { V28NpcAnimState } from '../scene/v28/DynamicBoothNpc3D';
+import type { V28OnboardingGuideSignal } from '../services/v28OnboardingStateMachine';
+import {
+  loadFavoriteBoothIds,
+  saveFavoriteBoothIds,
+  toggleFavoriteBoothId,
+} from '../services/v28FavoriteBooths';
 
 export interface DynamicExhibitionPageProps {
   onOpenAdmin: () => void;
@@ -56,12 +79,21 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   const previousExteriorModeRef = useRef<'overview' | 'explore'>('explore');
   const [focusedBooth, setFocusedBooth] = useState<V28BoothPlacementView | null>(null);
   const [guidedTargetBooth, setGuidedTargetBooth] = useState<V28BoothPlacementView | null>(null);
+  const [guidedTargetZone, setGuidedTargetZone] = useState<V28ZoneRecord | null>(null);
+  const [autoWalkRequest, setAutoWalkRequest] = useState<{
+    nonce: number;
+    waypoints: RoutePoint[];
+  } | null>(null);
+  const [navNoticeToast, setNavNoticeToast] = useState<string | null>(null);
+  const navNoticeTimerRef = useRef<number | null>(null);
   const [cameraYaw, setCameraYaw] = useState<number>(Math.PI);
   const lastYawUpdateRef = useRef<number>(Math.PI);
   const [npcChatOpen, setNpcChatOpen] = useState<boolean>(false);
   const [chatAnimState, setChatAnimState] = useState<V28NpcAnimState>('idle');
   const [similarDismissed, setSimilarDismissed] = useState<boolean>(false);
   const [directoryOpenNonce, setDirectoryOpenNonce] = useState<number>(0);
+  const [onboardingGuideSignal, setOnboardingGuideSignal] = useState<V28OnboardingGuideSignal | null>(null);
+  const [replayOnboardingNonce, setReplayOnboardingNonce] = useState<number>(0);
 
   // Phase 1.1–1.4: Headless Web Audio API NPC consultation state machine (no blocking UI panel)
   const npcSession = useNpcConsultationSession();
@@ -83,17 +115,77 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     }
   }, []);
 
-  const handleStartGuideToBooth = useCallback(
+  const showNavNotice = useCallback((msg: string) => {
+    setNavNoticeToast(msg);
+    if (navNoticeTimerRef.current) window.clearTimeout(navNoticeTimerRef.current);
+    navNoticeTimerRef.current = window.setTimeout(() => {
+      setNavNoticeToast(null);
+      navNoticeTimerRef.current = null;
+    }, 3200);
+  }, []);
+
+  const [favoriteBoothIds, setFavoriteBoothIds] = useState<string[]>(() => loadFavoriteBoothIds());
+  const favoriteBoothIdSet = useMemo(() => new Set(favoriteBoothIds), [favoriteBoothIds]);
+
+  const handleToggleFavoriteBooth = useCallback(
     (booth: V28BoothPlacementView) => {
+      const boothNumber = Math.max(1, (Number.isFinite(booth.slotIndex) ? Math.floor(booth.slotIndex) : 0) + 1);
+      const label = (booth.companyName || booth.boothName || `Gian #${boothNumber}`).trim();
+      setFavoriteBoothIds((prev) => {
+        const { nextIds, isFavorite } = toggleFavoriteBoothId(prev, booth.boothId);
+        saveFavoriteBoothIds(nextIds);
+        showNavNotice(
+          isFavorite
+            ? `♥ Đã ghim Gian #${boothNumber} (${label}) vào danh sách yêu thích`
+            : `Đã bỏ ghim Gian #${boothNumber} (${label}) khỏi danh sách yêu thích`
+        );
+        return nextIds;
+      });
+    },
+    [showNavNotice]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (navNoticeTimerRef.current) window.clearTimeout(navNoticeTimerRef.current);
+    };
+  }, []);
+
+  const sendTeleportRef = useRef<((x: number, z: number, rotationY: number) => void) | null>(null);
+
+  // Phase 1: Instant Teleport for BOTH "Chỉ đường" buttons and 3D Booth/Zone navigation labels
+  const teleportExploreToPoint = useCallback(
+    (x: number, z: number, rotationY: number) => {
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return;
       npcSession.stopSession();
       setFocusedBooth(null);
       setSelectedProduct(null);
       setNpcChatOpen(false);
       setChatAnimState('idle');
-      setGuidedTargetBooth(booth);
+      setPlayerTarget(null);
+      setAutoWalkRequest(null);
+      setGuidedTargetBooth(null);
+      setGuidedTargetZone(null);
       setCameraMode('explore');
+      previousExteriorModeRef.current = 'explore';
+      setTeleportState((prev) => ({
+        nonce: prev.nonce + 1,
+        pos: { x, z, rotationY },
+      }));
+      setPlayerPos({ x, z, rotationY });
+      sendTeleportRef.current?.(x, z, rotationY);
     },
     [npcSession]
+  );
+
+  const handleStartGuideToBooth = useCallback(
+    (booth: V28BoothPlacementView) => {
+      const tx = booth.approachPoint?.x ?? booth.positionX;
+      const tz = booth.approachPoint?.z ?? booth.positionZ;
+      const lookRot = Math.atan2(booth.positionX - tx, booth.positionZ - tz);
+      teleportExploreToPoint(tx, tz, lookRot);
+    },
+    [teleportExploreToPoint]
   );
 
   // Reset similar-booths dismissal when switching booths or starting a new consultation
@@ -111,10 +203,28 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   });
   const [playerColor, setPlayerColor] = useState<string>(() => {
     const saved = sessionStorage.getItem('expo_visitor_color');
-    if (saved) return saved;
-    const defaultCol = '#0ea5e9';
-    sessionStorage.setItem('expo_visitor_color', defaultCol);
-    return defaultCol;
+    if (saved && /^#[0-9a-fA-F]{6}$/.test(saved)) return saved;
+    const palette = [
+      '#0ea5e9',
+      '#10b981',
+      '#f59e0b',
+      '#8b5cf6',
+      '#ec4899',
+      '#ef4444',
+      '#14b8a6',
+      '#6366f1',
+      '#f97316',
+      '#84cc16',
+      '#06b6d4',
+      '#d946ef',
+      '#3b82f6',
+      '#eab308',
+      '#f43f5e',
+      '#22c55e',
+    ];
+    const picked = palette[Math.floor(Math.random() * palette.length)] || '#0ea5e9';
+    sessionStorage.setItem('expo_visitor_color', picked);
+    return picked;
   });
   const [selectedProduct, setSelectedProduct] = useState<{
     booth: V28BoothPlacementView;
@@ -124,25 +234,78 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
   const [playerTarget, setPlayerTarget] = useState<{ x: number; z: number } | null>(null);
   const [teleportState, setTeleportState] = useState<{
     nonce: number;
-    pos: { x: number; z: number; rotationY: number } | null;
+    pos: { x: number; z: number; rotationY: number; alignCamera?: boolean } | null;
   }>({ nonce: 0, pos: null });
   const [playerPos, setPlayerPos] = useState<V28PlayerState>({ x: 0, z: 20, rotationY: Math.PI });
 
-  // Phase 2.3: Collision-free 3D guided route along world.walkwayGraph
+  // Phase 1: Clickable 3D Booth Label -> Instant Teleport directly to booth approachPoint (explore mode, no auto-NPC)
+  const handleAutoWalkToBooth = useCallback(
+    (booth: V28BoothPlacementView) => {
+      const tx = booth.approachPoint?.x ?? booth.positionX;
+      const tz = booth.approachPoint?.z ?? booth.positionZ;
+      if (!Number.isFinite(tx) || !Number.isFinite(tz)) {
+        showNavNotice(`Không xác định được vị trí tới ${booth.boothName}.`);
+        return;
+      }
+      const lookRot = Math.atan2(booth.positionX - tx, booth.positionZ - tz);
+      teleportExploreToPoint(tx, tz, lookRot);
+    },
+    [teleportExploreToPoint, showNavNotice]
+  );
+
+  // Phase 1: Clickable 3D Zone Label -> Instant Teleport directly to valid zone entrance (explore mode)
+  const handleAutoWalkToZone = useCallback(
+    (zoneId: string) => {
+      if (!world) return;
+      const zone = world.zones.find((z) => z.id === zoneId);
+      if (!zone) return;
+      const route = computeGuidedZoneRoute(world, playerPos, zone);
+      const dest = route.destinationPoint;
+      if (!Number.isFinite(dest.x) || !Number.isFinite(dest.z)) {
+        showNavNotice(`Không xác định được lối vào Khu ${zone.code}.`);
+        return;
+      }
+      const zcx = zone.bounds ? (zone.bounds.minX + zone.bounds.maxX) / 2 : dest.x;
+      const zcz = zone.bounds ? (zone.bounds.minZ + zone.bounds.maxZ) / 2 : dest.z;
+      const lookRot = Math.hypot(zcx - dest.x, zcz - dest.z) > 0.2 ? Math.atan2(zcx - dest.x, zcz - dest.z) : Math.PI;
+      teleportExploreToPoint(dest.x, dest.z, lookRot);
+    },
+    [world, playerPos, teleportExploreToPoint, showNavNotice]
+  );
+
+  const handleClearAutoWalkAndGuide = useCallback(() => {
+    setAutoWalkRequest(null);
+    setGuidedTargetBooth(null);
+    setGuidedTargetZone(null);
+  }, []);
+
+  // Phase 2.3 & H3: Collision-free 3D guided route along world.walkwayGraph (Booth or Zone)
   const guidedRoute = useMemo(() => {
     if (!world || !guidedTargetBooth) return null;
     return computeGuidedRoute(world, playerPos, guidedTargetBooth);
   }, [world, guidedTargetBooth, playerPos]);
 
-  // Auto-complete guided route when visitor reaches within 4.0m of target booth approachPoint
+  const guidedZoneRoute = useMemo(() => {
+    if (!world || !guidedTargetZone) return null;
+    return computeGuidedZoneRoute(world, playerPos, guidedTargetZone);
+  }, [world, guidedTargetZone, playerPos]);
+
+  const activeNavWaypoints = useMemo<RoutePoint[] | null>(() => {
+    if (guidedRoute && guidedRoute.waypoints.length >= 2) return guidedRoute.waypoints;
+    if (guidedZoneRoute && guidedZoneRoute.waypoints.length >= 2) return guidedZoneRoute.waypoints;
+    if (autoWalkRequest && autoWalkRequest.waypoints.length >= 2) return autoWalkRequest.waypoints;
+    return null;
+  }, [guidedRoute, guidedZoneRoute, autoWalkRequest]);
+
+  // Auto-complete manual guided route when visitor walks manually within 4.0m of target booth approachPoint
   useEffect(() => {
-    if (!guidedTargetBooth) return;
+    if (!guidedTargetBooth || autoWalkRequest) return;
     const tx = guidedTargetBooth.approachPoint?.x ?? guidedTargetBooth.positionX;
     const tz = guidedTargetBooth.approachPoint?.z ?? guidedTargetBooth.positionZ;
     if (Math.hypot(playerPos.x - tx, playerPos.z - tz) <= 4.0) {
       setGuidedTargetBooth(null);
     }
-  }, [guidedTargetBooth, playerPos.x, playerPos.z]);
+  }, [guidedTargetBooth, autoWalkRequest, playerPos.x, playerPos.z]);
   const joystickVecRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const floatingJoystickRef = useRef<FloatingJoystickOverlayHandle | null>(null);
   const [zoomRequest, setZoomRequest] = useState<{ delta: number; nonce: number }>({ delta: 0, nonce: 0 });
@@ -342,20 +505,42 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     };
   }, [loading, world]);
 
-  // 2) When visitor focuses a booth, selectively preload that booth's pre-generated chunks (max concurrency 2,
-  //    cancellable on booth switch, 0 MB ONNX, 0 auto-play) so full consultation plays seamlessly without gaps!
+  // 2) When visitor focuses a booth, selectively preload that booth's opening consultation audio (cancellable on booth switch, 0 auto-play):
+  //    - Supertonic 3 active: pre-synthesizes the opening Greeting chunks so clicking "Nghe tư vấn" / NPC starts with 0ms wait!
+  //    - Hybrid mode: preloads manifest-verified WAV chunks.
   useEffect(() => {
     if (!focusedBooth || cameraMode !== 'focus') return;
-    if (resolveNpcTtsMode() !== 'hybrid') return;
     if (!shouldAllowHybridPreload().allowed) return;
 
     const controller = new AbortController();
-    const chunks = extractBoothConsultationChunks(focusedBooth);
-    void npcHybridTtsEngine.preloadChunks(chunks, {
-      signal: controller.signal,
-      maxConcurrency: 2,
-      maxChunks: 40,
-    });
+    if (resolveNpcTtsProvider() === 'supertonic' && !supertonicTtsAdapter.isCircuitOpen()) {
+      const steps = buildBoothConsultationSteps(focusedBooth);
+      const openingSteps = steps.slice(0, 2); // Greeting + Product #1 opening
+      const voicePreset = resolveSupertonicVoicePreset();
+      const speed = resolveSupertonicSpeed();
+      const openingChunks = openingSteps
+        .flatMap((st) => buildSupertonicStepChunks(st.naturalSpeechText || st.fallbackText))
+        .slice(0, 3);
+      void (async () => {
+        for (const ch of openingChunks) {
+          if (controller.signal.aborted || supertonicTtsAdapter.isCircuitOpen()) break;
+          await supertonicTtsAdapter
+            .trySynthesizeChunk(ch, {
+              voicePreset,
+              speed,
+              signal: controller.signal,
+            })
+            .catch(() => null);
+        }
+      })();
+    } else if (resolveNpcTtsMode() === 'hybrid') {
+      const chunks = extractBoothConsultationChunks(focusedBooth);
+      void npcHybridTtsEngine.preloadChunks(chunks, {
+        signal: controller.signal,
+        maxConcurrency: 2,
+        maxChunks: 40,
+      });
+    }
 
     return () => {
       controller.abort();
@@ -516,7 +701,12 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         void loadActiveWorld(true);
         void refreshRewardStatusOnly();
       },
+      onAssignedColor: (assignedColor) => {
+        setPlayerColor(assignedColor);
+        sessionStorage.setItem('expo_visitor_color', assignedColor);
+      },
     });
+  sendTeleportRef.current = sendTeleport;
 
   // Phase 4 Security Hardening: Bind authenticated visitorToken to `/v28-dynamic` socket once journey session is ready
   useEffect(() => {
@@ -631,9 +821,32 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
       setPlayerColor(nextColor);
       sessionStorage.setItem('expo_visitor_name', cleaned);
       sessionStorage.setItem('expo_visitor_color', nextColor);
+      sessionStorage.setItem('expo_visitor_color_custom', '1');
       sendProfile(cleaned, nextColor);
     },
     [sendProfile]
+  );
+
+  const moveAvatarToBoothIfFar = useCallback(
+    (booth: V28BoothPlacementView) => {
+      const tx = booth.approachPoint?.x ?? booth.positionX;
+      const tz = booth.approachPoint?.z ?? booth.positionZ;
+      if (!Number.isFinite(tx) || !Number.isFinite(tz)) return;
+      const dist = Math.hypot(playerPos.x - tx, playerPos.z - tz);
+      if (dist <= 2.2) return;
+      const lookRot = Math.atan2(booth.positionX - tx, booth.positionZ - tz);
+      setAutoWalkRequest(null);
+      setGuidedTargetBooth(null);
+      setGuidedTargetZone(null);
+      setPlayerTarget(null);
+      setTeleportState((prev) => ({
+        nonce: prev.nonce + 1,
+        pos: { x: tx, z: tz, rotationY: lookRot, alignCamera: true },
+      }));
+      setPlayerPos({ x: tx, z: tz, rotationY: lookRot });
+      sendTeleport(tx, tz, lookRot);
+    },
+    [playerPos.x, playerPos.z, sendTeleport]
   );
 
   const handleTeleportToBooth = useCallback((booth: V28BoothPlacementView) => {
@@ -647,9 +860,13 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
       booth.positionX - booth.approachPoint.x,
       booth.positionZ - booth.approachPoint.z
     );
+    setAutoWalkRequest(null);
+    setGuidedTargetBooth(null);
+    setGuidedTargetZone(null);
+    setPlayerTarget(null);
     setTeleportState((prev) => ({
       nonce: prev.nonce + 1,
-      pos: { x: booth.approachPoint.x, z: booth.approachPoint.z, rotationY: lookRot },
+      pos: { x: booth.approachPoint.x, z: booth.approachPoint.z, rotationY: lookRot, alignCamera: true },
     }));
     setPlayerPos({ x: booth.approachPoint.x, z: booth.approachPoint.z, rotationY: lookRot });
     sendTeleport(booth.approachPoint.x, booth.approachPoint.z, lookRot);
@@ -666,24 +883,35 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     if (npcSession.activeBoothId && npcSession.activeBoothId !== booth.boothId) {
       npcSession.stopSession();
     }
+    moveAvatarToBoothIfFar(booth);
     setFocusedBooth(booth);
     setSelectedProduct(null);
     setNpcChatOpen(false);
     setCameraMode('focus');
-  }, [cameraMode, npcSession]);
+  }, [cameraMode, npcSession, moveAvatarToBoothIfFar]);
 
   const handleSelectProduct = useCallback(
     (booth: V28BoothPlacementView, product: V28Product, slotId: string) => {
       if (cameraMode === 'overview' || cameraMode === 'explore') {
         previousExteriorModeRef.current = cameraMode;
       }
+      moveAvatarToBoothIfFar(booth);
       setFocusedBooth(booth);
       setSelectedProduct({ booth, product, slotId });
       setNpcChatOpen(false);
+      setChatAnimState('idle');
       setCameraMode('focus');
+      npcSession.startProductConsultation(booth, product, slotId);
     },
-    [cameraMode]
+    [cameraMode, npcSession, moveAvatarToBoothIfFar]
   );
+
+  const handleCloseProduct = useCallback(() => {
+    if (npcSession.consultationMode === 'product') {
+      npcSession.stopSession();
+    }
+    setSelectedProduct(null);
+  }, [npcSession]);
 
   const handleExitBoothFocus = useCallback((forceExplore = false) => {
     npcSession.stopSession();
@@ -708,7 +936,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         }
         if (selectedProduct) {
           e.preventDefault();
-          setSelectedProduct(null);
+          handleCloseProduct();
           return;
         }
         if (cameraMode === 'focus' || focusedBooth) {
@@ -734,7 +962,43 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [cameraMode, focusedBooth, selectedProduct, npcChatOpen, handleExitBoothFocus]);
+  }, [cameraMode, focusedBooth, selectedProduct, npcChatOpen, handleCloseProduct, handleExitBoothFocus]);
+
+  const handleReturnToMainAvenue = useCallback(() => {
+    if (!world) return;
+    npcSession.stopSession();
+    setFocusedBooth(null);
+    setSelectedProduct(null);
+    setNpcChatOpen(false);
+    setChatAnimState('idle');
+    setAutoWalkRequest(null);
+    setGuidedTargetBooth(null);
+    setGuidedTargetZone(null);
+    setPlayerTarget(null);
+    setCameraMode('explore');
+    previousExteriorModeRef.current = 'explore';
+
+    const ave = world.centralAvenueBounds;
+    const centerX = ave ? (ave.minX + ave.maxX) / 2 : world.spawnPoint.x;
+    const minSafeZ = ave ? ave.minZ + 1.5 : world.spawnPoint.z;
+    const maxSafeZ = ave ? Math.min(ave.maxZ - 2.5, world.spawnPoint.z) : world.spawnPoint.z;
+    const targetZ =
+      minSafeZ <= maxSafeZ
+        ? Math.max(minSafeZ, Math.min(maxSafeZ, playerPos.z))
+        : world.spawnPoint.z;
+    const targetRotY = world.spawnPoint.rotationY;
+
+    setTeleportState((prev) => ({
+      nonce: prev.nonce + 1,
+      pos: {
+        x: centerX,
+        z: targetZ,
+        rotationY: targetRotY,
+        alignCamera: true,
+      },
+    }));
+    sendTeleport(centerX, targetZ, targetRotY);
+  }, [world, playerPos.z, sendTeleport, npcSession]);
 
   const handleReturnToCenter = useCallback(() => {
     if (!world) return;
@@ -743,6 +1007,9 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     setSelectedProduct(null);
     setNpcChatOpen(false);
     setChatAnimState('idle');
+    setAutoWalkRequest(null);
+    setGuidedTargetBooth(null);
+    setGuidedTargetZone(null);
     setPlayerTarget(null);
     setCameraMode('explore');
     previousExteriorModeRef.current = 'explore';
@@ -752,6 +1019,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         x: world.spawnPoint.x,
         z: world.spawnPoint.z,
         rotationY: world.spawnPoint.rotationY,
+        alignCamera: true,
       },
     }));
     sendTeleport(world.spawnPoint.x, world.spawnPoint.z, world.spawnPoint.rotationY);
@@ -763,6 +1031,9 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
       return;
     }
     npcSession.stopSession();
+    setAutoWalkRequest(null);
+    setGuidedTargetBooth(null);
+    setGuidedTargetZone(null);
     setPlayerTarget({ x, z });
     setFocusedBooth(null);
     setSelectedProduct(null);
@@ -834,6 +1105,9 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         cameraMode={cameraMode}
         focusedBooth={focusedBooth}
         playerTarget={playerTarget}
+        autoWalkRequest={autoWalkRequest}
+        activeTargetBoothId={guidedTargetBooth?.boothId ?? null}
+        activeTargetZoneId={guidedTargetZone?.id ?? null}
         teleportNonce={teleportState.nonce}
         teleportPos={teleportState.pos}
         joystickVector={{ x: 0, y: 0 }}
@@ -850,6 +1124,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         activeNpcBoothId={npcSession.activeBoothId}
         highlightedProduct={npcSession.highlightedProduct}
         guidedRoute={guidedRoute}
+        activeNavWaypoints={activeNavWaypoints}
         onCameraYawChange={handleCameraYawChange}
         playerName={playerName}
         playerColor={playerColor}
@@ -858,12 +1133,20 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
           sendMove(pos.x, pos.z, pos.rotationY);
         }}
         onFloorClick={handleFloorClick}
+        onClickBoothIndicator={handleAutoWalkToBooth}
+        onClickZoneIndicator={handleAutoWalkToZone}
+        onAutoWalkComplete={handleClearAutoWalkAndGuide}
+        onAutoWalkCancel={handleClearAutoWalkAndGuide}
         onFocusBooth={handleFocusBooth}
         onSelectProduct={handleSelectProduct}
+        visitedBoothIds={visitedBoothIds}
+        favoriteBoothIds={favoriteBoothIdSet}
+        onToggleFavoriteBooth={handleToggleFavoriteBooth}
         onClickNpc={(booth) => {
           if (cameraMode === 'overview' || cameraMode === 'explore') {
             previousExteriorModeRef.current = cameraMode;
           }
+          moveAvatarToBoothIfFar(booth);
           setFocusedBooth(booth);
           setSelectedProduct(null);
           setNpcChatOpen(false);
@@ -871,6 +1154,8 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
           npcSession.handleNpcClick(booth);
         }}
         onOpenDirectoryMap={() => setDirectoryOpenNonce((n) => n + 1)}
+        onboardingGuideSignal={onboardingGuideSignal}
+        onClickWelcomeGuide={() => setReplayOnboardingNonce((n) => n + 1)}
         onFloatingJoystickVisual={(visual) => {
           floatingJoystickRef.current?.update(visual);
         }}
@@ -890,9 +1175,12 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         isMobileLandscape={viewport.isMobileLandscape}
         graphicsQuality={graphicsQuality}
         onChangeGraphicsQuality={handleChangeGraphicsQuality}
+        onReturnToMainAvenue={handleReturnToMainAvenue}
         onReturnToCenter={handleReturnToCenter}
         playerPos={playerPos}
         visitedBoothIds={visitedBoothIds}
+        favoriteBoothIds={favoriteBoothIdSet}
+        onToggleFavoriteBooth={handleToggleFavoriteBooth}
         journeyStatus={journeyStatus}
         rewardStatus={rewardStatus}
         onRewardStatusUpdated={setRewardStatus}
@@ -901,19 +1189,27 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         npcPanelOpen={false}
         npcChatOpen={npcChatOpen}
         npcIsMuted={npcSession.isMuted}
+        npcSessionState={npcSession.sessionState}
+        npcSubtitle={npcSession.currentSubtitle}
         similarBooths={similarBooths}
         showSimilarBooths={
           cameraMode === 'focus' &&
           Boolean(focusedBooth) &&
+          npcSession.consultationMode === 'booth' &&
           npcSession.sessionState === 'COMPLETED' &&
           npcSession.activeBoothId === focusedBooth?.boothId &&
           !similarDismissed
         }
         guidedRoute={guidedRoute}
+        activeNavWaypoints={activeNavWaypoints}
+        navNoticeToast={navNoticeToast}
         cameraYaw={cameraYaw}
         onStartGuideToBooth={handleStartGuideToBooth}
-        onCancelGuide={() => setGuidedTargetBooth(null)}
+        onCancelGuide={handleClearAutoWalkAndGuide}
         directoryOpenNonce={directoryOpenNonce}
+        replayOnboardingNonce={replayOnboardingNonce}
+        isNpcConsultActive={isNpcConsultActive}
+        onOnboardingSignalChange={setOnboardingGuideSignal}
         playerName={playerName}
         playerColor={playerColor}
         onUpdateVisitorProfile={handleUpdateVisitorProfile}
@@ -934,7 +1230,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         }}
         onTeleportToBooth={handleTeleportToBooth}
         onSelectProduct={handleSelectProduct}
-        onCloseProduct={() => setSelectedProduct(null)}
+        onCloseProduct={handleCloseProduct}
         onCloseFocus={() => handleExitBoothFocus(false)}
         onOpenNpcPanel={() => {
           if (focusedBooth) {
@@ -947,7 +1243,6 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         }}
         onOpenNpcChat={() => {
           npcSession.pauseSession();
-          setSelectedProduct(null);
           setNpcChatOpen(true);
         }}
         onCloseNpcChat={() => {
@@ -955,6 +1250,16 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
           setChatAnimState('idle');
         }}
         onToggleNpcMute={npcSession.toggleMute}
+        onReplayProductConsultation={() => {
+          if (selectedProduct) {
+            npcSession.startProductConsultation(
+              selectedProduct.booth,
+              selectedProduct.product,
+              selectedProduct.slotId,
+              { forceReplay: true }
+            );
+          }
+        }}
         onDismissSimilarBooths={() => setSimilarDismissed(true)}
         onNpcAnimStateChange={setChatAnimState}
         onJoystickChange={(vec) => {

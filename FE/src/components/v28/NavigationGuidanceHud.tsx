@@ -5,6 +5,7 @@ import type {
   GuidedRouteResult,
   ZoneGuidanceState,
 } from '../../services/v28NavigationEngine';
+import { V28SvgIcon } from './V28SvgIcon';
 
 export interface NavigationGuidanceHudProps {
   isMobileUi: boolean;
@@ -45,16 +46,16 @@ export const NavigationGuidanceHud: React.FC<NavigationGuidanceHudProps> = ({
       style={{
         pointerEvents: 'none',
         position: 'fixed',
-        top: isMobileUi ? 70 : 80,
-        left: '50%',
-        transform: 'translateX(-50%)',
+        top: isMobileUi ? 10 : 14,
+        left: isMobileUi ? 10 : '50%',
+        transform: isMobileUi ? 'none' : 'translateX(-50%)',
         zIndex: 23,
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
+        alignItems: isMobileUi ? 'flex-start' : 'center',
         gap: 6,
-        width: isMobileUi ? 'calc(100vw - 16px)' : 'auto',
-        maxWidth: isMobileUi ? 390 : 620,
+        width: isMobileUi ? 'calc(100vw - 180px)' : 'auto',
+        maxWidth: isMobileUi ? 320 : 540,
       }}
     >
       {/* Active Guided Route Banner */}
@@ -98,8 +99,9 @@ export const NavigationGuidanceHud: React.FC<NavigationGuidanceHudProps> = ({
             ↑
           </span>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              🧭 Dẫn đường: {activeRouteIndicator.boothLabel} · {activeRouteIndicator.boothName}
+            <div style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <V28SvgIcon name="compass" size={14} style={{ color: '#38bdf8' }} />
+              <span>Dẫn đường: {activeRouteIndicator.boothLabel} · {activeRouteIndicator.boothName}</span>
             </div>
             <div style={{ fontSize: 11, color: '#bae6fd' }}>
               Còn {Math.round(guidedRoute.totalDistanceM)}m · Đi theo mũi tên xanh trên sàn

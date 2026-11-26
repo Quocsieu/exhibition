@@ -30,8 +30,8 @@ describe('V28 Product Display Slot Alignment across all 6 Archetypes & Scale 1.2
       for (const s of specs) {
         const [x, y, z] = s.position;
         expect(Math.abs(x)).toBeLessThanOrEqual(2.8);
-        expect(y).toBeGreaterThanOrEqual(0.75); // Never sinking into floor (y = 0)
-        expect(y).toBeLessThanOrEqual(1.65); // Never floating into signage/roof
+        expect(y).toBeGreaterThanOrEqual(0.45); // Never sinking into floor (includes low coffee tables at y = 0.47)
+        expect(y).toBeLessThanOrEqual(2.45); // Never floating into signage/roof (includes top floating shelf at y = 2.423)
         expect(z).toBeGreaterThanOrEqual(-1.95);
         expect(z).toBeLessThanOrEqual(1.2);
         expect(s.scale).toBeGreaterThanOrEqual(0.5);
@@ -115,5 +115,17 @@ describe('V28 Product Display Slot Alignment across all 6 Archetypes & Scale 1.2
     expect(s2a.slotId).toBe('slot_02');
     expect(s5.slotId).toBe('slot_05');
     expect(s2a.position).not.toEqual(s5.position);
+  });
+
+  it('keeps readable, bounded stand scales (<= 0.80) across all 6 archetypes', () => {
+    for (const archetypeId of ALL_ARCHETYPES) {
+      const specs = V28_ARCHETYPE_SLOT_LAYOUTS[archetypeId];
+      for (const spec of specs) {
+        expect(spec.scale).toBeLessThanOrEqual(0.80);
+        if (spec.position[2] > 0) {
+          expect(spec.scale).toBeLessThanOrEqual(0.78);
+        }
+      }
+    }
   });
 });

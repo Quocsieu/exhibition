@@ -26,6 +26,14 @@ export interface V28BoothSummary {
   status: 'active' | 'archived';
 }
 
+export type V28ProductPriceStatus = 'listed' | 'contact' | 'unknown';
+export type V28WebsiteDiscoveryStatus =
+  | 'DISCOVERY_COMPLETE'
+  | 'PARTIAL'
+  | 'BLOCKED'
+  | 'FAILED'
+  | 'EMPTY';
+
 export interface V28Product {
   id: string;
   companyId: string;
@@ -33,7 +41,11 @@ export interface V28Product {
   name: string;
   sku: string;
   price: number;
+  priceAmount?: number | null;
+  priceStatus?: V28ProductPriceStatus;
+  priceDisplay?: string;
   currency: string;
+  category?: string;
   description: string;
   images: string[];
   videoUrl: string;
@@ -44,6 +56,121 @@ export interface V28Product {
   status: 'active' | 'inactive';
   createdAt: string;
   updatedAt: string;
+}
+
+export function resolveV28ProductImageUrl(rawUrl?: string | null): string {
+  const trimmed = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+  if (!trimmed) return '';
+  if (trimmed.startsWith('/api/') && API_BASE_URL) {
+    return `${API_BASE_URL}${trimmed}`;
+  }
+  return trimmed;
+}
+
+export function formatV28ProductPrice(item: {
+  price?: number | null;
+  priceAmount?: number | null;
+  priceStatus?: V28ProductPriceStatus;
+  priceDisplay?: string;
+  currency?: string;
+}): string {
+  if (
+    item.priceStatus === 'contact' ||
+    item.priceStatus === 'unknown' ||
+    item.price === null ||
+    item.priceAmount === null
+  ) {
+    return 'Liên hệ';
+  }
+  const num =
+    typeof item.priceAmount === 'number'
+      ? item.priceAmount
+      : typeof item.price === 'number'
+        ? item.price
+        : NaN;
+  if (!Number.isFinite(num) || num <= 0) {
+    return 'Liên hệ';
+  }
+  const curr = (item.currency || 'VND').trim().toUpperCase() || 'VND';
+  try {
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: curr,
+      maximumFractionDigits: curr === 'VND' ? 0 : 2,
+    }).format(num);
+  } catch {
+    return `${num.toLocaleString('vi-VN')} ${curr}`;
+  }
+}
+
+export interface V28WebsiteDiscoveryStats {
+  pagesScanned: number;
+  categoryUrlsDiscovered: number;
+  paginationUrlsDiscovered: number;
+  productUrlsDiscovered: number;
+  extractedValidCount: number;
+  failedExtractionCount: number;
+  uniqueProductCount: number;
+  duplicatesSkipped: number;
+  missingImageCount: number;
+  contactPriceCount: number;
+  listedPriceCount: number;
+  pendingPagesCount: number;
+  limitOrErrorReason: string | null;
+}
+
+export interface V28WebsiteCheckpointInfo {
+  hasMore: boolean;
+  checkpointToken: string | null;
+  batchIndex: number;
+  pendingPagesCount: number;
+  expiresAt: string | null;
+}
+
+export interface V28CompanyMismatchWarning {
+  code: 'COMPANY_DOMAIN_MISMATCH';
+  detectedDomain: string;
+  detectedSellerName: string | null;
+  boundCompanyId: string;
+  boundCompanyName: string;
+  message: string;
+}
+
+export interface V28DiscoveredWebsiteProduct {
+  name: string;
+  brand?: string;
+  sku: string;
+  price: number | null;
+  priceStatus?: V28ProductPriceStatus;
+  priceDisplay?: string;
+  currency: string;
+  description: string;
+  images: string[];
+  videoUrl?: string;
+  modelUrl?: string;
+  category?: string;
+  categorySource?: 'product_page' | 'breadcrumb' | 'listing_section' | 'json_ld' | 'keyword' | 'unknown';
+  categoryConfidence?: 'high' | 'medium' | 'low';
+  sourceUrl: string;
+  inStock: boolean;
+  alreadyInCatalog: boolean;
+}
+
+export interface V28DiscoveredCategorySummary {
+  key: string;
+  name: string;
+  productCount: number;
+  sources: Array<'product_page' | 'breadcrumb' | 'listing_section' | 'json_ld' | 'keyword' | 'unknown'>;
+  confidence: 'high' | 'medium' | 'low';
+  suggestedBoothCount: number;
+  suggestedZoneName: string;
+}
+
+export interface V28ZonePlanItem {
+  displayName: string;
+  categories: string[];
+  boothCount: number;
+  isManualName?: boolean;
 }
 
 export interface ExcelRowValidationItem {
@@ -117,7 +244,77 @@ async function v28Request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+export interface V28OwnerCompanyState {
+  state: 'empty' | 'bound' | 'selection_required';
+  exhibitionId: string | null;
+  exhibitionName: string | null;
+  company: (V28Company & { boothCount: number; productCount: number }) | null;
+  currentPublishedOwnerId: string | null;
+  candidateCompanies: Array<V28Company & { boothCount: number; productCount: number }>;
+}
+
 export const v28Api = {
+  // Single-Company Exhibition Owner Management (with graceful fallback for older deployed BE without /api/v28/company)
+  getOwnerCompany: async (exhibitionId?: string): Promise<V28OwnerCompanyState> => {
+    const qs = exhibitionId ? `?exhibitionId=${encodeURIComponent(exhibitionId)}` : '';
+    try {
+      return await v28Request<V28OwnerCompanyState>(`/company${qs}`);
+    } catch (err) {
+      const msg = (err as Error)?.message || '';
+      if (!msg.includes('404')) throw err;
+      const [compRes, activeRes] = await Promise.all([
+        v28Request<{ companies: Array<V28Company & { boothCount?: number; productCount?: number }> }>('/companies'),
+        v28Request<{ world: V28ExhibitionVersionDetail }>('/exhibitions/active').catch(() => null),
+      ]);
+      const activeCompanies = (compRes.companies || []).filter((c) => c.status === 'active');
+      const world = activeRes?.world || null;
+      const ownerId =
+        world?.ownerCompanyId ||
+        world?.booths?.find((b) => b.companyId)?.companyId ||
+        activeCompanies[0]?.id ||
+        null;
+      const matched = activeCompanies.find((c) => c.id === ownerId) || activeCompanies[0] || null;
+      return {
+        state: matched ? 'bound' : 'empty',
+        exhibitionId: world?.exhibitionId || exhibitionId || null,
+        exhibitionName: world?.exhibitionName || null,
+        company: matched ? { ...matched, boothCount: matched.boothCount ?? 0, productCount: matched.productCount ?? 0 } : null,
+        currentPublishedOwnerId: matched?.id || null,
+        candidateCompanies: activeCompanies.map((c) => ({
+          ...c,
+          boothCount: c.boothCount ?? 0,
+          productCount: c.productCount ?? 0,
+        })),
+      };
+    }
+  },
+  selectOwnerCompany: (payload: { companyId: string; exhibitionId?: string }) =>
+    v28Request<V28OwnerCompanyState>('/company/select-owner', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  replaceOwnerCompany: (payload: {
+    exhibitionId?: string;
+    name: string;
+    slug?: string;
+    category?: string;
+    description?: string;
+    logoUrl?: string;
+    bannerUrl?: string;
+    contactEmail?: string;
+    contactUrl?: string;
+  }) =>
+    v28Request<
+      V28OwnerCompanyState & {
+        replaced: boolean;
+        previousCompanyId: string | null;
+        previousCompanyName: string | null;
+      }
+    >('/company/replace', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   // Companies
   listCompanies: (params?: { q?: string; status?: 'all' | 'active' | 'inactive' }) => {
     const qs = new URLSearchParams();
@@ -131,6 +328,8 @@ export const v28Api = {
       `/companies/${encodeURIComponent(id)}`
     ),
   createCompany: (payload: {
+    exhibitionId?: string;
+    replaceCurrent?: boolean;
     name: string;
     slug?: string;
     category?: string;
@@ -140,15 +339,23 @@ export const v28Api = {
     contactEmail?: string;
     contactUrl?: string;
   }) =>
-    v28Request<{ company: V28Company }>('/companies', {
+    v28Request<{
+      company: V28Company;
+      exhibitionId?: string;
+      replaced?: boolean;
+      previousCompanyId?: string | null;
+      previousCompanyName?: string | null;
+    }>('/companies', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  updateCompany: (id: string, patch: Partial<V28Company>) =>
-    v28Request<{ company: V28Company }>(`/companies/${encodeURIComponent(id)}`, {
+  updateCompany: (id: string, patch: Partial<V28Company>, exhibitionId?: string) => {
+    const qs = exhibitionId ? `?exhibitionId=${encodeURIComponent(exhibitionId)}` : '';
+    return v28Request<{ company: V28Company }>(`/companies/${encodeURIComponent(id)}${qs}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
-    }),
+    });
+  },
 
   // Independent Product Catalog
   listProducts: (params?: {
@@ -175,11 +382,14 @@ export const v28Api = {
   },
   createProduct: (payload: {
     companyId: string;
+    exhibitionId?: string;
     boothId?: string | null;
     name: string;
     sku?: string;
-    price: number;
+    price: number | null;
+    priceStatus?: V28ProductPriceStatus;
     currency?: string;
+    category?: string;
     description?: string;
     images?: string[];
     sourceUrl?: string;
@@ -192,14 +402,20 @@ export const v28Api = {
     }),
   batchCreateProducts: (payload: {
     companyId: string;
+    exhibitionId?: string;
+    replaceCompanyCatalog?: boolean;
     duplicateStrategy?: 'skip' | 'update';
     products: Array<{
       name: string;
       sku?: string;
-      price?: number;
+      price?: number | null;
+      priceStatus?: V28ProductPriceStatus;
       currency?: string;
+      category?: string;
       description?: string;
       images?: string[];
+      videoUrl?: string;
+      modelUrl?: string;
       sourceUrl?: string;
       contactUrl?: string;
       inStock?: boolean;
@@ -217,11 +433,17 @@ export const v28Api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  updateProduct: (id: string, patch: Partial<V28Product>) =>
-    v28Request<{ product: V28Product }>(`/products/${encodeURIComponent(id)}`, {
+  updateProduct: (
+    id: string,
+    patch: Omit<Partial<V28Product>, 'price'> & { price?: number | null },
+    exhibitionId?: string
+  ) => {
+    const qs = exhibitionId ? `?exhibitionId=${encodeURIComponent(exhibitionId)}` : '';
+    return v28Request<{ product: V28Product }>(`/products/${encodeURIComponent(id)}${qs}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
-    }),
+    });
+  },
 
   // Booths & Slots
   listBooths: (companyId?: string) => {
@@ -246,6 +468,27 @@ export const v28Api = {
         method: 'DELETE',
       }
     ),
+  assignDraftSlot: (
+    exhibitionId: string,
+    versionId: string,
+    boothId: string,
+    slotId: string,
+    productId: string
+  ) =>
+    v28Request<{ version: V28ExhibitionVersionDetail }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/booths/${encodeURIComponent(boothId)}/slots/${encodeURIComponent(slotId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ productId }),
+      }
+    ),
+  clearDraftSlot: (exhibitionId: string, versionId: string, boothId: string, slotId: string) =>
+    v28Request<{ version: V28ExhibitionVersionDetail }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/booths/${encodeURIComponent(boothId)}/slots/${encodeURIComponent(slotId)}`,
+      {
+        method: 'DELETE',
+      }
+    ),
 
   // Excel Import
   previewExcel: (payload: { companyId: string; filename: string; fileBase64: string }) =>
@@ -261,9 +504,26 @@ export const v28Api = {
   getErrorCsvUrl: (jobId: string) =>
     `${API_BASE_URL}/api/v28/imports/${encodeURIComponent(jobId)}/report?format=csv`,
 
-  // URL Import into Company Catalog
-  importFromUrl: (payload: { companyId: string; url: string; saveToCatalog?: boolean }) =>
-    v28Request<{ product?: V28Product; draft: Record<string, unknown>; saved: boolean }>('/imports/url', {
+  // URL Import into Company Catalog (Preview-first by default: saveToCatalog = false)
+  importFromUrl: (payload: { companyId?: string; exhibitionId?: string; url: string; saveToCatalog?: boolean }) =>
+    v28Request<{
+      product?: V28Product;
+      companyId?: string;
+      draft: {
+        name: string;
+        sku?: string;
+        price?: number;
+        currency?: string;
+        description?: string;
+        images?: string[];
+        videoUrl?: string;
+        sourceUrl?: string;
+        inStock?: boolean;
+        warnings?: string[];
+      };
+      saved: boolean;
+      duplicateWarning?: { existingProductId: string; existingProductName: string } | null;
+    }>('/imports/url', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
@@ -299,6 +559,8 @@ export const v28Api = {
       sourceUrl?: string;
       sourceFilename?: string;
       ownerCompanyId?: string;
+      cleanSlots?: boolean;
+      zonePlan?: V28ZonePlanItem[];
     }
   ) =>
     v28Request<{ version: V28ExhibitionVersionDetail }>(
@@ -316,14 +578,21 @@ export const v28Api = {
       productIds?: string[];
       categoryHints?: Record<string, string>;
       organizeZonesByCategory?: boolean;
+      zonePlan?: V28ZonePlanItem[];
+      respectManualZoneNames?: boolean;
+      strictCategoryZones?: boolean;
     }
   ) =>
     v28Request<{
       version: V28ExhibitionVersionDetail;
       assignedSlots: number;
       boothsFilled: number;
+      totalSlotCapacity?: number;
+      totalOccupiedSlots?: number;
+      emptySlotsRemaining?: number;
       assignedProductIds: string[];
       overflowProductIds: string[];
+      overflowSummary?: string;
       uncertainProducts: Array<{ productId: string; name: string; reason: string }>;
       classifiedCount: number;
       zoneDecisions?: Array<{
@@ -344,6 +613,22 @@ export const v28Api = {
   getVersionDetail: (exhibitionId: string, versionId: string) =>
     v28Request<{ version: V28ExhibitionVersionDetail }>(
       `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}`
+    ),
+  ensureWorkingDraft: (exhibitionId: string) =>
+    v28Request<{
+      version: V28ExhibitionVersionDetail;
+      createdFromPublished: boolean;
+      sourcePublishedVersionId: string | null;
+    }>(`/exhibitions/${encodeURIComponent(exhibitionId)}/working-draft`, {
+      method: 'POST',
+    }),
+  saveAndPublishExhibition: (exhibitionId: string, versionId?: string) =>
+    v28Request<{ version: V28ExhibitionVersionDetail; publishedNow: boolean }>(
+      `/exhibitions/${encodeURIComponent(exhibitionId)}/save-and-publish`,
+      {
+        method: 'POST',
+        body: JSON.stringify(versionId ? { versionId } : {}),
+      }
     ),
   updateDraftZone: (
     exhibitionId: string,
@@ -422,16 +707,24 @@ export const v28Api = {
       body: JSON.stringify(payload),
     }),
 
-  // Phase 5 + Phase 9: Pre-generated Cached Audio & Smart URL / Website Discovery Import
+  // Phase 5 + Phase 9 + Phase 3/4 Unified Website Discovery Import
   discoverWebsiteProducts: (payload: {
     companyId?: string;
+    exhibitionId?: string;
     url: string;
+    discoveryMode?: 'full' | 'target';
     targetCount?: number;
     maxPages?: number;
+    checkpointToken?: string;
     autoDetectCompany?: boolean;
   }) =>
     v28Request<{
       siteUrl: string;
+      entryPageType?: 'homepage' | 'category' | 'product_detail' | 'unknown';
+      discoveryMode?: 'full' | 'target';
+      discoveryStatus: V28WebsiteDiscoveryStatus;
+      discoveryStats?: V28WebsiteDiscoveryStats;
+      checkpoint?: V28WebsiteCheckpointInfo;
       pagesScanned: number;
       totalBytesRead?: number;
       detectedCompany?: {
@@ -443,43 +736,50 @@ export const v28Api = {
         created: boolean;
         matchedBy: string;
       };
+      companyMismatchWarning?: V28CompanyMismatchWarning | null;
       coverageReport?: {
         targetCount?: number;
         shortfall?: number;
-        stopReason?: 'TARGET_REACHED' | 'SOURCE_EXHAUSTED' | 'RESOURCE_LIMIT' | 'ACCESS_BLOCKED' | 'NETWORK_ERROR';
+        stopReason?:
+          | 'TARGET_REACHED'
+          | 'DISCOVERY_COMPLETE'
+          | 'SOURCE_EXHAUSTED'
+          | 'RESOURCE_LIMIT'
+          | 'ACCESS_BLOCKED'
+          | 'NETWORK_ERROR';
         pagesScanned: number;
         maxPagesBudget?: number;
         productUrlsDiscovered: number;
         extractedValidCount: number;
+        failedExtractionCount?: number;
+        uniqueProductCount?: number;
+        pendingPagesCount?: number;
         newCount: number;
         duplicateCount: number;
         inCrawlDuplicatesSkipped?: number;
         errorCount: number;
         totalBytesRead: number;
         stopReasons: string[];
-        coverageStatus: 'IMPORT_COMPLETED' | 'TARGET_REACHED' | 'PARTIAL' | 'EMPTY';
+        coverageStatus:
+          | 'IMPORT_COMPLETED'
+          | 'DISCOVERY_COMPLETE'
+          | 'TARGET_REACHED'
+          | 'PARTIAL'
+          | 'BLOCKED'
+          | 'FAILED'
+          | 'EMPTY';
         fullCatalogVerified: boolean;
       };
-      discoveredProducts: Array<{
-        name: string;
-        brand?: string;
-        sku: string;
-        price: number;
-        currency: string;
-        description: string;
-        images: string[];
-        category?: string;
-        sourceUrl: string;
-        inStock: boolean;
-        alreadyInCatalog: boolean;
-      }>;
+      discoveredProducts: V28DiscoveredWebsiteProduct[];
+      discoveredCategories?: V28DiscoveredCategorySummary[];
       note: string;
     }>('/imports/website', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
   importProductFromUrl: (payload: {
-    companyId: string;
+    companyId?: string;
+    exhibitionId?: string;
     boothId?: string;
     url: string;
     saveToCatalog?: boolean;
@@ -495,7 +795,9 @@ export const v28Api = {
         videoUrl?: string;
         sourceUrl?: string;
         inStock?: boolean;
+        warnings?: string[];
       };
+      companyId?: string;
       product?: V28Product;
       saved: boolean;
       duplicateWarning?: { existingProductId: string; existingProductName: string } | null;
@@ -511,10 +813,20 @@ export const v28Api = {
     }),
   getBoothAudio: (boothId: string) =>
     v28Request<V28BoothAudioPack>(`/booths/${encodeURIComponent(boothId)}/audio`),
+  getProductConsultation: (boothId: string, productId: string, signal?: AbortSignal) =>
+    v28Request<V28ProductConsultationResponse>(
+      `/booths/${encodeURIComponent(boothId)}/products/${encodeURIComponent(productId)}/consultation`,
+      { signal }
+    ),
 
   // Phase 6: AI Chat & Voice Consultant
   getAiStatus: () => v28Request<V28AiStatusResponse>('/ai/status'),
-  chatWithBoothNpc: (payload: { boothId: string; userId: string; message: string }) =>
+  chatWithBoothNpc: (payload: {
+    boothId: string;
+    productId?: string;
+    userId: string;
+    message: string;
+  }) =>
     v28Request<V28AiChatResponse>('/ai/chat', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -637,7 +949,31 @@ export interface V28AiChatResponse {
   liveGeminiVerified: boolean;
   groundedBoothId: string;
   groundedCompanyId: string;
+  groundedProductId?: string;
   disclosure: string;
+}
+
+export interface V28ProductConsultationResponse {
+  boothId: string;
+  productId: string;
+  slotId: string;
+  product: {
+    id: string;
+    name: string;
+    sku: string;
+    price: number;
+    currency: string;
+    inStock: boolean;
+    description: string;
+    images: string[];
+    sourceUrl: string;
+  };
+  script: string;
+  audio: V28AudioAssetRecord | null;
+  source: 'uploaded' | 'pre_generated' | 'pregenerated' | 'cached' | 'synthesized' | 'client_fallback';
+  cacheHit: boolean;
+  fallbackUsed: boolean;
+  legacyFallbackEnabled?: boolean;
 }
 
 export interface V28VoiceSessionInfo {
@@ -1165,4 +1501,451 @@ export const v28RewardApi = {
       `/exhibitions/${encodeURIComponent(exhibitionId)}/versions/${encodeURIComponent(versionId)}/empty-booths/remove`,
       { method: 'POST', body: JSON.stringify(input) }
     ),
+};
+
+
+// ============================================================================
+// PHASE 1 — HYBRID MULTI-PROVIDER TTS & ADMIN AUDIO MANAGEMENT API CLIENT
+// ============================================================================
+
+export type V28TtsProviderId = 'gemini' | 'vbee' | 'edge' | 'fpt' | 'local-fallback';
+export type V28AudioSourceType = 'uploaded' | 'pre_generated' | 'cached';
+export type V28AudioBusinessStatus = 'missing' | 'generating' | 'ready' | 'needs_update' | 'failed';
+export type V28AudioMode = 'AUTO' | 'AI_GENERATED' | 'RECORDED';
+
+export interface V28VoiceApprovalRecord {
+  approvalId: string;
+  configSignature: string;
+  provider: V28TtsProviderId;
+  modelId: string;
+  voiceId: string;
+  speed: number;
+  style: string;
+  sampleAudioId: string;
+  sampleAudioUrl: string;
+  sampleTranscript: string;
+  status: 'previewed' | 'approved' | 'revoked';
+  approvedBy: string;
+  approvedAt: string;
+  createdAt: string;
+}
+
+export interface V28TtsVoiceOption {
+  id: string;
+  label: string;
+  provider: V28TtsProviderId;
+  language: string;
+  gender: 'female' | 'male';
+  region?: 'north' | 'south' | 'central' | 'neutral';
+  description: string;
+  recommended?: boolean;
+}
+
+export type V28TtsProviderHealthState =
+  | 'unconfigured'
+  | 'configured_unverified'
+  | 'ready_verified'
+  | 'permission_denied'
+  | 'quota_exhausted'
+  | 'cooldown_locked'
+  | 'unavailable'
+  | 'disabled';
+
+export interface V28TtsProviderStatus {
+  id: V28TtsProviderId;
+  displayName: string;
+  enabled: boolean;
+  configured: boolean;
+  available: boolean;
+  healthState?: V28TtsProviderHealthState;
+  healthLabel?: string;
+  cooldownRemainingSec?: number;
+  lastError?: string;
+  lastCheckedAt?: string;
+  defaultModel: string;
+  defaultVoice: string;
+  audioFormat: 'wav' | 'mp3';
+  priorityRank: number;
+  paidApi: boolean;
+  notes: string;
+  reason?: string;
+  voices: V28TtsVoiceOption[];
+}
+
+export interface V28AdminAudioItem {
+  entityType: 'product' | 'booth' | 'welcome';
+  entityId: string;
+  slotKey: string;
+  entityName: string;
+  imageUrl: string;
+  subtitle: string;
+  audioMode: V28AudioMode;
+  preferredProvider: string;
+  configuredModelId: string;
+  configuredVoiceId: string;
+  configuredSpeed: number;
+  configuredStyle: string;
+  defaultTranscript: string;
+  transcript: string;
+  status: V28AudioBusinessStatus;
+  sourceType: V28AudioSourceType | null;
+  provider: string | null;
+  modelId: string | null;
+  voiceId: string | null;
+  mimeType: string | null;
+  durationSec: number;
+  needsUpdate: boolean;
+  originalFilename: string;
+  errorMessage: string;
+  audioId: string | null;
+  audioUrl: string | null;
+  updatedAt: string | null;
+}
+
+export interface V28AudioBatchEstimate {
+  totalTargets: number;
+  skippedAlreadyReady: number;
+  skippedManualUploaded: number;
+  totalCharacters: number;
+  estimatedDurationSec: number;
+  estimatedCostNote: string;
+  concurrency: number;
+  voiceApproved: boolean;
+  approvedConfigSignature: string | null;
+  targets: Array<{
+    entityType: 'product' | 'booth' | 'welcome';
+    entityId: string;
+    slotKey: string;
+    label: string;
+    chars: number;
+    reason: 'missing' | 'needs_update' | 'failed';
+  }>;
+}
+
+export interface V28AudioBatchJobStatus {
+  jobId: string;
+  status: 'queued' | 'running' | 'paused' | 'completed' | 'cancelled' | 'failed';
+  totalItems: number;
+  completedItems: number;
+  succeededItems: number;
+  failedItems: number;
+  skippedItems: number;
+  concurrency: number;
+  providerOverride: string;
+  voiceId: string;
+  approvalId: string;
+  pauseReason: string;
+  createdBy: string;
+  errors: Array<{ entityType: string; entityId: string; label: string; error: string }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface V28HybridAudioAsset {
+  audioId: string;
+  entityType: string;
+  entityId: string;
+  slotKey: string;
+  provider: string;
+  sourceType: V28AudioSourceType;
+  modelId: string;
+  voiceId: string;
+  mimeType: string;
+  durationSec: number;
+  transcript: string;
+  needsUpdate: boolean;
+  status: string;
+  audioUrl: string;
+}
+
+export type V28AudioAssetRecord = V28HybridAudioAsset;
+
+export type V28NeutralVoiceProfileId = 'female_standard' | 'male_standard' | 'female_warm';
+
+export interface V28NeutralVoiceProfile {
+  id: V28NeutralVoiceProfileId;
+  label: string;
+  gender: 'female' | 'male';
+  description: string;
+  recommended?: boolean;
+}
+
+export const v28AudioApi = {
+  getProviders: () =>
+    v28Request<{
+      priority: V28TtsProviderId[];
+      providers: V28TtsProviderStatus[];
+      voices: V28TtsVoiceOption[];
+      voiceProfiles?: V28NeutralVoiceProfile[];
+      legacyFallbackEnabled: boolean;
+      storageDriver: string;
+    }>('/tts/providers'),
+
+  getOverview: (limit = 30) =>
+    v28Request<{
+      overview: {
+        totalAssets: number;
+        readyCount: number;
+        realReadyCount?: number;
+        boothReadyCount?: number;
+        productReadyCount?: number;
+        legacyChimeCount?: number;
+        pendingCount: number;
+        failedCount: number;
+        currentFailedEntities?: number;
+        historicalFailedRows?: number;
+        needsUpdateCount: number;
+        uploadedCount: number;
+        scope?: {
+          companyId?: string;
+          exhibitionTitle?: string;
+          occupiedBoothCount: number;
+          totalBoothSlots: number;
+          activeProductCount: number;
+        };
+        providerLabel: string;
+        storageDriver: string;
+        providers: V28TtsProviderStatus[];
+        metrics: {
+          cacheHits: number;
+          cacheMisses: number;
+          generationFailures: number;
+          inFlightDeduplicated: number;
+          uploadedHits: number;
+          pregeneratedHits: number;
+        };
+      };
+    }>(`/audio/overview?limit=${limit}`),
+
+  resolveAudioFirst: (params: {
+    entityType: 'product' | 'booth' | 'welcome' | 'faq';
+    entityId: string;
+    slotKey?: string;
+  }) => {
+    const qs = new URLSearchParams({
+      entityType: params.entityType,
+      entityId: params.entityId,
+    });
+    if (params.slotKey) qs.set('slotKey', params.slotKey);
+    return v28Request<{
+      found: boolean;
+      source: 'uploaded' | 'pre_generated' | 'cached' | null;
+      asset: V28HybridAudioAsset | null;
+    }>(`/audio/resolve?${qs.toString()}`);
+  },
+
+  synthesizeRealtime: (
+    payload: {
+      text: string;
+      entityType?: 'product' | 'booth' | 'welcome' | 'faq';
+      entityId?: string;
+      slotKey?: string;
+      voiceId?: string;
+      speed?: number;
+    },
+    signal?: AbortSignal
+  ) =>
+    v28Request<{
+      asset: V28HybridAudioAsset;
+      source: 'uploaded' | 'pre_generated' | 'cached' | 'synthesized';
+      cacheHit: boolean;
+      fallbackUsed: boolean;
+    }>('/tts/synthesize', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      signal,
+    }),
+
+  checkProviderConnection: (provider: V28TtsProviderId, runLiveSynthesis = false) =>
+    v28Request<{
+      provider: V28TtsProviderId;
+      ok: boolean;
+      mode: 'config_only' | 'live_synthesis';
+      status: V28TtsProviderStatus;
+      message: string;
+    }>('/admin/audio/providers/check', {
+      method: 'POST',
+      body: JSON.stringify({ provider, runLiveSynthesis }),
+    }),
+
+  listAdminItems: (params?: {
+    entityType?: 'product' | 'booth' | 'welcome' | 'all';
+    companyId?: string;
+    status?: V28AudioBusinessStatus | 'all';
+    q?: string;
+    page?: number;
+    limit?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.entityType) qs.set('entityType', params.entityType);
+    if (params?.companyId) qs.set('companyId', params.companyId);
+    if (params?.status && params.status !== 'all') qs.set('status', params.status);
+    if (params?.q) qs.set('q', params.q);
+    if (params?.page) qs.set('page', String(params.page));
+    if (params?.limit) qs.set('limit', String(params.limit));
+    return v28Request<{
+      items: V28AdminAudioItem[];
+      total: number;
+      page: number;
+      totalPages: number;
+      summary: Record<V28AudioBusinessStatus, number>;
+      scopedCompanyId?: string | null;
+      scopedCompanyName?: string | null;
+    }>(`/admin/audio/items?${qs.toString()}`);
+  },
+
+  generateAdminAudio: (payload: {
+    entityType: 'product' | 'booth' | 'welcome';
+    entityId: string;
+    slotKey?: string;
+    transcript: string;
+    voiceId?: string;
+    preferredProvider?: V28TtsProviderId;
+    speed?: number;
+  }) =>
+    v28Request<{ asset: V28HybridAudioAsset; fallbackUsed: boolean }>('/admin/audio/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  uploadAdminAudio: (payload: {
+    entityType: 'product' | 'booth' | 'welcome';
+    entityId: string;
+    slotKey?: string;
+    transcript?: string;
+    filename: string;
+    mimeType: string;
+    fileBase64: string;
+  }) =>
+    v28Request<{ asset: V28HybridAudioAsset }>('/admin/audio/upload', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  confirmUploadedAudio: (audioId: string) =>
+    v28Request<{ asset: V28HybridAudioAsset }>(`/admin/audio/${encodeURIComponent(audioId)}/confirm`, {
+      method: 'POST',
+    }),
+
+  deleteAdminAudio: (audioId: string) =>
+    v28Request<{ deleted: boolean; blobDeleted: boolean }>(`/admin/audio/${encodeURIComponent(audioId)}`, {
+      method: 'DELETE',
+    }),
+
+  setEntityMode: (payload: {
+    entityType: 'product' | 'booth' | 'welcome';
+    entityId: string;
+    audioMode: V28AudioMode;
+    preferredProvider?: string;
+    modelId?: string;
+    voiceId?: string;
+    speed?: number;
+    style?: string;
+    customTranscript?: string;
+  }) =>
+    v28Request<{ config: { entityId: string; audioMode: V28AudioMode } }>('/admin/audio/mode', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  bulkSetEntityMode: (payload: {
+    entityType: 'product' | 'booth' | 'welcome';
+    entityIds: string[];
+    audioMode: V28AudioMode;
+    preferredProvider?: string;
+    modelId?: string;
+    voiceId?: string;
+    speed?: number;
+    style?: string;
+  }) =>
+    v28Request<{ updatedCount: number }>('/admin/audio/mode/bulk', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  listVoiceApprovals: () =>
+    v28Request<{ approvals: V28VoiceApprovalRecord[] }>('/admin/audio/voice/approvals'),
+
+  previewVoice: (payload: {
+    provider?: V28TtsProviderId;
+    modelId?: string;
+    voiceId?: string;
+    voiceProfile?: V28NeutralVoiceProfileId;
+    speed?: number;
+    style?: string;
+    productId?: string;
+    transcript?: string;
+  }) =>
+    v28Request<{
+      preview: V28VoiceApprovalRecord;
+      voiceProfile?: V28NeutralVoiceProfileId;
+      limitations?: string[];
+      durationSec: number;
+      mimeType: string;
+      cacheHit: boolean;
+    }>('/admin/audio/voice/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  approveVoice: (configSignature: string) =>
+    v28Request<{ approval: V28VoiceApprovalRecord }>('/admin/audio/voice/approve', {
+      method: 'POST',
+      body: JSON.stringify({ configSignature }),
+    }),
+
+  estimateBatch: (payload: {
+    entityType?: 'product' | 'booth' | 'welcome' | 'all';
+    entityIds?: string[];
+    includeNeedsUpdate?: boolean;
+    onlyMissing?: boolean;
+    limit?: number;
+    providerOverride?: V28TtsProviderId;
+    modelId?: string;
+    voiceId?: string;
+    speed?: number;
+    style?: string;
+  }) =>
+    v28Request<{ estimate: V28AudioBatchEstimate }>('/admin/audio/batch/estimate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  startBatch: (payload: {
+    confirmed: boolean;
+    entityType?: 'product' | 'booth' | 'welcome' | 'all';
+    entityIds?: string[];
+    includeNeedsUpdate?: boolean;
+    onlyMissing?: boolean;
+    configSignature?: string;
+    approvalId?: string;
+    providerOverride?: V28TtsProviderId;
+    modelId?: string;
+    voiceId?: string;
+    speed?: number;
+    style?: string;
+    concurrency?: number;
+    limit?: number;
+  }) =>
+    v28Request<{ job: V28AudioBatchJobStatus }>('/admin/audio/batch/start', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  listBatchJobs: (limit = 10) =>
+    v28Request<{ jobs: V28AudioBatchJobStatus[] }>(`/admin/audio/batch?limit=${limit}`),
+
+  getBatchJob: (jobId: string) =>
+    v28Request<{ job: V28AudioBatchJobStatus }>(`/admin/audio/batch/${encodeURIComponent(jobId)}`),
+
+  resumeBatchJob: (jobId: string, limit?: number) =>
+    v28Request<{ job: V28AudioBatchJobStatus }>(`/admin/audio/batch/${encodeURIComponent(jobId)}/resume`, {
+      method: 'POST',
+      body: JSON.stringify(limit ? { limit } : {}),
+    }),
+
+  cancelBatchJob: (jobId: string) =>
+    v28Request<{ job: V28AudioBatchJobStatus }>(`/admin/audio/batch/${encodeURIComponent(jobId)}/cancel`, {
+      method: 'POST',
+    }),
 };

@@ -23,7 +23,7 @@ const BEACON_RING_MAT = new THREE.MeshBasicMaterial({
 });
 
 export interface NavigationPath3DProps {
-  route: GuidedRouteResult | null;
+  route: Pick<GuidedRouteResult, 'waypoints'> | null;
 }
 
 /**

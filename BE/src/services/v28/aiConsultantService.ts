@@ -58,6 +58,7 @@ export interface AiChatResponse {
   liveGeminiVerified: boolean;
   groundedBoothId: string;
   groundedCompanyId: string;
+  groundedProductId?: string;
   promptTokens: number;
   outputTokens: number;
   estimatedCostUsd: number;
@@ -199,6 +200,7 @@ export class V28AiConsultantService {
     boothId: string;
     userId: string;
     message: string;
+    productId?: string;
   }): Promise<AiChatResponse> {
     // Per-user rate limit
     const now = Date.now();
@@ -217,7 +219,33 @@ export class V28AiConsultantService {
     }
 
     const ctx = this.buildGroundedBoothContext(params.boothId);
-    const reply = this.generateGroundedMockReply(ctx, cleanMsg);
+    const requestedProductId = typeof params.productId === 'string' ? params.productId.trim() : '';
+    let focusedProduct: GroundedBoothContext['displayedProducts'][number] | null = null;
+    if (requestedProductId) {
+      focusedProduct = ctx.displayedProducts.find((p) => p.id === requestedProductId) || null;
+      if (!focusedProduct) {
+        const catalogProduct = this.v28Db.getProductById(requestedProductId);
+        if (
+          catalogProduct &&
+          catalogProduct.companyId === ctx.companyId &&
+          catalogProduct.status === 'active'
+        ) {
+          focusedProduct = {
+            slotId: 'catalog',
+            id: catalogProduct.id,
+            name: sanitizeAgainstPromptInjection(catalogProduct.name, 140),
+            sku: sanitizeAgainstPromptInjection(catalogProduct.sku, 60),
+            price: catalogProduct.price,
+            currency: catalogProduct.currency,
+            inStock: catalogProduct.inStock,
+            description: sanitizeAgainstPromptInjection(catalogProduct.description, 320),
+            sourceUrl: catalogProduct.sourceUrl,
+          };
+        }
+      }
+    }
+
+    const reply = this.generateGroundedMockReply(ctx, cleanMsg, focusedProduct);
 
     const promptTokens = Math.ceil((cleanMsg.length + JSON.stringify(ctx).length) / 4);
     const outputTokens = Math.ceil(reply.length / 4);
@@ -243,14 +271,21 @@ export class V28AiConsultantService {
       liveGeminiVerified: false,
       groundedBoothId: ctx.boothId,
       groundedCompanyId: ctx.companyId,
+      groundedProductId: focusedProduct?.id,
       promptTokens,
       outputTokens,
       estimatedCostUsd,
-      disclosure: 'Bạn đang trò chuyện với Trợ lý AI tư vấn (dữ liệu thực tế từ hồ sơ gian hàng).',
+      disclosure: focusedProduct
+        ? `Bạn đang trò chuyện với Trợ lý AI tư vấn cho sản phẩm "${focusedProduct.name}" (dữ liệu thực tế từ gian hàng).`
+        : 'Bạn đang trò chuyện với Trợ lý AI tư vấn (dữ liệu thực tế từ hồ sơ gian hàng).',
     };
   }
 
-  private generateGroundedMockReply(ctx: GroundedBoothContext, question: string): string {
+  private generateGroundedMockReply(
+    ctx: GroundedBoothContext,
+    question: string,
+    focusedProduct?: GroundedBoothContext['displayedProducts'][number] | null
+  ): string {
     const q = question.toLowerCase();
 
     // Security guard: block admin mutation / privilege escalation attempts
@@ -268,10 +303,47 @@ export class V28AiConsultantService {
 
     // Warranty / Promotion honesty guard (NEVER fabricate!)
     if (/(bảo hành|warranty|khuyến mãi|giảm giá|voucher)/i.test(q)) {
-      return `Hiện tại hồ sơ gian hàng ${ctx.boothName} (${ctx.companyName}) chưa có thông tin chi tiết về chính sách bảo hành hoặc khuyến mãi. Quý khách vui lòng liên hệ trực tiếp ${ctx.contactEmail || ctx.contactUrl || ctx.companyName} để được xác nhận chính xác.`;
+      const productRef = focusedProduct ? ` cho sản phẩm "${focusedProduct.name}"` : '';
+      return `Hiện tại hồ sơ gian hàng ${ctx.boothName} (${ctx.companyName}) chưa có thông tin chi tiết về chính sách bảo hành hoặc khuyến mãi${productRef}. Quý khách vui lòng liên hệ trực tiếp ${ctx.contactEmail || ctx.contactUrl || ctx.companyName} để được xác nhận chính xác.`;
     }
 
-    // Compare products
+    // Product-focused grounded replies when a specific productId is active
+    if (focusedProduct) {
+      const priceLabel =
+        focusedProduct.price > 0
+          ? `${focusedProduct.price.toLocaleString('vi-VN')} ${focusedProduct.currency}`
+          : 'Liên hệ báo giá';
+      const stockLabel = focusedProduct.inStock ? 'Còn hàng' : 'Tạm hết hàng / Liên hệ đặt trước';
+      const skuLabel = focusedProduct.sku ? ` (SKU: ${focusedProduct.sku})` : '';
+      const contactHint =
+        focusedProduct.sourceUrl || ctx.contactUrl || ctx.contactEmail || ctx.companyName;
+
+      // Compare focused product with another displayed product in the same booth
+      if (/(so sánh|compare|khác nhau)/i.test(q)) {
+        const other = ctx.displayedProducts.find((p) => p.id !== focusedProduct.id);
+        if (!other) {
+          return `Gian hàng ${ctx.boothName} hiện chỉ trưng bày "${focusedProduct.name}" nên chưa có sản phẩm thứ 2 cùng gian hàng để so sánh.`;
+        }
+        const otherPrice =
+          other.price > 0
+            ? `${other.price.toLocaleString('vi-VN')} ${other.currency}`
+            : 'Liên hệ báo giá';
+        return `So sánh "${focusedProduct.name}" với "${other.name}" tại ${ctx.boothName}:\n1) ${focusedProduct.name}: ${priceLabel} (${stockLabel}) — ${focusedProduct.description || 'Chưa có mô tả chi tiết'}.\n2) ${other.name}: ${otherPrice} (${other.inStock ? 'Còn hàng' : 'Tạm hết hàng'}) — ${other.description || 'Chưa có mô tả chi tiết'}.`;
+      }
+
+      // Price / stock / purchase inquiry for the exact focused product
+      if (/(giá|bao nhiêu|mua|đặt hàng|liên hệ|còn hàng|tồn kho|sku|mã)/i.test(q)) {
+        return `Thông tin sản phẩm ${focusedProduct.name}${skuLabel}:\n• Giá: ${priceLabel}\n• Tình trạng: ${stockLabel}${focusedProduct.sourceUrl ? `\n• Link sản phẩm: ${focusedProduct.sourceUrl}` : ''}\nĐể đặt mua hoặc nhận báo giá, quý khách vui lòng liên hệ ${contactHint}.`;
+      }
+
+      // Details / description / general question about the exact focused product
+      const descText =
+        focusedProduct.description ||
+        'Hiện hồ sơ sản phẩm chưa có mô tả chi tiết bổ sung từ doanh nghiệp.';
+      return `Thông tin về sản phẩm ${focusedProduct.name}${skuLabel} tại gian hàng ${ctx.boothName}:\n• Giá: ${priceLabel} (${stockLabel})\n• Mô tả: ${descText}\nNếu quý khách cần hỏi thêm về giá, tình trạng hàng hoặc so sánh với sản phẩm khác trong gian hàng, hãy nhắn cho tôi nhé.`;
+    }
+
+    // Compare products (booth-wide)
     if (/(so sánh|compare|khác nhau)/i.test(q)) {
       if (ctx.displayedProducts.length < 2) {
         return `Gian hàng ${ctx.boothName} hiện chỉ có ${ctx.displayedProducts.length} sản phẩm đang trưng bày nên chưa đủ dữ liệu để so sánh 2 sản phẩm.`;
@@ -280,7 +352,7 @@ export class V28AiConsultantService {
       return `So sánh 2 sản phẩm trưng bày tại ${ctx.boothName}:\n1) ${p1.name}: ${p1.price.toLocaleString('vi-VN')} ${p1.currency} (${p1.inStock ? 'Còn hàng' : 'Tạm hết hàng'}) — ${p1.description || 'Chưa có mô tả chi tiết'}.\n2) ${p2.name}: ${p2.price.toLocaleString('vi-VN')} ${p2.currency} (${p2.inStock ? 'Còn hàng' : 'Tạm hết hàng'}) — ${p2.description || 'Chưa có mô tả chi tiết'}.`;
     }
 
-    // Price / Buy inquiry
+    // Price / Buy inquiry (booth-wide)
     if (/(giá|bao nhiêu|mua|đặt hàng|liên hệ)/i.test(q)) {
       if (ctx.displayedProducts.length === 0) {
         return `Gian hàng ${ctx.boothName} (${ctx.companyName}) hiện chưa trưng bày sản phẩm nào trên 6 vị trí. Quý khách có thể liên hệ ${ctx.contactEmail || ctx.contactUrl || 'doanh nghiệp'} để biết thêm thông tin.`;

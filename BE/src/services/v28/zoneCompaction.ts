@@ -512,16 +512,17 @@ export function computeZoneAwareCompactedLayout<TBooth extends CompactableBoothI
       const bot = col[i + 1];
       if (bot.bounds.minZ > top.bounds.maxZ) {
         walkableRegions.push({
-          minX: round2(Math.max(top.bounds.minX, bot.bounds.minX)),
-          maxX: round2(Math.min(top.bounds.maxX, bot.bounds.maxX)),
-          minZ: round2(top.bounds.maxZ - 0.5),
-          maxZ: round2(bot.bounds.minZ + 0.5),
+          minX: round2(Math.min(top.bounds.minX, bot.bounds.minX) - 1.5),
+          maxX: round2(Math.max(top.bounds.maxX, bot.bounds.maxX) + 1.5),
+          minZ: round2(top.bounds.maxZ - 1.5),
+          maxZ: round2(bot.bounds.minZ + 1.5),
         });
       }
     }
   };
   addInterColWalkways('east');
   addInterColWalkways('west');
+  walkableRegions.push({ ...walkableBounds });
 
   const radius = round2(Math.hypot(halfHallWidth, halfHallDepth));
   const cameraOverviewBounds = {

@@ -1995,6 +1995,7 @@ export function createArchitecturalProductDisplayTexture(options: {
   name: string;
   priceText: string;
   imageUrl?: string;
+  fallbackImageUrls?: string[];
   accentColor: string;
   selected?: boolean;
   style: ArchitecturalDisplayStyle;
@@ -2109,16 +2110,31 @@ export function createArchitecturalProductDisplayTexture(options: {
 
   drawLayout(null);
 
-  if (options.imageUrl && typeof Image !== 'undefined') {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => drawLayout(img);
-    img.onerror = () => drawLayout(null);
-    const resolvedImgSrc =
-      options.imageUrl.startsWith('/api/') && API_BASE_URL
-        ? `${API_BASE_URL}${options.imageUrl}`
-        : options.imageUrl;
-    img.src = resolvedImgSrc;
+  const candidateUrls = [
+    options.imageUrl || '',
+    ...(options.fallbackImageUrls || []),
+  ]
+    .map((u) => (typeof u === 'string' ? u.trim() : ''))
+    .filter(Boolean);
+
+  if (candidateUrls.length > 0 && typeof Image !== 'undefined') {
+    const loadAtIndex = (idx: number) => {
+      if (idx >= candidateUrls.length) {
+        drawLayout(null);
+        return;
+      }
+      const rawUrl = candidateUrls[idx];
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => drawLayout(img);
+      img.onerror = () => loadAtIndex(idx + 1);
+      const resolvedImgSrc =
+        rawUrl.startsWith('/api/') && API_BASE_URL
+          ? `${API_BASE_URL}${rawUrl}`
+          : rawUrl;
+      img.src = resolvedImgSrc;
+    };
+    loadAtIndex(0);
   }
 
   return texture;

@@ -1,8 +1,43 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ExhibitionPage } from './pages/ExhibitionPage';
-import { AdminPage } from './pages/AdminPage';
-import { DynamicExhibitionPage } from './pages/DynamicExhibitionPage';
-import { AdminV28Page } from './pages/AdminV28Page';
+import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+
+const ExhibitionPage = lazy(() =>
+  import('./pages/ExhibitionPage').then((m) => ({ default: m.ExhibitionPage }))
+);
+const AdminPage = lazy(() =>
+  import('./pages/AdminPage').then((m) => ({ default: m.AdminPage }))
+);
+const DynamicExhibitionPage = lazy(() =>
+  import('./pages/DynamicExhibitionPage').then((m) => ({ default: m.DynamicExhibitionPage }))
+);
+const AdminV28Page = lazy(() =>
+  import('./pages/AdminV28Page').then((m) => ({ default: m.AdminV28Page }))
+);
+
+const RouteLoadingFallback: React.FC = () => (
+  <div
+    role="status"
+    aria-live="polite"
+    style={{
+      width: '100vw',
+      height: '100dvh',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'linear-gradient(160deg, #003d82 0%, #0f172a 100%)',
+      color: '#f8fafc',
+      fontFamily: 'system-ui, sans-serif',
+    }}
+  >
+    <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em' }}>
+      Đang tải Grand Expo World V28...
+    </div>
+    <div style={{ fontSize: 13, color: '#bae6fd' }}>
+      Đang chuẩn bị không gian triển lãm 3D
+    </div>
+  </div>
+);
 
 interface ParsedRoute {
   view: 'expo' | 'admin' | 'admin_v28' | 'dynamic';
@@ -110,28 +145,32 @@ export const App: React.FC = () => {
     setRoute({ view: 'dynamic', adminBoothId: null });
   }, []);
 
-  return route.view === 'admin_v28' ? (
-    <AdminV28Page
-      onOpenDynamicWorld={openDynamicWorld}
-      onOpenLegacyAdmin={() => {
-        window.history.pushState({}, '', '/v27/admin');
-        window.location.hash = '';
-        setRoute({ view: 'admin', adminBoothId: null });
-      }}
-    />
-  ) : route.view === 'admin' ? (
-    <AdminPage
-      initialBoothId={route.adminBoothId}
-      onNavigateBoothSlots={openAdmin}
-      onBackToExpo={openExpo}
-    />
-  ) : route.view === 'dynamic' ? (
-    <DynamicExhibitionPage onOpenAdmin={openAdminV28} />
-  ) : (
-    <ExhibitionPage
-      initialFocusBoothId={route.previewBoothId || null}
-      onOpenAdmin={() => openAdmin(null)}
-    />
+  return (
+    <Suspense fallback={<RouteLoadingFallback />}>
+      {route.view === 'admin_v28' ? (
+        <AdminV28Page
+          onOpenDynamicWorld={openDynamicWorld}
+          onOpenLegacyAdmin={() => {
+            window.history.pushState({}, '', '/v27/admin');
+            window.location.hash = '';
+            setRoute({ view: 'admin', adminBoothId: null });
+          }}
+        />
+      ) : route.view === 'admin' ? (
+        <AdminPage
+          initialBoothId={route.adminBoothId}
+          onNavigateBoothSlots={openAdmin}
+          onBackToExpo={openExpo}
+        />
+      ) : route.view === 'dynamic' ? (
+        <DynamicExhibitionPage onOpenAdmin={openAdminV28} />
+      ) : (
+        <ExhibitionPage
+          initialFocusBoothId={route.previewBoothId || null}
+          onOpenAdmin={() => openAdmin(null)}
+        />
+      )}
+    </Suspense>
   );
 };
 

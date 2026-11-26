@@ -30,16 +30,33 @@ export function computeRotatedBoothCollider(
 }
 
 /**
- * Returns the adaptive list of valid walkable regions (U-zone courtyards, Grand Boulevard,
- * South Entry Spine, Welcome Area, and inter-U-zone walkways).
- * Never relies on a single giant world rectangle that would expose empty outer voids.
+ * Returns the continuous full-hall walkable space so visitors can move freely across
+ * the entire exhibition floor and transition seamlessly between all zones, courtyards,
+ * inter-zone corridors, and perimeter walkways while still colliding smoothly with
+ * rotated 3D booth footprints and the outer hall boundary.
  */
 export function deriveWalkableRegions(
   world: Pick<
     V28ExhibitionVersionDetail,
     'walkableRegions' | 'walkableBounds' | 'centralAvenueBounds' | 'welcomeAreaBounds' | 'zones'
-  >
+  > & { hallBounds?: V28RectBounds }
 ): V28RectBounds[] {
+  if (world.walkableBounds) {
+    return [world.walkableBounds];
+  }
+
+  if (world.hallBounds) {
+    const pad = 1.5;
+    return [
+      {
+        minX: world.hallBounds.minX + pad,
+        maxX: world.hallBounds.maxX - pad,
+        minZ: world.hallBounds.minZ + pad,
+        maxZ: world.hallBounds.maxZ - pad,
+      },
+    ];
+  }
+
   if (Array.isArray(world.walkableRegions) && world.walkableRegions.length > 0) {
     return world.walkableRegions;
   }
@@ -50,17 +67,69 @@ export function deriveWalkableRegions(
   for (const z of world.zones || []) {
     if (z.bounds) {
       regions.push({
-        minX: z.bounds.minX + 0.8,
-        maxX: z.bounds.maxX - 0.8,
+        minX: z.bounds.minX - 1.5,
+        maxX: z.bounds.maxX + 1.5,
         minZ: z.bounds.minZ - 1.5,
         maxZ: z.bounds.maxZ + 1.5,
       });
     }
   }
-  if (regions.length === 0 && world.walkableBounds) {
-    regions.push(world.walkableBounds);
-  }
   return regions;
+}
+
+/**
+ * Advances a free-roam click/tap move step toward `target` with smooth axis-sliding
+ * around booth edges so cross-zone movement never stalls on a grazed corner.
+ */
+export function stepSeamlessFreeMove(
+  current: { x: number; z: number },
+  target: { x: number; z: number },
+  maxStep: number,
+  isWalkable: (x: number, z: number) => boolean
+): { x: number; z: number; moved: boolean; reached: boolean; blocked: boolean; moveX: number; moveZ: number } {
+  const dx = target.x - current.x;
+  const dz = target.z - current.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist < 0.35) {
+    return { x: current.x, z: current.z, moved: false, reached: true, blocked: false, moveX: 0, moveZ: 0 };
+  }
+
+  const step = Math.min(dist, Math.max(0, maxStep));
+  const vx = (dx / dist) * step;
+  const vz = (dz / dist) * step;
+  const nx = current.x + vx;
+  const nz = current.z + vz;
+
+  if (isWalkable(nx, nz)) {
+    return { x: nx, z: nz, moved: true, reached: false, blocked: false, moveX: vx, moveZ: vz };
+  }
+
+  // Smooth axis-sliding when approaching a booth edge diagonally
+  let outX = current.x;
+  let outZ = current.z;
+  let moved = false;
+  if (Math.abs(vx) > 1e-4 && isWalkable(nx, outZ)) {
+    outX = nx;
+    moved = true;
+  }
+  if (Math.abs(vz) > 1e-4 && isWalkable(outX, nz)) {
+    outZ = nz;
+    moved = true;
+  }
+
+  if (moved) {
+    return {
+      x: outX,
+      z: outZ,
+      moved: true,
+      reached: false,
+      blocked: false,
+      moveX: outX - current.x,
+      moveZ: outZ - current.z,
+    };
+  }
+
+  return { x: current.x, z: current.z, moved: false, reached: false, blocked: true, moveX: 0, moveZ: 0 };
 }
 
 export function isPointInRect(x: number, z: number, r: V28RectBounds): boolean {

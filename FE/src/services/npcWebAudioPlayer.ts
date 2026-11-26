@@ -81,6 +81,34 @@ class NpcWebAudioPlayer {
   }
 
   /**
+   * Synchronously creates and resumes AudioContext inside a user click/tap gesture
+   * BEFORE any async network synthesis (e.g. Supertonic 3 HTTP fetch) so browser
+   * autoplay policies never suspend playback after the gesture token expires.
+   */
+  public unlockFromUserGesture(): AudioContextState | 'unsupported' {
+    const ctx = this.getOrCreateContext();
+    if (!ctx) return 'unsupported';
+    if (ctx.state === 'suspended') {
+      void ctx.resume().catch(() => { });
+    }
+    return ctx.state;
+  }
+
+  public getDebugState(): {
+    contextState: AudioContextState | 'none';
+    sampleRate: number;
+    muted: boolean;
+    hasActiveSource: boolean;
+  } {
+    return {
+      contextState: this.ctx ? this.ctx.state : 'none',
+      sampleRate: this.ctx ? this.ctx.sampleRate : 0,
+      muted: this.muted,
+      hasActiveSource: Boolean(this.activeSource),
+    };
+  }
+
+  /**
    * Returns current playback offset (seconds) within the active AudioBuffer, for exact pause/resume.
    */
   public getCurrentOffsetSec(): number {

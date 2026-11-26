@@ -8,6 +8,7 @@ data/*.db
 data/*.db-*
 BE/data/*.db
 BE/data/*.db-*
+BE/data/v28_audio/
 .env
 .env.*
 FE/.env

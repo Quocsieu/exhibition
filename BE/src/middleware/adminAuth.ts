@@ -1,14 +1,60 @@
 import type { Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const FALLBACK_SECRET = crypto.randomBytes(32).toString('hex');
+const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PERSISTENT_SECRET_PATH = path.resolve(THIS_DIR, '../../data/.admin_token_secret');
+
+const EPHEMERAL_FALLBACK_SECRET = crypto.randomBytes(32).toString('hex');
+let cachedPersistentSecret: string | null = null;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILED_LOGIN_ATTEMPTS = 10;
 
 const failedLoginBuckets = new Map<string, { count: number; resetAt: number }>();
 
+function loadOrCreatePersistentSecret(): string {
+  if (cachedPersistentSecret) return cachedPersistentSecret;
+  if (process.env.VITEST) {
+    cachedPersistentSecret = EPHEMERAL_FALLBACK_SECRET;
+    return cachedPersistentSecret;
+  }
+  try {
+    if (fs.existsSync(PERSISTENT_SECRET_PATH)) {
+      const existing = fs.readFileSync(PERSISTENT_SECRET_PATH, 'utf8').trim();
+      if (existing.length >= 32) {
+        cachedPersistentSecret = existing;
+        return cachedPersistentSecret;
+      }
+    }
+    fs.mkdirSync(path.dirname(PERSISTENT_SECRET_PATH), { recursive: true });
+    const generated = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(PERSISTENT_SECRET_PATH, generated, { mode: 0o600 });
+    cachedPersistentSecret = generated;
+    return cachedPersistentSecret;
+  } catch {
+    cachedPersistentSecret = EPHEMERAL_FALLBACK_SECRET;
+    return cachedPersistentSecret;
+  }
+}
+
 function getSigningSecret(): string {
-  return process.env.ADMIN_TOKEN_SECRET || FALLBACK_SECRET;
+  const fromEnv = (process.env.ADMIN_TOKEN_SECRET || '').trim();
+  if (fromEnv) return fromEnv;
+  return loadOrCreatePersistentSecret();
+}
+
+function resolveAdminTokenExpiry(): number | null {
+  const rawHours = (process.env.ADMIN_SESSION_TTL_HOURS || '').trim();
+  if (rawHours) {
+    const hours = Number(rawHours);
+    if (Number.isFinite(hours) && hours > 0) {
+      return Date.now() + Math.round(hours * 60 * 60 * 1000);
+    }
+  }
+  // Non-expiring session by default: stays signed in across reloads/restarts until explicit Logout
+  return null;
 }
 
 function getExpectedCredentials(): { username: string; password: string } | null {
@@ -44,8 +90,9 @@ export function getDemoAccountCredentials(): { username: string; password: strin
 }
 
 function constantTimeStringEquals(a: string, b: string): boolean {
-  const hashA = crypto.createHmac('sha256', FALLBACK_SECRET).update(a, 'utf8').digest();
-  const hashB = crypto.createHmac('sha256', FALLBACK_SECRET).update(b, 'utf8').digest();
+  const secret = getSigningSecret();
+  const hashA = crypto.createHmac('sha256', secret).update(a, 'utf8').digest();
+  const hashB = crypto.createHmac('sha256', secret).update(b, 'utf8').digest();
   return crypto.timingSafeEqual(hashA, hashB) && a.length === b.length;
 }
 
@@ -86,7 +133,7 @@ export function resetAdminLoginRateLimitForTests(): void {
 }
 
 export function issueAdminToken(username: string): string {
-  const exp = Date.now() + 12 * 60 * 60 * 1000;
+  const exp = resolveAdminTokenExpiry();
   const payload = Buffer.from(JSON.stringify({ sub: username, role: 'admin', exp })).toString(
     'base64url'
   );
@@ -121,12 +168,14 @@ export function verifyAdminToken(token: string): { valid: boolean; username?: st
     if (
       decoded.role !== 'admin' ||
       typeof decoded.sub !== 'string' ||
-      decoded.sub.trim().length === 0 ||
-      typeof decoded.exp !== 'number' ||
-      !Number.isFinite(decoded.exp) ||
-      Date.now() >= decoded.exp
+      decoded.sub.trim().length === 0
     ) {
       return { valid: false };
+    }
+    if (decoded.exp !== null && decoded.exp !== undefined) {
+      if (typeof decoded.exp !== 'number' || !Number.isFinite(decoded.exp) || Date.now() >= decoded.exp) {
+        return { valid: false };
+      }
     }
     return { valid: true, username: decoded.sub };
   } catch {

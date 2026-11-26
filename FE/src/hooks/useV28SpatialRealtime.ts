@@ -10,18 +10,22 @@ export interface UseV28SpatialRealtimeOptions {
   versionId: string | null;
   isMobilePortrait: boolean;
   onLayoutChanged: () => void;
+  onAssignedColor?: (color: string) => void;
 }
 
 export function useV28SpatialRealtime({
   versionId,
   isMobilePortrait,
   onLayoutChanged,
+  onAssignedColor,
 }: UseV28SpatialRealtimeOptions) {
   const socketRef = useRef<Socket | null>(null);
   const sessionIdRef = useRef<string>('');
   const seqRef = useRef<number>(0);
   const versionIdRef = useRef<string | null>(versionId);
   versionIdRef.current = versionId;
+  const onAssignedColorRef = useRef(onAssignedColor);
+  onAssignedColorRef.current = onAssignedColor;
 
   const [remoteAvatars, setRemoteAvatars] = useState<V28RemoteAvatarView[]>([]);
   const [onlineCount, setOnlineCount] = useState<number>(1);
@@ -40,6 +44,7 @@ export function useV28SpatialRealtime({
         cb({
           name: sessionStorage.getItem('expo_visitor_name') || visitorName,
           color: sessionStorage.getItem('expo_visitor_color') || visitorColor,
+          colorCustomized: sessionStorage.getItem('expo_visitor_color_custom') === '1',
           deviceTier: isMobilePortrait ? 'mobile' : 'desktop',
           visitorToken: getStoredVisitorToken() || undefined,
         });
@@ -52,11 +57,15 @@ export function useV28SpatialRealtime({
     socket.on('v28:snapshot', (snap: {
       sessionId: string;
       versionId: string;
+      self?: { x: number; z: number; rotationY: number; color?: string };
       onlineCount: number;
       overflowCount: number;
       avatars: V28RemoteAvatarView[];
     }) => {
       sessionIdRef.current = snap.sessionId;
+      if (snap.self?.color && /^#[0-9a-fA-F]{6}$/.test(snap.self.color)) {
+        onAssignedColorRef.current?.(snap.self.color);
+      }
       setOnlineCount(Math.max(1, snap.onlineCount || 1));
       setOverflowCount(snap.overflowCount || 0);
       const map = new Map<string, V28RemoteAvatarView>();

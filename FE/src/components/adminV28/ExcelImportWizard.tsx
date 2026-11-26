@@ -140,7 +140,7 @@ const ImportReportView: React.FC<{ report: ImportJobReport; onReset: () => void 
 };
 
 export const ExcelImportWizard: React.FC = () => {
-  const [companies, setCompanies] = useState<V28Company[]>([]);
+  const [ownerCompany, setOwnerCompany] = useState<V28Company | null>(null);
   const [companyId, setCompanyId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [duplicateStrategy, setDuplicateStrategy] = useState<'skip' | 'update' | 'create'>('skip');
@@ -151,10 +151,12 @@ export const ExcelImportWizard: React.FC = () => {
 
   useEffect(() => {
     v28Api
-      .listCompanies({ status: 'active' })
+      .getOwnerCompany()
       .then((res) => {
-        setCompanies(res.companies);
-        if (res.companies[0]) setCompanyId(res.companies[0].id);
+        if (res.state === 'bound' && res.company) {
+          setOwnerCompany(res.company);
+          setCompanyId(res.company.id);
+        }
       })
       .catch((err) => setError((err as Error).message));
   }, []);
@@ -230,20 +232,10 @@ export const ExcelImportWizard: React.FC = () => {
 
       {!report && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <select
-            value={companyId}
-            onChange={(e) => {
-              setCompanyId(e.target.value);
-              setPreview(null);
-            }}
-          >
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <input type="file" accept=".xlsx" onChange={handleFileChange} />
+          <span style={{ padding: '6px 10px', borderRadius: 8, background: 'rgba(14,165,233,0.15)', fontSize: 13 }}>
+            🏢 Doanh nghiệp: <strong>{ownerCompany?.name || 'Chưa thiết lập'}</strong>
+          </span>
+          <input type="file" accept=".xlsx" onChange={handleFileChange} disabled={!companyId} />
           <button
             type="button"
             className="btn btn-primary"

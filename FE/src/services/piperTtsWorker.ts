@@ -587,7 +587,7 @@ self.onmessage = async (ev: MessageEvent) => {
 
         const bigIds = BigInt64Array.from(phonemeIds.map((x) => BigInt(x)));
         const bigLen = BigInt64Array.from([BigInt(phonemeIds.length)]);
-        const effectiveLengthScale = lengthScaleOverride ?? cfg.inference.length_scale ?? 1.06;
+        const effectiveLengthScale = lengthScaleOverride ?? cfg.inference.length_scale ?? 0.90;
         const scales = Float32Array.from([
           cfg.inference.noise_scale ?? 0.667,
           effectiveLengthScale,

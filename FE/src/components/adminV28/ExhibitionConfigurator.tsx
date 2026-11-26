@@ -4,12 +4,22 @@ import {
   type V28ArchetypeId,
   type V28ArchetypeSpec,
   type V28BoothPlacementView,
-  type V28Company,
+  type V28CompanyMismatchWarning,
   type V28ExhibitionSummary,
   type V28ExhibitionVersionDetail,
-  type V28Product,
+  type V28OwnerCompanyState,
+  type V28WebsiteCheckpointInfo,
+  type V28WebsiteDiscoveryStats,
+  type V28WebsiteDiscoveryStatus,
 } from '../../services/v28Api';
 import { BoothInspectorPanel } from './BoothInspectorPanel';
+import { V28SvgIcon } from '../v28/V28SvgIcon';
+import {
+  mapRawDiscoveredItemsToEditable,
+  validatePreviewProductItem,
+  WebsiteProductPreviewPanel,
+  type EditableDiscoveredProductItem,
+} from './WebsiteProductPreviewPanel';
 
 const V28_SYNC_CHANNEL = 'v28-expo-sync';
 
@@ -30,13 +40,22 @@ export interface ExhibitionConfiguratorProps {
   onManageCompanies?: () => void;
   externalNavRequest?: { mode: 'dashboard' | 'wizard'; step?: 1 | 2 | 3 | 4; nonce: number };
   refreshNonce?: number;
-  onActiveVersionChange?: (meta: { status: string; zones: number; booths: number; ownerName?: string } | null) => void;
+  onActiveVersionChange?: (
+    meta: {
+      exhibitionId?: string;
+      versionId?: string;
+      status: string;
+      zones: number;
+      booths: number;
+      ownerName?: string;
+    } | null
+  ) => void;
   onViewStateChange?: (mode: 'dashboard' | 'wizard', step: 1 | 2 | 3 | 4) => void;
 }
 
 export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
   onDataChanged,
-  onOpenDynamicWorld,
+  onOpenDynamicWorld: _onOpenDynamicWorld,
   onManageCatalog,
   onManageCompanies,
   externalNavRequest,
@@ -72,7 +91,13 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     coverageReport?: {
       targetCount?: number;
       shortfall?: number;
-      stopReason?: 'TARGET_REACHED' | 'SOURCE_EXHAUSTED' | 'RESOURCE_LIMIT' | 'ACCESS_BLOCKED' | 'NETWORK_ERROR';
+      stopReason?:
+        | 'TARGET_REACHED'
+        | 'DISCOVERY_COMPLETE'
+        | 'SOURCE_EXHAUSTED'
+        | 'RESOURCE_LIMIT'
+        | 'ACCESS_BLOCKED'
+        | 'NETWORK_ERROR';
       pagesScanned: number;
       maxPagesBudget?: number;
       productUrlsDiscovered: number;
@@ -83,8 +108,21 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
       errorCount: number;
       totalBytesRead: number;
       stopReasons: string[];
-      coverageStatus: 'IMPORT_COMPLETED' | 'TARGET_REACHED' | 'PARTIAL' | 'EMPTY';
+      coverageStatus:
+        | 'IMPORT_COMPLETED'
+        | 'DISCOVERY_COMPLETE'
+        | 'TARGET_REACHED'
+        | 'PARTIAL'
+        | 'BLOCKED'
+        | 'FAILED'
+        | 'EMPTY';
       fullCatalogVerified: boolean;
+    };
+    batchStats?: {
+      createdCount: number;
+      updatedCount: number;
+      skippedCount: number;
+      failedCount: number;
     };
     zoneDecisions?: Array<{
       zoneId: string;
@@ -96,6 +134,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     }>;
     assignedSlots: number;
     boothsFilled: number;
+    emptySlotsRemaining?: number;
     overflowCount: number;
     uncertainProducts: Array<{ productId: string; name: string; reason: string }>;
   } | null>(null);
@@ -103,17 +142,37 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
   const [selectedExhId, setSelectedExhId] = useState<string>('');
   const [selectedVersionId, setSelectedVersionId] = useState<string>('');
   const [versionDetail, setVersionDetail] = useState<V28ExhibitionVersionDetail | null>(null);
-  const [companies, setCompanies] = useState<V28Company[]>([]);
+  const [ownerState, setOwnerState] = useState<V28OwnerCompanyState | null>(null);
   const [archetypes, setArchetypes] = useState<V28ArchetypeSpec[]>([]);
-  const [companyCatalogProducts, setCompanyCatalogProducts] = useState<V28Product[]>([]);
 
   // String-backed numeric inputs (allow clearing completely, typing/pasting freely, zero wheel jumps or focus loss!)
   const [zoneCountInput, setZoneCountInput] = useState<string>('10');
   const [boothsPerZoneInput, setBoothsPerZoneInput] = useState<string>('10');
   const [sourceMode, setSourceMode] = useState<'url' | 'excel'>('url');
-  const [sourceCompanyId, setSourceCompanyId] = useState<string>('');
   const [sourceWebsiteUrl, setSourceWebsiteUrl] = useState<string>('');
+  const [discoveryMode, setDiscoveryMode] = useState<'full' | 'target'>('full');
   const [targetProductCountInput, setTargetProductCountInput] = useState<string>('15');
+  const [duplicateStrategy, setDuplicateStrategy] = useState<'skip' | 'update'>('skip');
+  const [previewingWebsite, setPreviewingWebsite] = useState<boolean>(false);
+  const [resumingCheckpoint, setResumingCheckpoint] = useState<boolean>(false);
+  const [savingCatalogOnly, setSavingCatalogOnly] = useState<boolean>(false);
+  const [websitePreview, setWebsitePreview] = useState<{
+    forUrl: string;
+    discoveryMode: 'full' | 'target';
+    targetCount?: number;
+    siteUrl: string;
+    entryPageType?: string;
+    discoveryStatus: V28WebsiteDiscoveryStatus;
+    discoveryStats?: V28WebsiteDiscoveryStats;
+    checkpoint?: V28WebsiteCheckpointInfo;
+    companyMismatchWarning?: V28CompanyMismatchWarning | null;
+    pagesScanned: number;
+    totalBytesRead?: number;
+    note: string;
+    detectedCompany?: NonNullable<typeof lastImportSummary>['detectedCompany'];
+    coverageReport?: NonNullable<typeof lastImportSummary>['coverageReport'];
+    items: EditableDiscoveredProductItem[];
+  } | null>(null);
   const [sourceExcelFile, setSourceExcelFile] = useState<{ name: string; base64: string } | null>(null);
   const [autoAllocateProducts, setAutoAllocateProducts] = useState<boolean>(true);
   const [showCreateConfirm, setShowCreateConfirm] = useState<boolean>(false);
@@ -127,8 +186,11 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     steps: Array<{ key: string; label: string; status: 'pending' | 'running' | 'done' | 'error'; detail?: string }>;
   } | null>(null);
   const [selectedBooth, setSelectedBooth] = useState<V28BoothPlacementView | null>(null);
-  const [editBoothName, setEditBoothName] = useState<string>('');
-  const [editZoneName, setEditZoneName] = useState<Record<string, string>>({});
+  const [renamingZoneCode, setRenamingZoneCode] = useState<string | null>(null);
+  const [renameZoneInput, setRenameZoneInput] = useState<string>('');
+  const [renameZoneError, setRenameZoneError] = useState<string>('');
+  const [renamingZoneBusy, setRenamingZoneBusy] = useState<boolean>(false);
+  const [switchingDraftBusy, setSwitchingDraftBusy] = useState<boolean>(false);
 
   const parsedZoneCount = /^\d+$/.test(zoneCountInput.trim()) ? Number(zoneCountInput.trim()) : NaN;
   const parsedBoothsPerZone = /^\d+$/.test(boothsPerZoneInput.trim()) ? Number(boothsPerZoneInput.trim()) : NaN;
@@ -155,6 +217,11 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
   })();
 
   const configValidationError = (() => {
+    if (ownerState && ownerState.state !== 'bound') {
+      return ownerState.state === 'selection_required'
+        ? 'Vui lòng vào mục "Thông tin doanh nghiệp" để xác nhận 1 doanh nghiệp chủ sở hữu duy nhất trước khi tạo triển lãm.'
+        : 'Chưa có doanh nghiệp chủ sở hữu. Vui lòng tạo thông tin doanh nghiệp trong mục "Thông tin doanh nghiệp" trước.';
+    }
     if (!zoneCountInput.trim()) return 'Vui lòng nhập số khu triển lãm.';
     if (!Number.isFinite(parsedZoneCount) || parsedZoneCount < 1 || parsedZoneCount > 30) {
       return 'Số khu phải là số nguyên từ 1 đến 30.';
@@ -174,10 +241,12 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     return '';
   })();
 
-  // Search, Filter & Pagination for 100+ booths dashboard
+  // Search, Filter & Pagination for Zone-first Booth Management (Phase 4: '' = no zone selected yet)
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [filterZoneCode, setFilterZoneCode] = useState<string>('ALL');
-  const [filterAssign, setFilterAssign] = useState<'all' | 'assigned' | 'unassigned' | 'has_products' | 'empty_slots'>('all');
+  const [filterZoneCode, setFilterZoneCode] = useState<string>('');
+  const [filterAssign, setFilterAssign] = useState<
+    'all' | 'full_slots' | 'partial_slots' | 'empty_slots' | 'has_products' | 'assigned' | 'unassigned'
+  >('all');
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(12);
 
@@ -189,21 +258,20 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     setLoading(true);
     setError('');
     try {
-      const [exhRes, compRes, archRes] = await Promise.all([
+      const [exhRes, ownerRes, archRes] = await Promise.all([
         v28Api.listExhibitions(),
-        v28Api.listCompanies({ status: 'active' }),
+        v28Api.getOwnerCompany(),
         v28Api.listArchetypes(),
       ]);
       setExhibitions(exhRes.exhibitions);
-      setCompanies(compRes.companies);
-      if (compRes.companies.length > 0) {
-        setSourceCompanyId((prev) => prev || compRes.companies[0].id);
-      }
+      setOwnerState(ownerRes);
       setArchetypes(archRes.archetypes);
       const first = exhRes.exhibitions[0];
       if (first) {
         setSelectedExhId((prev) => prev || first.id);
-        const defaultVer = first.activeVersionId || first.latestDraftVersionId || first.versions[0]?.id || '';
+        // Single-version Admin: always load the active published exhibition directly
+        const defaultVer =
+          first.activeVersionId || first.versions[0]?.id || '';
         setSelectedVersionId((prev) => prev || defaultVer);
       }
     } catch (e) {
@@ -224,14 +292,9 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     try {
       const { version } = await v28Api.getVersionDetail(exhId, verId);
       setVersionDetail(version);
-      const zn: Record<string, string> = {};
-      for (const z of version.zones) zn[z.id] = z.displayName;
-      setEditZoneName(zn);
-      setSelectedBooth((prev) => {
-        const next = prev ? version.booths.find((b) => b.boothId === prev.boothId) || null : null;
-        if (next) setEditBoothName(next.boothName);
-        return next;
-      });
+      setSelectedBooth((prev) =>
+        prev ? version.booths.find((b) => b.boothId === prev.boothId) || null : null
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -255,13 +318,15 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshNonce]);
 
-  // V28-AUDIT-015: Sync currently viewed version status & counts up to Topbar
+  // V28-AUDIT-015: Sync currently viewed version status & counts up to Topbar & EmptyBoothManager
   useEffect(() => {
     if (!versionDetail) {
       onActiveVersionChange?.(null);
       return;
     }
     onActiveVersionChange?.({
+      exhibitionId: versionDetail.exhibitionId,
+      versionId: versionDetail.versionId,
       status: versionDetail.status,
       zones: versionDetail.zones.length,
       booths: versionDetail.booths.length,
@@ -280,33 +345,17 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
   }, [versionDetail?.versionId]);
 
   useEffect(() => {
-    if (filterZoneCode !== 'ALL' && selectedBooth && selectedBooth.zoneCode !== filterZoneCode) {
+    if (filterZoneCode && selectedBooth && selectedBooth.zoneCode !== filterZoneCode) {
       setSelectedBooth(null);
     }
   }, [filterZoneCode, selectedBooth]);
 
-  // Load company's own catalog products whenever a booth is selected for 6-slot assignment
-  useEffect(() => {
-    if (!selectedBooth?.companyId) {
-      setCompanyCatalogProducts([]);
-      return;
-    }
-    let cancelled = false;
-    v28Api
-      .listProducts({ companyId: selectedBooth.companyId, status: 'active', page: 1, limit: 100 })
-      .then((res) => {
-        if (!cancelled) setCompanyCatalogProducts(res.items);
-      })
-      .catch(() => {
-        if (!cancelled) setCompanyCatalogProducts([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedBooth?.companyId]);
-
   const selectedExh = exhibitions.find((e) => e.id === selectedExhId) || null;
-  const isDraft = versionDetail?.status === 'draft';
+  const isDraft = Boolean(versionDetail && versionDetail.status !== 'archived');
+  const activeSelectedZone = useMemo(
+    () => (filterZoneCode ? versionDetail?.zones.find((z) => z.code === filterZoneCode) || null : null),
+    [versionDetail, filterZoneCode]
+  );
 
   // Dashboard statistics derived 100% from V28 DB
   const stats = useMemo(() => {
@@ -327,14 +376,16 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     };
   }, [versionDetail]);
 
-  // Filtered & Paginated Booths
+  // Filtered & Paginated Booths (Phase 4: strictly scoped to selected Zone when filterZoneCode is set)
   const filteredBooths = useMemo(() => {
     const list = versionDetail?.booths || [];
     const q = searchQuery.trim().toLowerCase();
     return list.filter((b) => {
-      if (filterZoneCode !== 'ALL' && b.zoneCode !== filterZoneCode) return false;
+      if (filterZoneCode && b.zoneCode !== filterZoneCode) return false;
       if (filterAssign === 'assigned' && !b.companyId) return false;
       if (filterAssign === 'unassigned' && b.companyId) return false;
+      if (filterAssign === 'full_slots' && b.assignedSlotCount < 6) return false;
+      if (filterAssign === 'partial_slots' && (b.assignedSlotCount === 0 || b.assignedSlotCount >= 6)) return false;
       if (filterAssign === 'has_products' && b.assignedSlotCount === 0) return false;
       if (filterAssign === 'empty_slots' && b.assignedSlotCount > 0) return false;
       if (!q) return true;
@@ -357,11 +408,169 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
 
   const handleSelectBooth = (b: V28BoothPlacementView) => {
     setSelectedBooth(b);
-    setEditBoothName(b.boothName);
+  };
+
+  const handlePreviewWebsite = async () => {
+    if (!ownerState?.company || !isSourceValid) return;
+    const trimmedUrl = sourceWebsiteUrl.trim();
+    const requiredProductCount = Math.max(1, Math.min(1800, computedTotalBooths * 6));
+    setPreviewingWebsite(true);
+    setError('');
+    setMessage('');
+    setShowCreateConfirm(false);
+    try {
+      const disc = await v28Api.discoverWebsiteProducts({
+        companyId: ownerState.company.id,
+        exhibitionId: selectedExhId || undefined,
+        url: trimmedUrl,
+        discoveryMode: 'full',
+        targetCount: requiredProductCount,
+        autoDetectCompany: false,
+      });
+      if (!disc.discoveredProducts || disc.discoveredProducts.length === 0) {
+        setWebsitePreview(null);
+        setError(
+          disc.discoveryStats?.limitOrErrorReason ||
+            disc.note ||
+            'Không tìm thấy sản phẩm công khai có cấu trúc từ URL này. Bạn có thể nhập URL trang danh mục hoặc URL sản phẩm cụ thể.'
+        );
+        return;
+      }
+      setWebsitePreview({
+        forUrl: trimmedUrl,
+        discoveryMode: 'full',
+        targetCount: requiredProductCount,
+        siteUrl: disc.siteUrl,
+        entryPageType: disc.entryPageType,
+        discoveryStatus: disc.discoveryStatus,
+        discoveryStats: disc.discoveryStats,
+        checkpoint: disc.checkpoint,
+        companyMismatchWarning: disc.companyMismatchWarning,
+        pagesScanned: disc.pagesScanned,
+        totalBytesRead: disc.totalBytesRead,
+        note: disc.note,
+        detectedCompany: disc.detectedCompany,
+        coverageReport: disc.coverageReport,
+        items: mapRawDiscoveredItemsToEditable(disc.discoveredProducts, 'wiz-prev'),
+      });
+    } catch (e) {
+      setWebsitePreview(null);
+      setError((e as Error).message || 'Không thể quét xem trước sản phẩm từ website.');
+    } finally {
+      setPreviewingWebsite(false);
+    }
+  };
+
+  const handleResumeWebsiteCheckpoint = async () => {
+    if (!ownerState?.company || !websitePreview?.checkpoint?.checkpointToken) return;
+    const requiredProductCount = Math.max(1, Math.min(1800, computedTotalBooths * 6));
+    setResumingCheckpoint(true);
+    setError('');
+    try {
+      const disc = await v28Api.discoverWebsiteProducts({
+        companyId: ownerState.company.id,
+        exhibitionId: selectedExhId || undefined,
+        url: websitePreview.forUrl,
+        discoveryMode: 'full',
+        targetCount: requiredProductCount,
+        checkpointToken: websitePreview.checkpoint.checkpointToken,
+        autoDetectCompany: false,
+      });
+      const moreEditable = mapRawDiscoveredItemsToEditable(
+        disc.discoveredProducts || [],
+        `wiz-b${disc.checkpoint?.batchIndex || 2}`
+      );
+      setWebsitePreview((prev) => {
+        if (!prev) return prev;
+        const existingUrls = new Set(prev.items.map((i) => i.sourceUrl.toLowerCase()));
+        const dedupedNew = moreEditable.filter(
+          (m) => !m.sourceUrl || !existingUrls.has(m.sourceUrl.toLowerCase())
+        );
+        const totalScanned = (prev.discoveryStats?.pagesScanned || prev.pagesScanned) + disc.pagesScanned;
+        return {
+          ...prev,
+          discoveryStatus: disc.discoveryStatus,
+          discoveryStats: disc.discoveryStats
+            ? { ...disc.discoveryStats, pagesScanned: totalScanned }
+            : prev.discoveryStats,
+          checkpoint: disc.checkpoint,
+          pagesScanned: totalScanned,
+          note: disc.note,
+          coverageReport: disc.coverageReport || prev.coverageReport,
+          items: [...prev.items, ...dedupedNew],
+        };
+      });
+    } catch (e) {
+      setError((e as Error).message || 'Không thể tiếp tục quét batch kế tiếp từ checkpoint.');
+    } finally {
+      setResumingCheckpoint(false);
+    }
+  };
+
+  const handleSavePreviewOnlyToCatalog = async () => {
+    if (!ownerState?.company || !websitePreview) return;
+    const chosenItems = websitePreview.items.filter(
+      (item) => item.selected && validatePreviewProductItem(item) === null
+    );
+    if (chosenItems.length === 0) {
+      setError('Vui lòng chọn ít nhất 1 sản phẩm hợp lệ để lưu vào Kho sản phẩm.');
+      return;
+    }
+    setSavingCatalogOnly(true);
+    setError('');
+    setMessage('');
+    try {
+      const batchRes = await v28Api.batchCreateProducts({
+        companyId: ownerState.company.id,
+        exhibitionId: selectedExhId || undefined,
+        replaceCompanyCatalog: true,
+        duplicateStrategy: 'update',
+        products: chosenItems.map((item) => ({
+          name: item.name.trim(),
+          sku: item.sku.trim(),
+          price: item.priceStatus === 'listed' ? item.price : null,
+          priceStatus: item.priceStatus,
+          currency: item.priceStatus === 'listed' ? item.currency || 'VND' : '',
+          category: item.category.trim(),
+          description: item.description.trim(),
+          images: item.images,
+          videoUrl: item.videoUrl,
+          modelUrl: item.modelUrl,
+          sourceUrl: item.sourceUrl.trim(),
+          inStock: item.inStock,
+        })),
+      });
+      const savedUrls = new Set(chosenItems.map((c) => c.sourceUrl.toLowerCase()));
+      setWebsitePreview((prev) =>
+        prev
+          ? {
+              ...prev,
+              items: prev.items.map((it) =>
+                savedUrls.has(it.sourceUrl.toLowerCase())
+                  ? { ...it, alreadyInCatalog: true, selected: false }
+                  : it
+              ),
+            }
+          : prev
+      );
+      setMessage(
+        `Đã lưu sản phẩm vào Kho của "${ownerState.company.name}": Tạo mới ${batchRes.createdCount} · Cập nhật ${batchRes.updatedCount} · Bỏ qua (trùng) ${batchRes.skippedCount} · Thất bại ${batchRes.failedCount}. Bạn có thể bấm "Tạo không gian triển lãm" để phân bổ vào gian hàng.`
+      );
+      await loadExhibitions();
+      onDataChanged?.();
+    } catch (e) {
+      setError((e as Error).message || 'Không thể lưu sản phẩm vào Kho.');
+    } finally {
+      setSavingCatalogOnly(false);
+    }
   };
 
   const handleCreateDraft = async () => {
     if (!selectedExhId || configValidationError || creationProgress?.running) return;
+    if (!ownerState?.company) {
+      setError('Vui lòng thiết lập hoặc xác nhận 1 doanh nghiệp chủ sở hữu trước khi tạo triển lãm.');
+      return;
+    }
     setShowCreateConfirm(false);
     setViewMode('wizard');
     setWizardStep(2);
@@ -371,8 +580,8 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     setMessage('');
 
     const initSteps = [
-      { key: 'validate', label: '1. Kiểm tra cấu hình khu & gian hàng', status: 'running' as const, detail: `${parsedZoneCount} khu × ${parsedBoothsPerZone} gian = ${computedTotalBooths} gian` },
-      { key: 'source', label: '2. Lấy dữ liệu sản phẩm', status: 'pending' as const, detail: sourceMode === 'url' ? sourceWebsiteUrl : sourceMode === 'excel' ? sourceExcelFile?.name : 'Sử dụng Catalog hiện có' },
+      { key: 'validate', label: '1. Kiểm tra cấu hình khu & doanh nghiệp sở hữu', status: 'running' as const, detail: `${ownerState.company.name} · ${parsedZoneCount} khu × ${parsedBoothsPerZone} gian = ${computedTotalBooths} gian` },
+      { key: 'source', label: '2. Lưu sản phẩm đã xác nhận xem trước', status: 'pending' as const, detail: sourceMode === 'url' ? sourceWebsiteUrl : sourceMode === 'excel' ? sourceExcelFile?.name : 'Sử dụng Catalog hiện có' },
       { key: 'categorize', label: '3. Phân tích danh mục & chuẩn bị phân khu chữ U', status: 'pending' as const },
       { key: 'layout', label: '4. Tạo bản Draft & bố cục 2D hai dãy chữ U', status: 'pending' as const },
       { key: 'allocate', label: '5. Tự động phân bổ sản phẩm vào 6 slot/gian', status: 'pending' as const },
@@ -412,86 +621,135 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
             : 'Vui lòng chọn tệp Excel (.xlsx, .xls hoặc .csv) hợp lệ.'
         );
       }
-      setStepState('validate', 'done', `Hợp lệ: ${parsedZoneCount} khu × ${parsedBoothsPerZone} gian`);
+      setStepState('validate', 'done', `Hợp lệ: ${ownerState.company.name} (${parsedZoneCount} khu × ${parsedBoothsPerZone} gian)`);
 
-      // Step 2: Fetch / Import product data from chosen mandatory source (auto-detects Seller Company on URL!)
+      // Step 2: Persist confirmed preview products strictly into the bound single owner company
       setStepState('source', 'running');
       let importedCount = 0;
       const importedProductIds: string[] = [];
       const categoryHints: Record<string, string> = {};
-      let targetCompanyId = sourceCompanyId || companies[0]?.id || '';
+      const targetCompanyId = ownerState.company.id;
       let detectedCompanyMeta: NonNullable<typeof lastImportSummary>['detectedCompany'] | undefined;
       let coverageReportMeta: NonNullable<typeof lastImportSummary>['coverageReport'] | undefined;
 
+      let batchStatsMeta: NonNullable<typeof lastImportSummary>['batchStats'] | undefined;
+
       if (sourceMode === 'url') {
-        const parsedTargetCount = /^\d+$/.test(targetProductCountInput.trim())
-          ? Math.max(1, Math.min(120, Number(targetProductCountInput.trim())))
-          : 15;
-        const disc = await v28Api.discoverWebsiteProducts({
-          companyId: undefined,
-          url: sourceWebsiteUrl.trim(),
-          targetCount: parsedTargetCount,
-          autoDetectCompany: true,
-        });
-        detectedCompanyMeta = disc.detectedCompany;
-        coverageReportMeta = disc.coverageReport;
-        if (disc.detectedCompany?.companyId) {
-          targetCompanyId = disc.detectedCompany.companyId;
-          setSourceCompanyId(disc.detectedCompany.companyId);
-        } else {
-          targetCompanyId = '';
+        const trimmedUrl = sourceWebsiteUrl.trim();
+        const requiredProductCount = Math.max(1, Math.min(1800, computedTotalBooths * 6));
+        let activePreview =
+          websitePreview &&
+          websitePreview.forUrl === trimmedUrl &&
+          websitePreview.targetCount === requiredProductCount
+            ? websitePreview
+            : null;
+
+        if (!activePreview) {
+          const disc = await v28Api.discoverWebsiteProducts({
+            companyId: targetCompanyId,
+            exhibitionId: selectedExhId,
+            url: trimmedUrl,
+            discoveryMode: 'full',
+            targetCount: requiredProductCount,
+            autoDetectCompany: false,
+          });
+          if (!disc.discoveredProducts || disc.discoveredProducts.length === 0) {
+            throw new Error(
+              disc.discoveryStats?.limitOrErrorReason ||
+                disc.note ||
+                'Không tìm thấy sản phẩm công khai có cấu trúc từ URL này. Bạn có thể nhập URL trang danh mục hoặc URL sản phẩm cụ thể.'
+            );
+          }
+          activePreview = {
+            forUrl: trimmedUrl,
+            discoveryMode: 'full',
+            targetCount: requiredProductCount,
+            siteUrl: disc.siteUrl,
+            entryPageType: disc.entryPageType,
+            discoveryStatus: disc.discoveryStatus,
+            discoveryStats: disc.discoveryStats,
+            checkpoint: disc.checkpoint,
+            companyMismatchWarning: disc.companyMismatchWarning,
+            pagesScanned: disc.pagesScanned,
+            totalBytesRead: disc.totalBytesRead,
+            note: disc.note,
+            detectedCompany: disc.detectedCompany,
+            coverageReport: disc.coverageReport,
+            items: mapRawDiscoveredItemsToEditable(disc.discoveredProducts, 'wiz-auto'),
+          };
         }
-        if (!targetCompanyId) {
+
+        detectedCompanyMeta = activePreview.detectedCompany;
+        coverageReportMeta = activePreview.coverageReport;
+
+        const invalidSelected = activePreview.items.find(
+          (item) => item.selected && validatePreviewProductItem(item) !== null
+        );
+        if (invalidSelected) {
           throw new Error(
-            disc.detectedCompany?.confidence === 'needs_confirmation'
-              ? `Website ${disc.detectedCompany.canonicalDomain} chưa có đủ metadata tổ chức để tự động xác minh doanh nghiệp sở hữu (trạng thái: needs_confirmation). Vui lòng xác nhận/tạo hồ sơ doanh nghiệp trong mục "Thông tin Doanh nghiệp" trước khi tạo triển lãm.`
-              : 'Không xác định được doanh nghiệp sở hữu từ URL này. Vui lòng kiểm tra lại URL hoặc xác nhận thông tin doanh nghiệp.'
+            `Sản phẩm "${invalidSelected.name || '(chưa có tên)'}" không hợp lệ: ${validatePreviewProductItem(invalidSelected)}`
           );
         }
-        if (!disc.discoveredProducts || disc.discoveredProducts.length === 0) {
-          throw new Error(
-            disc.note ||
-              'Không tìm thấy sản phẩm công khai có cấu trúc từ URL này. Bạn có thể nhập URL trang danh mục, URL sản phẩm cụ thể hoặc dùng Excel.'
-          );
-        }
-        const batchPayload = disc.discoveredProducts
-          .filter((item) => !item.alreadyInCatalog && item.name.trim().length >= 2)
-          .map((item) => ({
-            name: item.name.trim(),
-            sku: item.sku.trim(),
-            price: Math.max(0, Number(item.price) || 0),
-            currency: item.currency || 'VND',
-            description: item.description.trim(),
-            images: item.images,
-            sourceUrl: item.sourceUrl,
-            inStock: item.inStock,
-          }));
+
+        const chosenItems = activePreview.items.filter(
+          (item) => item.selected && validatePreviewProductItem(item) === null
+        );
+        const batchPayload = chosenItems.map((item) => ({
+          name: item.name.trim(),
+          sku: item.sku.trim(),
+          price: item.priceStatus === 'listed' ? item.price : null,
+          priceStatus: item.priceStatus,
+          currency: item.priceStatus === 'listed' ? item.currency || 'VND' : '',
+          category: item.category.trim(),
+          description: item.description.trim(),
+          images: item.images,
+          videoUrl: item.videoUrl,
+          modelUrl: item.modelUrl,
+          sourceUrl: item.sourceUrl.trim(),
+          inStock: item.inStock,
+        }));
+
+        const skippedPreExisting = 0;
+
         if (batchPayload.length > 0) {
           const batchRes = await v28Api.batchCreateProducts({
             companyId: targetCompanyId,
-            duplicateStrategy: 'skip',
+            exhibitionId: selectedExhId,
+            replaceCompanyCatalog: true,
+            duplicateStrategy: 'update',
             products: batchPayload,
           });
           importedCount = batchRes.createdCount;
+          batchStatsMeta = {
+            createdCount: batchRes.createdCount,
+            updatedCount: batchRes.updatedCount,
+            skippedCount: batchRes.skippedCount + skippedPreExisting,
+            failedCount: batchRes.failedCount,
+          };
           batchRes.productIds.forEach((pid, idx) => {
             importedProductIds.push(pid);
-            const cat = disc.discoveredProducts[idx]?.category;
+            const cat = chosenItems[idx]?.category;
             if (cat) categoryHints[pid] = cat;
           });
+        } else {
+          batchStatsMeta = {
+            createdCount: 0,
+            updatedCount: 0,
+            skippedCount: skippedPreExisting,
+            failedCount: 0,
+          };
         }
-        const skippedExisting = disc.discoveredProducts.filter((i) => i.alreadyInCatalog).length;
+
         const sizeLabel =
-          typeof disc.totalBytesRead === 'number'
-            ? ` · ${(disc.totalBytesRead / (1024 * 1024)).toFixed(2)} MB`
+          typeof activePreview.totalBytesRead === 'number'
+            ? ` · ${(activePreview.totalBytesRead / (1024 * 1024)).toFixed(2)} MB`
             : '';
-        const sellerLabel = disc.detectedCompany?.companyName
-          ? ` · Doanh nghiệp: ${disc.detectedCompany.companyName} (${disc.detectedCompany.confidence === 'verified' ? 'đã xác minh' : 'cần xác nhận'})`
-          : '';
         setStepState(
           'source',
           'done',
-          `Quét ${disc.pagesScanned} trang${sizeLabel} · Tìm thấy ${disc.discoveredProducts.length} SP (thêm mới ${importedCount}, đã có ${skippedExisting})${sellerLabel}`
+          `Quét ${activePreview.pagesScanned} trang${sizeLabel} · Tạo mới ${batchStatsMeta.createdCount}, cập nhật ${batchStatsMeta.updatedCount}, bỏ qua ${batchStatsMeta.skippedCount}, lỗi ${batchStatsMeta.failedCount}`
         );
+        setWebsitePreview(null);
       } else if (sourceMode === 'excel' && sourceExcelFile) {
         if (!targetCompanyId) {
           throw new Error('Chưa có doanh nghiệp để gắn sản phẩm Excel.');
@@ -540,12 +798,12 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
         sourceUrl: sourceMode === 'url' ? sourceWebsiteUrl.trim() : undefined,
         sourceFilename: sourceMode === 'excel' ? sourceExcelFile?.name : undefined,
         ownerCompanyId: targetCompanyId,
+        cleanSlots: true,
       });
       setStepState('layout', 'done', `Draft v${version.versionNumber} (${version.zones.length} khu · ${version.booths.length} gian · ${version.hallWidth}×${version.hallDepth}m)`);
 
       // Step 5: Atomic backend auto-classification, category-zone mapping & slot allocation
       setStepState('allocate', 'running');
-      let allocatedSlots = 0;
       let allocDetail = 'Giữ nguyên phân bổ hiện tại (gian chưa có SP được đánh dấu đỏ)';
       if (autoAllocateProducts) {
         const allocRes = await v28Api.autoAllocateDraftProducts(selectedExhId, version.versionId, {
@@ -554,19 +812,23 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
           categoryHints,
           organizeZonesByCategory: true,
         });
-        allocatedSlots = allocRes.assignedSlots;
         setLastImportSummary({
           detectedCompany: detectedCompanyMeta,
           coverageReport: coverageReportMeta,
+          batchStats: batchStatsMeta,
           zoneDecisions: allocRes.zoneDecisions,
           assignedSlots: allocRes.assignedSlots,
           boothsFilled: allocRes.boothsFilled,
+          emptySlotsRemaining: allocRes.emptySlotsRemaining,
           overflowCount: allocRes.overflowProductIds.length,
           uncertainProducts: allocRes.uncertainProducts,
         });
         const notes: string[] = [
           `Đã tự động gán ${allocRes.assignedSlots} vị trí tại ${allocRes.boothsFilled} gian`,
         ];
+        if (typeof allocRes.emptySlotsRemaining === 'number' && allocRes.emptySlotsRemaining > 0) {
+          notes.push(`${allocRes.emptySlotsRemaining} slot còn trống`);
+        }
         if (allocRes.overflowProductIds.length > 0) {
           notes.push(`${allocRes.overflowProductIds.length} SP dư giữ trong Catalog`);
         }
@@ -578,28 +840,32 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
         setLastImportSummary({
           detectedCompany: detectedCompanyMeta,
           coverageReport: coverageReportMeta,
+          batchStats: batchStatsMeta,
           assignedSlots: 0,
           boothsFilled: 0,
+          emptySlotsRemaining: computedTotalBooths * 6,
           overflowCount: importedProductIds.length,
           uncertainProducts: [],
         });
       }
       setStepState('allocate', 'done', allocDetail);
 
+      // Immediately activate as the single live exhibition (no separate Draft state)
+      const { version: liveVersion } = await v28Api.saveAndPublishExhibition(selectedExhId, version.versionId);
       await loadExhibitions();
-      const refreshed = await v28Api.getVersionDetail(selectedExhId, version.versionId);
-      setSelectedVersionId(version.versionId);
-      setVersionDetail(refreshed.version);
-      setFilterZoneCode('ALL');
+      setSelectedVersionId(liveVersion.versionId);
+      setVersionDetail(liveVersion);
+      setFilterZoneCode(liveVersion.zones.length === 1 ? liveVersion.zones[0].code : '');
       setPage(1);
 
-      const withSp = refreshed.version.booths.filter((b) => b.assignedSlotCount > 0).length;
-      const emptySp = refreshed.version.booths.length - withSp;
-      const summaryText = `Đã tạo Draft v${refreshed.version.versionNumber}: ${refreshed.version.zones.length} khu × ${parsedBoothsPerZone} gian = ${refreshed.version.booths.length} gian (${withSp} gian có SP, ${emptySp} gian trống đánh dấu đỏ). Kiểm tra sơ đồ 2D và bấm "🚀 Publish" để xuất bản.`;
+      const withSp = liveVersion.booths.filter((b) => b.assignedSlotCount > 0).length;
+      const emptySp = liveVersion.booths.length - withSp;
+      const summaryText = `Đã tạo và đồng bộ triển lãm: ${liveVersion.zones.length} khu × ${parsedBoothsPerZone} gian = ${liveVersion.booths.length} gian (${withSp} gian có SP, ${emptySp} gian trống).`;
       setCreationProgress((prev) =>
         prev ? { ...prev, running: false, summary: summaryText } : prev
       );
       setMessage(summaryText);
+      notifyV28WorldSync('exhibition_created');
       onDataChanged?.();
     } catch (e) {
       const errMsg = (e as Error).message || 'Có lỗi xảy ra khi tạo không gian triển lãm.';
@@ -647,20 +913,103 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     }
   };
 
-  const handleRenameZone = async (zoneId: string) => {
-    if (!selectedExhId || !selectedVersionId) return;
-    const displayName = (editZoneName[zoneId] || '').trim();
-    if (!displayName) return;
+  const handleEnsureWorkingDraft = useCallback(async (): Promise<V28ExhibitionVersionDetail | null> => {
+    if (!selectedExhId) return null;
+    if (versionDetail?.status === 'draft') return versionDetail;
+    setSwitchingDraftBusy(true);
     setError('');
     setMessage('');
     try {
-      const { version } = await v28Api.updateDraftZone(selectedExhId, selectedVersionId, zoneId, {
-        displayName,
-      });
-      setVersionDetail(version);
-      setMessage(`Đã đổi tên phân khu thành "${displayName}".`);
+      const res = await v28Api.ensureWorkingDraft(selectedExhId);
+      const exhRes = await v28Api.listExhibitions().catch(() => null);
+      if (exhRes?.exhibitions) {
+        setExhibitions(exhRes.exhibitions);
+      }
+      setSelectedVersionId(res.version.versionId);
+      setVersionDetail(res.version);
+      setSelectedBooth((prev) =>
+        prev ? res.version.booths.find((b) => b.boothId === prev.boothId) || null : null
+      );
+      setMessage(
+        res.createdFromPublished
+          ? `Đã sao chép nguyên vẹn bản Xuất bản sang Bản nháp v${res.version.versionNumber} để chỉnh sửa an toàn.`
+          : `Đã chuyển sang Bản nháp v${res.version.versionNumber} đang làm dở.`
+      );
+      onDataChanged?.();
+      return res.version;
     } catch (e) {
-      setError((e as Error).message);
+      const msg = (e as Error).message || 'Không thể mở bản Nháp làm việc.';
+      setError(msg);
+      throw e;
+    } finally {
+      setSwitchingDraftBusy(false);
+    }
+  }, [selectedExhId, versionDetail, onDataChanged]);
+
+  const handleStartZoneRename = async (zone: { id: string; code: string; displayName: string }) => {
+    setRenameZoneError('');
+    setError('');
+    setRenamingZoneCode(zone.code);
+    setRenameZoneInput(zone.displayName);
+  };
+
+  const handleCancelZoneRename = () => {
+    setRenamingZoneCode(null);
+    setRenameZoneInput('');
+    setRenameZoneError('');
+  };
+
+  const handleCommitZoneRename = async (zone: { id: string; code: string; displayName: string }) => {
+    if (!selectedExhId || !selectedVersionId || !versionDetail) return;
+    if (versionDetail.status === 'archived') {
+      setRenameZoneError('Không thể đổi tên phân khu trên phiên bản đã lưu trữ.');
+      return;
+    }
+    const cleaned = renameZoneInput.replace(/\s+/g, ' ').trim();
+    if (cleaned.length < 2) {
+      setRenameZoneError('Tên phân khu phải có ít nhất 2 ký tự.');
+      return;
+    }
+    if (cleaned.length > 60) {
+      setRenameZoneError('Tên phân khu không được vượt quá 60 ký tự.');
+      return;
+    }
+    const norm = cleaned.toLocaleLowerCase('vi-VN');
+    const dup = versionDetail.zones.find(
+      (z) =>
+        z.code !== zone.code &&
+        z.displayName.replace(/\s+/g, ' ').trim().toLocaleLowerCase('vi-VN') === norm
+    );
+    if (dup) {
+      setRenameZoneError(`Tên "${cleaned}" đã trùng với khu ${dup.code}.`);
+      return;
+    }
+    if (cleaned === zone.displayName) {
+      handleCancelZoneRename();
+      return;
+    }
+    setRenamingZoneBusy(true);
+    setRenameZoneError('');
+    setError('');
+    setMessage('');
+    try {
+      const { version: updatedVer } = await v28Api.updateDraftZone(selectedExhId, selectedVersionId, zone.id, {
+        displayName: cleaned,
+      });
+      await loadExhibitions();
+      setSelectedVersionId(updatedVer.versionId);
+      setVersionDetail(updatedVer);
+      setSelectedBooth((prev) =>
+        prev ? updatedVer.booths.find((b) => b.boothId === prev.boothId) || null : null
+      );
+      handleCancelZoneRename();
+      setMessage(`Đã lưu và đồng bộ tên khu ${zone.code} thành "${cleaned}" lên World 3D!`);
+      notifyV28WorldSync('zone_renamed');
+      onDataChanged?.();
+    } catch (e) {
+      setRenameZoneError((e as Error).message || 'Không thể lưu tên phân khu.');
+    } finally {
+      setRenamingZoneBusy(false);
     }
   };
 
@@ -678,37 +1027,70 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     setError('');
     setMessage('');
     try {
-      const { version } = await v28Api.updateDraftBooth(selectedExhId, selectedVersionId, boothId, patch);
-      setVersionDetail(version);
-      const updated = version.booths.find((b) => b.boothId === boothId) || null;
+      const { version: updatedVer } = await v28Api.updateDraftBooth(selectedExhId, selectedVersionId, boothId, patch);
+      await loadExhibitions();
+      setSelectedVersionId(updatedVer.versionId);
+      setVersionDetail(updatedVer);
+      const updated = updatedVer.booths.find((b) => b.boothId === boothId) || null;
       setSelectedBooth(updated);
-      if (updated) setEditBoothName(updated.boothName);
-      setMessage('Đã cập nhật gian hàng trong bản Draft.');
+      setMessage('Đã lưu và đồng bộ cập nhật gian hàng lên World 3D!');
+      notifyV28WorldSync('booth_updated');
+      onDataChanged?.();
     } catch (e) {
       setError((e as Error).message);
+      throw e;
     }
   };
 
   const handleAssignSlot = async (boothId: string, slotId: string, productId: string) => {
     setError('');
     setMessage('');
+    if (!selectedExhId || !selectedVersionId) return;
     try {
-      if (!productId) {
-        await v28Api.clearSlot(boothId, slotId);
-        setMessage(`Đã gỡ sản phẩm khỏi vị trí ${slotId}.`);
-      } else {
-        await v28Api.assignSlot(boothId, slotId, productId);
-        setMessage(`Đã gán sản phẩm vào vị trí ${slotId} và đồng bộ World V28.`);
-      }
-      if (selectedExhId && selectedVersionId) {
-        await loadVersionDetail(selectedExhId, selectedVersionId);
-      }
+      const { version: updatedVer } = !productId
+        ? await v28Api.clearDraftSlot(selectedExhId, selectedVersionId, boothId, slotId)
+        : await v28Api.assignDraftSlot(selectedExhId, selectedVersionId, boothId, slotId, productId);
+      await loadExhibitions();
+      setSelectedVersionId(updatedVer.versionId);
+      setVersionDetail(updatedVer);
+      setSelectedBooth((prev) =>
+        prev ? updatedVer.booths.find((b) => b.boothId === prev.boothId) || null : null
+      );
+      setMessage(
+        !productId
+          ? `Đã gỡ sản phẩm khỏi vị trí ${slotId} và đồng bộ World 3D!`
+          : `Đã gắn sản phẩm vào vị trí ${slotId} và đồng bộ World 3D!`
+      );
       notifyV28WorldSync('slot_updated');
       onDataChanged?.();
     } catch (e) {
       setError((e as Error).message);
-      // V28-AUDIT-002: Re-throw so BoothInspectorPanel never shows a false green success banner on API failure!
       throw e;
+    }
+  };
+
+  const handleManualAutoAllocateDraft = async () => {
+    if (!selectedExhId || !selectedVersionId || versionDetail?.status !== 'draft') return;
+    setLoading(true);
+    setError('');
+    setMessage('');
+    try {
+      const allocRes = await v28Api.autoAllocateDraftProducts(selectedExhId, selectedVersionId, {
+        companyId: ownerState?.company?.id || versionDetail.ownerCompanyId || undefined,
+        organizeZonesByCategory: true,
+      });
+      setVersionDetail(allocRes.version);
+      setSelectedBooth((prev) =>
+        prev ? allocRes.version.booths.find((b) => b.boothId === prev.boothId) || null : null
+      );
+      setMessage(
+        `Đã tự động phân bổ thêm ${allocRes.assignedSlots} SP từ Kho vào các slot trống (giữ nguyên slot đã gán tay · còn ${allocRes.emptySlotsRemaining ?? 0} slot trống · ${allocRes.overflowProductIds.length} SP dư trong Kho).`
+      );
+      onDataChanged?.();
+    } catch (e) {
+      setError((e as Error).message || 'Không thể tự động phân bổ sản phẩm.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -718,10 +1100,11 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
     setError('');
     setMessage('');
     try {
-      const { version } = await v28Api.publishVersion(selectedExhId, selectedVersionId);
+      const { version } = await v28Api.saveAndPublishExhibition(selectedExhId, selectedVersionId);
       await loadExhibitions();
+      setSelectedVersionId(version.versionId);
       setVersionDetail(version);
-      setMessage(`Đã Publish phiên bản v${version.versionNumber} (${version.booths.length} gian) — World V28 đã tự đồng bộ!`);
+      setMessage(`Đã lưu và đồng bộ triển lãm (${version.booths.length} gian) lên World 3D theo thời gian thực!`);
       notifyV28WorldSync('version_published');
       onDataChanged?.();
     } catch (e) {
@@ -752,46 +1135,82 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Focused Dashboard Overview: Owner Card + Next-Step Actions + Minimalist 4 KPIs */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+      {/* Focused Dashboard Overview: Compact Owner + Version Bar + Minimalist 4 KPIs */}
       {viewMode === 'dashboard' && (
         <>
-          <div className="v28-card" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 240 }}>
-              {versionDetail?.ownerCompany?.logoUrl ? (
+          <div
+            className="v28-card"
+            style={{
+              padding: '14px 16px',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 12,
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: '1 1 240px' }}>
+              {(ownerState?.company?.logoUrl || versionDetail?.ownerCompany?.logoUrl) ? (
                 <img
-                  src={versionDetail.ownerCompany.logoUrl}
-                  alt={versionDetail.ownerCompany.name}
-                  style={{ width: 48, height: 48, borderRadius: 10, objectFit: 'contain', background: '#f8fafc', border: '1px solid rgba(17,24,39,0.1)', padding: 4 }}
+                  src={ownerState?.company?.logoUrl || versionDetail?.ownerCompany?.logoUrl || ''}
+                  alt={ownerState?.company?.name || versionDetail?.ownerCompany?.name || ''}
+                  style={{ width: 42, height: 42, borderRadius: 9, objectFit: 'contain', background: '#f8fafc', border: '1px solid rgba(17,24,39,0.1)', padding: 4, flexShrink: 0 }}
                 />
               ) : (
-                <div style={{ width: 48, height: 48, borderRadius: 10, background: '#e0f2fe', color: '#0369a1', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 18 }}>
-                  {(versionDetail?.ownerCompany?.name || 'E').slice(0, 1).toUpperCase()}
+                <div style={{ width: 42, height: 42, borderRadius: 9, background: '#e0f2fe', color: '#0369a1', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 16, flexShrink: 0 }}>
+                  {(ownerState?.company?.name || versionDetail?.ownerCompany?.name || 'E').slice(0, 1).toUpperCase()}
                 </div>
               )}
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#526071' }}>Doanh nghiệp sở hữu triển lãm</div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: '#111827', letterSpacing: '-0.02em' }}>
-                  {versionDetail?.ownerCompany?.name ||
-                    (new Set((versionDetail?.booths || []).map((b) => b.companyId).filter(Boolean)).size > 1
-                      ? 'Chưa chuẩn hóa 1 doanh nghiệp (Bản cũ)'
-                      : 'Chưa xác định doanh nghiệp')}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: '#526071' }}>Doanh nghiệp hiện tại</div>
+                <div
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 800,
+                    color: '#111827',
+                    letterSpacing: '-0.02em',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {ownerState?.company?.name ||
+                    versionDetail?.ownerCompany?.name ||
+                    (ownerState?.state === 'selection_required'
+                      ? 'Cần xác nhận doanh nghiệp sở hữu'
+                      : 'Chưa thiết lập doanh nghiệp')}
                 </div>
-                <div style={{ fontSize: 12.5, color: '#0284c7', marginTop: 2 }}>
-                  {versionDetail?.ownerCompany?.contactUrl || 'Mô hình 1 Website triển lãm · 1 Doanh nghiệp duy nhất'}
-                </div>
+                {(ownerState?.company?.contactUrl || versionDetail?.ownerCompany?.contactUrl) && (
+                  <div style={{ fontSize: 12, color: '#0284c7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {ownerState?.company?.contactUrl || versionDetail?.ownerCompany?.contactUrl}
+                  </div>
+                )}
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            {/* Phase 4: Single Current Exhibition Actions */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }} data-testid="v28-single-exhibition-actions">
+              {versionDetail?.status === 'draft' && (
+                <button
+                  type="button"
+                  data-testid="v28-save-and-publish-btn"
+                  className="v28-btn v28-btn--primary"
+                  disabled={loading || !versionDetail.validation.valid}
+                  onClick={() => void handlePublish()}
+                  style={{ minHeight: 34, padding: '0 13px', fontSize: 12, background: '#059669' }}
+                >
+                  {loading ? 'Đang lưu...' : 'Đồng bộ World 3D'}
+                </button>
+              )}
               {onManageCompanies && (
                 <button
                   type="button"
                   className="v28-btn v28-btn--secondary"
                   onClick={onManageCompanies}
-                  style={{ minHeight: 36, padding: '0 12px', fontSize: 12.5 }}
+                  style={{ minHeight: 34, padding: '0 11px', fontSize: 12 }}
                 >
-                  Chỉnh sửa doanh nghiệp
+                  {ownerState?.state === 'bound' ? 'Doanh nghiệp' : 'Thiết lập DN'}
                 </button>
               )}
               {onManageCatalog && (
@@ -799,7 +1218,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                   type="button"
                   className="v28-btn v28-btn--secondary"
                   onClick={() => onManageCatalog(versionDetail?.ownerCompanyId || undefined)}
-                  style={{ minHeight: 36, padding: '0 12px', fontSize: 12.5 }}
+                  style={{ minHeight: 34, padding: '0 11px', fontSize: 12 }}
                 >
                   Kho sản phẩm
                 </button>
@@ -812,19 +1231,9 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                     setViewMode('wizard');
                     setWizardStep(3);
                   }}
-                  style={{ minHeight: 36, padding: '0 12px', fontSize: 12.5 }}
+                  style={{ minHeight: 34, padding: '0 11px', fontSize: 12 }}
                 >
                   Sơ đồ 2D
-                </button>
-              )}
-              {onOpenDynamicWorld && (
-                <button
-                  type="button"
-                  className="v28-btn v28-btn--primary"
-                  onClick={onOpenDynamicWorld}
-                  style={{ minHeight: 36, padding: '0 14px', fontSize: 12.5 }}
-                >
-                  Xem triển lãm
                 </button>
               )}
             </div>
@@ -834,47 +1243,41 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
             <div className="v28-kpi-card">
               <div className="v28-kpi-label">Tổng số khu</div>
               <div className="v28-kpi-value">{stats.zoneCount}</div>
-              <div className="v28-kpi-sub">Phân khu theo danh mục</div>
             </div>
             <div className="v28-kpi-card">
               <div className="v28-kpi-label">Tổng số gian</div>
               <div className="v28-kpi-value">{stats.totalBooths}</div>
-              <div className="v28-kpi-sub">
-                {versionDetail ? (versionDetail.status === 'published' ? 'Đã xuất bản' : 'Bản nháp') : 'Chưa tạo'}
-              </div>
             </div>
             <div className="v28-kpi-card">
-              <div className="v28-kpi-label">Sản phẩm đã gắn</div>
+              <div className="v28-kpi-label">Sản phẩm đã gắn / tổng slot</div>
               <div className="v28-kpi-value" style={{ color: '#0284c7' }}>
                 {stats.totalAssignedSlots} / {stats.totalSlotCapacity}
               </div>
-              <div className="v28-kpi-sub">{stats.boothsWithProducts} gian đang trưng bày</div>
             </div>
             <div className="v28-kpi-card">
               <div className="v28-kpi-label">Gian trống</div>
               <div className="v28-kpi-value" style={{ color: stats.totalBooths - stats.boothsWithProducts > 0 ? '#dc2626' : '#059669' }}>
                 {Math.max(0, stats.totalBooths - stats.boothsWithProducts)}
               </div>
-              <div className="v28-kpi-sub">Chưa có sản phẩm</div>
             </div>
           </div>
         </>
       )}
 
-      {/* 4-Step Website-Builder Wizard Stepper Navigation */}
+      {/* Compact 4-Step Wizard Stepper Navigation */}
       {viewMode === 'wizard' && (
         <div
           className="v28-card"
           style={{
-            padding: '14px 18px',
+            padding: '10px 14px',
             display: 'flex',
             flexWrap: 'wrap',
-            gap: 10,
+            gap: 8,
             alignItems: 'center',
             justifyContent: 'space-between',
           }}
         >
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             {[
               { step: 1 as const, label: '1. Cấu hình' },
               { step: 2 as const, label: '2. Sản phẩm' },
@@ -895,13 +1298,13 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                     if (!blockedByValidation) setWizardStep(item.step);
                   }}
                   style={{
-                    padding: '7px 14px',
-                    borderRadius: 8,
+                    padding: '5px 11px',
+                    borderRadius: 7,
                     border: active ? '1.5px solid #0284c7' : '1px solid rgba(17,24,39,0.12)',
                     background: active ? '#e0f2fe' : done ? '#ecfdf5' : '#f8fafc',
                     color: active ? '#0369a1' : done ? '#059669' : '#526071',
                     fontWeight: 700,
-                    fontSize: 13,
+                    fontSize: 12.5,
                     cursor: blockedByValidation ? 'not-allowed' : 'pointer',
                     opacity: blockedByValidation ? 0.55 : 1,
                   }}
@@ -912,13 +1315,13 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
               );
             })}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             {wizardStep > 1 && (
               <button
                 type="button"
                 className="v28-btn v28-btn--secondary"
                 onClick={() => setWizardStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3 | 4) : s))}
-                style={{ minHeight: 36, padding: '0 12px' }}
+                style={{ minHeight: 32, padding: '0 10px', fontSize: 12 }}
               >
                 ← Quay lại
               </button>
@@ -930,8 +1333,9 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                 disabled={wizardStep === 1 && Boolean(configValidationError)}
                 onClick={() => setWizardStep((s) => (s < 4 ? ((s + 1) as 1 | 2 | 3 | 4) : s))}
                 style={{
-                  minHeight: 36,
-                  padding: '0 14px',
+                  minHeight: 32,
+                  padding: '0 12px',
+                  fontSize: 12,
                   opacity: wizardStep === 1 && configValidationError ? 0.5 : 1,
                 }}
               >
@@ -966,9 +1370,17 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div className="v28-kpi-grid">
                     <div className="v28-kpi-card">
-                      <div className="v28-kpi-label">Sản phẩm hợp lệ</div>
-                      <div className="v28-kpi-value" style={{ color: '#0284c7' }}>{lastImportSummary.coverageReport.extractedValidCount}</div>
-                      <div className="v28-kpi-sub">{lastImportSummary.coverageReport.newCount} mới · {lastImportSummary.coverageReport.duplicateCount} đã có</div>
+                      <div className="v28-kpi-label">Đã lưu vào Kho</div>
+                      <div className="v28-kpi-value" style={{ color: '#0284c7' }}>
+                        {lastImportSummary.batchStats
+                          ? lastImportSummary.batchStats.createdCount
+                          : lastImportSummary.coverageReport.extractedValidCount}
+                      </div>
+                      <div className="v28-kpi-sub">
+                        {lastImportSummary.batchStats
+                          ? `Cập nhật ${lastImportSummary.batchStats.updatedCount} · Bỏ qua ${lastImportSummary.batchStats.skippedCount} · Lỗi ${lastImportSummary.batchStats.failedCount}`
+                          : `${lastImportSummary.coverageReport.newCount} mới · ${lastImportSummary.coverageReport.duplicateCount} đã có`}
+                      </div>
                     </div>
                     <div className="v28-kpi-card">
                       <div className="v28-kpi-label">Đã phân bổ vào gian</div>
@@ -976,9 +1388,12 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                       <div className="v28-kpi-sub">Trên {lastImportSummary.boothsFilled} gian hàng</div>
                     </div>
                     <div className="v28-kpi-card">
-                      <div className="v28-kpi-label">Sản phẩm dư (Catalog)</div>
-                      <div className="v28-kpi-value">{lastImportSummary.overflowCount}</div>
-                      <div className="v28-kpi-sub">Có thể gán thủ công ở Bước 3</div>
+                      <div className="v28-kpi-label">Slot còn trống</div>
+                      <div className="v28-kpi-value">
+                        {lastImportSummary.emptySlotsRemaining ??
+                          Math.max(0, stats.totalSlotCapacity - stats.totalAssignedSlots)}
+                      </div>
+                      <div className="v28-kpi-sub">SP dư trong Kho: {lastImportSummary.overflowCount}</div>
                     </div>
                   </div>
                   <details className="v28-advanced-details">
@@ -1146,6 +1561,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
               onChange={(e) => {
                 setZoneCountInput(e.target.value.replace(/[^\d]/g, ''));
                 setShowCreateConfirm(false);
+                setWebsitePreview(null);
               }}
               onWheel={(e) => e.currentTarget.blur()}
               placeholder="VD: 10"
@@ -1172,6 +1588,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
               onChange={(e) => {
                 setBoothsPerZoneInput(e.target.value.replace(/[^\d]/g, ''));
                 setShowCreateConfirm(false);
+                setWebsitePreview(null);
               }}
               onWheel={(e) => e.currentTarget.blur()}
               placeholder="VD: 10"
@@ -1186,143 +1603,98 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
             />
           </label>
 
-          {/* Mandatory Product Source Selector (URL or Excel ONLY — Catalog bypass removed per F3) */}
+          {/* Mandatory Product Source (URL Website only) */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: '1 1 320px', minWidth: 260 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>Nguồn sản phẩm (bắt buộc):</span>
-              {[
-                { id: 'url', label: '🔗 URL Website' },
-              ].map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => {
-                    setSourceMode(opt.id as 'url' | 'excel');
-                    setShowCreateConfirm(false);
-                  }}
-                  style={{
-                    padding: '3px 9px',
-                    borderRadius: 7,
-                    border: sourceMode === opt.id ? '1.5px solid #0ea5e9' : '1px solid #cbd5e1',
-                    background: sourceMode === opt.id ? '#e0f2fe' : '#fff',
-                    color: sourceMode === opt.id ? '#0369a1' : '#334155',
-                    fontWeight: 700,
-                    fontSize: 12,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {opt.label}
-                </button>
-              ))}
-              {sourceMode === 'url' ? (
+              <span
+                style={{
+                  padding: '3px 9px',
+                  borderRadius: 7,
+                  border: '1.5px solid #0ea5e9',
+                  background: '#e0f2fe',
+                  color: '#0369a1',
+                  fontWeight: 700,
+                  fontSize: 12,
+                }}
+              >
+                🔗 URL Website
+              </span>
                 <span
                   style={{
                     padding: '3px 8px',
                     borderRadius: 7,
-                    background: '#f0f9ff',
-                    border: '1px solid #bae6fd',
-                    color: '#0369a1',
+                    background: ownerState?.state === 'bound' ? '#f0f9ff' : '#fef3c7',
+                    border: `1px solid ${ownerState?.state === 'bound' ? '#bae6fd' : '#fde68a'}`,
+                    color: ownerState?.state === 'bound' ? '#0369a1' : '#92400e',
                     fontSize: 11.5,
                     fontWeight: 600,
                   }}
                 >
-                  ✨ Tự động nhận diện 1 doanh nghiệp từ URL
+                  {ownerState?.state === 'bound' && ownerState.company
+                    ? `🏢 Chủ sở hữu: ${ownerState.company.name}`
+                    : '⚠️ Chưa xác định doanh nghiệp chủ sở hữu'}
                 </span>
-              ) : (
-                <select
-                  aria-label="Doanh nghiệp sở hữu triển lãm"
-                  value={sourceCompanyId}
-                  onChange={(e) => setSourceCompanyId(e.target.value)}
-                  style={{ padding: '3px 8px', borderRadius: 7, border: '1px solid #cbd5e1', fontSize: 12, background: '#fff' }}
-                >
-                  {companies.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-            {sourceMode === 'url' ? (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <input
-                  type="url"
-                  aria-label="URL Website doanh nghiệp"
-                  value={sourceWebsiteUrl}
-                  onChange={(e) => {
-                    setSourceWebsiteUrl(e.target.value);
-                    setShowCreateConfirm(false);
-                  }}
-                  placeholder="https://example-business.com"
-                  style={{
-                    flex: '1 1 220px',
-                    padding: '9px 11px',
-                    borderRadius: 10,
-                    border: !isSourceValid ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
-                    fontSize: 13.5,
-                    boxSizing: 'border-box',
-                  }}
-                />
-                <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
-                  <span>Số SP cần lấy:</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    aria-label="Số lượng sản phẩm cần lấy"
-                    value={targetProductCountInput}
-                    onChange={(e) => {
-                      const v = e.target.value.replace(/[^\d]/g, '').slice(0, 3);
-                      setTargetProductCountInput(v);
-                      setShowCreateConfirm(false);
-                    }}
-                    placeholder="15"
+                {ownerState && ownerState.state !== 'bound' && onManageCompanies && (
+                  <button
+                    type="button"
+                    onClick={onManageCompanies}
                     style={{
-                      width: 64,
-                      padding: '8px 8px',
-                      borderRadius: 8,
-                      border: '1px solid #cbd5e1',
-                      fontSize: 13,
+                      padding: '3px 9px',
+                      borderRadius: 7,
+                      border: '1px solid #0284c7',
+                      background: '#fff',
+                      color: '#0369a1',
+                      fontSize: 11.5,
                       fontWeight: 700,
-                      textAlign: 'center',
+                      cursor: 'pointer',
                     }}
-                  />
-                </label>
-              </div>
-            ) : (
+                  >
+                    Thiết lập doanh nghiệp →
+                  </button>
+                )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <input
-                type="file"
-                aria-label="Tệp Excel sản phẩm"
-                accept=".xlsx,.xls,.csv"
+                type="url"
+                aria-label="URL Website doanh nghiệp"
+                value={sourceWebsiteUrl}
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
+                  const nextVal = e.target.value;
+                  setSourceWebsiteUrl(nextVal);
                   setShowCreateConfirm(false);
-                  if (!file) {
-                    setSourceExcelFile(null);
-                    return;
+                  if (websitePreview && websitePreview.forUrl !== nextVal.trim()) {
+                    setWebsitePreview(null);
                   }
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    const res = String(reader.result || '');
-                    const base64 = res.includes(',') ? res.split(',')[1] : res;
-                    setSourceExcelFile({ name: file.name, base64 });
-                  };
-                  reader.readAsDataURL(file);
                 }}
+                placeholder="Nhập URL trang chủ (VD: http://nongsanviet.pro/), danh mục hoặc chi tiết SP..."
                 style={{
-                  width: '100%',
-                  padding: '6px 8px',
+                  flex: '1 1 240px',
+                  padding: '9px 11px',
                   borderRadius: 10,
                   border: !isSourceValid ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
-                  fontSize: 12.5,
-                  background: '#f8fafc',
+                  fontSize: 13.5,
                   boxSizing: 'border-box',
                 }}
               />
-            )}
+            </div>
           </div>
 
           <button
             type="button"
-            onClick={() => setShowCreateConfirm(true)}
-            disabled={loading || Boolean(configValidationError)}
+            onClick={() => {
+              const requiredProductCount = Math.max(1, Math.min(1800, computedTotalBooths * 6));
+              if (
+                !websitePreview ||
+                websitePreview.forUrl !== sourceWebsiteUrl.trim() ||
+                websitePreview.targetCount !== requiredProductCount
+              ) {
+                void handlePreviewWebsite();
+                return;
+              }
+              setShowCreateConfirm(true);
+            }}
+            disabled={loading || previewingWebsite || Boolean(configValidationError)}
             style={{
               padding: '10px 18px',
               borderRadius: 10,
@@ -1335,7 +1707,11 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
               whiteSpace: 'nowrap',
             }}
           >
-            🏛️ Tạo không gian triển lãm
+            {previewingWebsite
+              ? '⏳ Đang quét xem trước...'
+              : !websitePreview || websitePreview.forUrl !== sourceWebsiteUrl.trim()
+                ? '🔍 Xem trước SP & Tạo triển lãm'
+                : '🏛️ Tạo không gian triển lãm'}
           </button>
         </div>
 
@@ -1353,7 +1729,8 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                 fontWeight: 700,
               }}
             >
-              Tổng dự kiến: <strong style={{ fontSize: 15 }}>{computedTotalBooths}</strong> gian hàng
+              Tổng dự kiến: <strong style={{ fontSize: 15 }}>{computedTotalBooths}</strong> gian hàng (tối đa{' '}
+              <strong>{computedTotalBooths * 6}</strong> SP)
             </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#334155' }}>
               <input
@@ -1482,6 +1859,75 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
           </div>
         )}
 
+        {previewingWebsite && (
+          <div
+            data-testid="v28-wizard-crawl-progress"
+            style={{
+              padding: '10px 12px',
+              borderRadius: 10,
+              background: '#eff6ff',
+              border: '1px solid #93c5fd',
+              color: '#1e3a8a',
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            ⏳ Đang khám phá danh mục, trang sản phẩm &amp; trích xuất dữ liệu từ website (chế độ chỉ đọc — chưa ghi vào Database)...
+          </div>
+        )}
+
+        {websitePreview && sourceMode === 'url' && websitePreview.forUrl === sourceWebsiteUrl.trim() && (() => {
+          const validNewSelectedCount = websitePreview.items.filter(
+            (i) =>
+              i.selected &&
+              validatePreviewProductItem(i) === null &&
+              (duplicateStrategy === 'update' || !i.alreadyInCatalog)
+          ).length;
+          const existingCatalogCount = websitePreview.items.filter((i) => i.alreadyInCatalog).length;
+          const confirmBtnLabel =
+            validNewSelectedCount > 0
+              ? `✅ Xác nhận chọn ${validNewSelectedCount} SP & Tạo không gian triển lãm`
+              : existingCatalogCount > 0
+                ? `🏛️ Tạo không gian triển lãm từ ${existingCatalogCount} SP đã có trong Kho`
+                : '✅ Xác nhận chọn SP & Tạo không gian triển lãm';
+
+          return (
+            <WebsiteProductPreviewPanel
+              ownerCompanyName={ownerState?.company?.name || 'Doanh nghiệp hiện tại'}
+              siteUrl={websitePreview.siteUrl}
+              entryPageType={websitePreview.entryPageType}
+              discoveryStatus={websitePreview.discoveryStatus}
+              discoveryStats={websitePreview.discoveryStats}
+              checkpoint={websitePreview.checkpoint}
+              companyMismatchWarning={websitePreview.companyMismatchWarning}
+              note={websitePreview.note}
+              items={websitePreview.items}
+              duplicateStrategy={duplicateStrategy}
+              onChangeDuplicateStrategy={setDuplicateStrategy}
+              onChangeItems={(next) =>
+                setWebsitePreview((prev) => (prev ? { ...prev, items: next } : prev))
+              }
+              onResumeCheckpoint={() => void handleResumeWebsiteCheckpoint()}
+              resumingCheckpoint={resumingCheckpoint}
+              onConfirmSave={() => setShowCreateConfirm(true)}
+              confirmLabel={confirmBtnLabel}
+              secondaryActionLabel={
+                validNewSelectedCount > 0
+                  ? savingCatalogOnly
+                    ? '⏳ Đang lưu vào Kho...'
+                    : `💾 Chỉ lưu ${validNewSelectedCount} SP vào Kho sản phẩm`
+                  : undefined
+              }
+              onSecondaryAction={
+                validNewSelectedCount > 0 ? () => void handleSavePreviewOnlyToCatalog() : undefined
+              }
+              allowConfirmWithZeroNewWhenCatalogHasExisting
+              onCancel={() => setWebsitePreview(null)}
+              busy={loading || savingCatalogOnly}
+            />
+          );
+        })()}
+
         {showCreateConfirm && !configValidationError && (
           <div
             style={{
@@ -1495,7 +1941,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
             }}
           >
             <strong style={{ fontSize: 14, color: '#0f172a' }}>
-              📋 Xác nhận cấu hình trước khi tạo không gian triển lãm (Draft)
+              📋 Xác nhận cấu hình trước khi tạo không gian triển lãm
             </strong>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, fontSize: 13 }}>
               <div>• Số khu chữ U: <strong>{parsedZoneCount} khu</strong></div>
@@ -1506,7 +1952,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
               <div>• Gian trống dự kiến: <strong style={{ color: '#dc2626' }}>{Math.max(0, computedTotalBooths - stats.boothsWithProducts)} gian</strong></div>
             </div>
             <div style={{ fontSize: 12, color: '#475569' }}>
-              Lưu ý: Hệ thống sẽ tạo bản <strong>Draft</strong> mới để bạn xem trước và chỉnh sửa. World 3D công khai chỉ cập nhật sau khi bạn bấm nút <strong>🚀 Publish</strong>.
+              Lưu ý: Hệ thống sẽ tạo và áp dụng trực tiếp vào không gian triển lãm 3D hiện tại.
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
@@ -1524,7 +1970,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                   fontSize: 13,
                 }}
               >
-                {loading ? '⏳ Đang tạo...' : `✅ Xác nhận Tạo Draft (${parsedZoneCount} khu × ${parsedBoothsPerZone} gian)`}
+                {loading ? '⏳ Đang tạo...' : `✅ Xác nhận Tạo triển lãm (${parsedZoneCount} khu × ${parsedBoothsPerZone} gian)`}
               </button>
               <button
                 type="button"
@@ -1548,34 +1994,104 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
       )}
 
       {error && (
-        <div style={{ padding: 12, borderRadius: 8, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }}>
-          ⚠️ {error}
+        <div
+          style={{
+            padding: '8px 12px',
+            borderRadius: 8,
+            background: '#fef2f2',
+            color: '#b91c1c',
+            border: '1px solid #fecaca',
+            fontSize: 13,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <V28SvgIcon name="warning" size={15} />
+            <span>{error}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setError('')}
+            aria-label="Đóng thông báo lỗi"
+            style={{ border: 'none', background: 'transparent', color: '#b91c1c', cursor: 'pointer', fontWeight: 700, padding: '2px 6px' }}
+          >
+            ✕
+          </button>
         </div>
       )}
       {message && (
-        <div style={{ padding: 12, borderRadius: 8, background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }}>
-          ✅ {message}
+        <div
+          style={{
+            padding: '8px 12px',
+            borderRadius: 8,
+            background: '#ecfdf5',
+            color: '#047857',
+            border: '1px solid #a7f3d0',
+            fontSize: 13,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <V28SvgIcon name="check" size={15} />
+            <span>{message}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setMessage('')}
+            aria-label="Đóng thông báo"
+            style={{ border: 'none', background: 'transparent', color: '#047857', cursor: 'pointer', fontWeight: 700, padding: '2px 6px' }}
+          >
+            ✕
+          </button>
         </div>
       )}
 
-      {/* Main Split: Large 2D Floorplan Left + Selected Booth Inspector Right (Wizard Step 3 — Bố trí) */}
+      {/* Main Split: Spacious 2D Floorplan Left + Unified BoothInspectorPanel Right (Wizard Step 3 — Bố trí) */}
       {versionDetail && viewMode === 'wizard' && wizardStep === 3 && (
         <div className="v28-preview-split">
-          {/* 2D Interactive SVG Floorplan + Zones */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div className="v28-card" style={{ padding: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                <strong style={{ fontSize: 14.5 }}>
-                  Sơ đồ 2D ({versionDetail.booths.length} gian · {versionDetail.zones.length} khu)
+          {/* 2D Interactive SVG Floorplan + Compact Zone Manager */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+            <div className="v28-card" style={{ padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                <strong style={{ fontSize: 14 }}>
+                  Sơ đồ 2D ({versionDetail.booths.length} gian · {versionDetail.zones.length} khu · {stats.totalAssignedSlots}/{stats.totalSlotCapacity} slot)
                 </strong>
-                <span style={{ fontSize: 12, color: '#526071' }}>
-                  <span style={{ color: '#dc2626', fontWeight: 700 }}>■ Đỏ: gian trống (0 SP)</span> ·{' '}
-                  {isDraft ? 'Bản nháp (chọn gian để chỉnh)' : 'Đã xuất bản'}
-                </span>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11.5, color: '#526071' }}>
+                    <span style={{ color: '#0ea5e9', fontWeight: 700 }}>■ Có SP</span> ·{' '}
+                    <span style={{ color: '#dc2626', fontWeight: 700 }}>■ Trống (0 SP)</span>
+                  </span>
+                  {isDraft && (
+                    <button
+                      type="button"
+                      data-testid="v28-step3-auto-allocate-btn"
+                      disabled={loading}
+                      onClick={() => void handleManualAutoAllocateDraft()}
+                      style={{
+                        padding: '4px 9px',
+                        borderRadius: 6,
+                        border: '1px solid #0284c7',
+                        background: '#f0f9ff',
+                        color: '#0369a1',
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        cursor: loading ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      🔀 Tự động phân bổ slot trống
+                    </button>
+                  )}
+                </div>
               </div>
               <svg
                 viewBox={`${versionDetail.hallBounds.minX - 4} ${versionDetail.hallBounds.minZ - 4} ${versionDetail.hallWidth + 8} ${versionDetail.hallDepth + 8}`}
-                style={{ width: '100%', maxHeight: 480, background: '#f8fafc', borderRadius: 8, border: '1px solid rgba(17,24,39,0.12)' }}
+                style={{ width: '100%', maxHeight: 540, background: '#f8fafc', borderRadius: 8, border: '1px solid rgba(17,24,39,0.12)' }}
               >
                 <rect
                   x={versionDetail.hallBounds.minX}
@@ -1597,9 +2113,10 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                 {versionDetail.booths.map((b) => {
                   const isSel = selectedBooth?.boothId === b.boothId;
                   const isEmpty = b.assignedSlotCount === 0;
-                  const dimmed = filterZoneCode !== 'ALL' && b.zoneCode !== filterZoneCode;
+                  const dimmed = Boolean(filterZoneCode) && b.zoneCode !== filterZoneCode;
                   return (
                     <g key={b.boothId} onClick={() => handleSelectBooth(b)} style={{ cursor: 'pointer' }}>
+                      <title>{`${b.boothName} (${b.zoneName}) — ${b.assignedSlotCount}/6 SP`}</title>
                       <rect
                         x={b.positionX - b.footprintWidth / 2}
                         y={b.positionZ - b.footprintDepth / 2}
@@ -1607,7 +2124,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                         height={b.footprintDepth}
                         rx={0.6}
                         fill={dimmed ? '#cbd5e1' : isEmpty ? '#dc2626' : b.color || '#0ea5e9'}
-                        fillOpacity={isSel ? 1 : isEmpty ? 0.9 : 0.8}
+                        fillOpacity={isSel ? 1 : isEmpty ? 0.9 : 0.82}
                         stroke={isSel ? '#0f172a' : isEmpty ? '#7f1d1d' : '#ffffff'}
                         strokeWidth={isSel ? 1.1 : isEmpty ? 0.65 : 0.35}
                       />
@@ -1628,339 +2145,430 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
               </svg>
             </div>
 
-            {/* Zones Manager */}
-            <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0' }}>
-              <strong style={{ fontSize: 14, display: 'block', marginBottom: 8 }}>
-                Danh sách Phân khu ({versionDetail.zones.length})
-              </strong>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
-                {versionDetail.zones.map((z) => (
-                  <div
-                    key={z.id}
-                    style={{
-                      display: 'flex',
-                      gap: 6,
-                      alignItems: 'center',
-                      padding: 6,
-                      borderRadius: 8,
-                      background: filterZoneCode === z.code ? '#e0f2fe' : '#f8fafc',
-                      border: '1px solid #e2e8f0',
+            {/* Compact Zones List with Pencil Inline Rename */}
+            <div className="v28-card" style={{ padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                <strong style={{ fontSize: 13.5, color: '#0f172a' }}>
+                  Danh sách phân khu ({versionDetail.zones.length})
+                </strong>
+                {filterZoneCode && versionDetail.zones.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilterZoneCode('');
+                      setPage(1);
                     }}
+                    style={{ padding: '3px 9px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#f8fafc', fontSize: 11.5, cursor: 'pointer', fontWeight: 600 }}
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFilterZoneCode(filterZoneCode === z.code ? 'ALL' : z.code);
-                        setPage(1);
-                      }}
-                      style={{
-                        minWidth: 28,
-                        padding: '3px 6px',
-                        borderRadius: 6,
-                        border: 'none',
-                        background: filterZoneCode === z.code ? '#0284c7' : '#e2e8f0',
-                        color: filterZoneCode === z.code ? '#fff' : '#0f172a',
-                        fontWeight: 700,
-                        fontSize: 12,
-                        cursor: 'pointer',
-                      }}
+                    Bỏ lọc khu ({filterZoneCode})
+                  </button>
+                )}
+              </div>
+              <div className="v28-zone-grid">
+                {versionDetail.zones.map((z) => {
+                  const zoneBooths = versionDetail.booths.filter((b) => b.zoneCode === z.code);
+                  const withProducts = zoneBooths.filter((b) => b.assignedSlotCount > 0).length;
+                  const emptyCount = zoneBooths.length - withProducts;
+                  const isEditingThis = renamingZoneCode === z.code;
+                  const isSelected = filterZoneCode === z.code;
+                  return (
+                    <div
+                      key={z.id}
+                      data-testid={`v28-step3-zone-item-${z.code}`}
+                      className={`v28-zone-card ${isSelected ? 'v28-zone-card--active' : ''} ${withProducts === 0 ? 'v28-zone-card--empty' : ''}`}
                     >
-                      {z.code}
-                    </button>
-                    <input
-                      value={editZoneName[z.id] ?? z.displayName}
-                      disabled={!isDraft}
-                      onChange={(e) => setEditZoneName((prev) => ({ ...prev, [z.id]: e.target.value }))}
-                      style={{ flex: 1, minWidth: 0, padding: '4px 6px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
-                    />
-                    <span style={{ fontSize: 11, color: '#64748b' }}>{z.boothCount}</span>
-                    {isDraft && (
-                      <button
-                        type="button"
-                        onClick={() => handleRenameZone(z.id)}
-                        style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', fontSize: 11 }}
-                      >
-                        Lưu
-                      </button>
-                    )}
-                  </div>
-                ))}
+                      {isEditingThis ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                            <span style={{ fontSize: 11.5, fontWeight: 800, color: '#0284c7', flexShrink: 0 }}>{z.code}</span>
+                            <input
+                              type="text"
+                              autoFocus
+                              data-testid={`v28-zone-rename-input-${z.code}`}
+                              value={renameZoneInput}
+                              disabled={renamingZoneBusy}
+                              onChange={(e) => {
+                                setRenameZoneInput(e.target.value);
+                                if (renameZoneError) setRenameZoneError('');
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  void handleCommitZoneRename(z);
+                                } else if (e.key === 'Escape') {
+                                  e.preventDefault();
+                                  handleCancelZoneRename();
+                                }
+                              }}
+                              className="v28-input"
+                              style={{ padding: '4px 7px', fontSize: 12.5, minWidth: 0, flex: 1 }}
+                            />
+                          </div>
+                          {renameZoneError && (
+                            <div data-testid="v28-zone-rename-error" style={{ fontSize: 11.5, color: '#dc2626', fontWeight: 600 }}>
+                              {renameZoneError}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              data-testid={`v28-zone-cancel-btn-${z.code}`}
+                              disabled={renamingZoneBusy}
+                              onClick={handleCancelZoneRename}
+                              style={{ padding: '3px 9px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}
+                            >
+                              Hủy
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`v28-zone-save-btn-${z.code}`}
+                              disabled={renamingZoneBusy}
+                              onClick={() => void handleCommitZoneRename(z)}
+                              style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: '#0284c7', color: '#fff', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}
+                            >
+                              {renamingZoneBusy ? '...' : 'Lưu'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFilterZoneCode(isSelected ? '' : z.code);
+                                setPage(1);
+                              }}
+                              title={`Lọc gian hàng thuộc ${z.displayName}`}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: 6,
+                                border: 'none',
+                                background: 'transparent',
+                                padding: 0,
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                minWidth: 0,
+                                flex: 1,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  minWidth: 22,
+                                  padding: '1px 5px',
+                                  borderRadius: 5,
+                                  background: isSelected ? '#0284c7' : '#e2e8f0',
+                                  color: isSelected ? '#fff' : '#0f172a',
+                                  fontWeight: 800,
+                                  fontSize: 11,
+                                  textAlign: 'center',
+                                  flexShrink: 0,
+                                  marginTop: 1,
+                                }}
+                              >
+                                {z.code}
+                              </span>
+                              <span className="v28-zone-title-clamp" title={z.displayName}>
+                                {z.displayName}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="v28-icon-btn"
+                              data-testid={`v28-zone-edit-btn-${z.code}`}
+                              title={`Đổi tên phân khu ${z.displayName}`}
+                              aria-label={`Đổi tên phân khu ${z.displayName}`}
+                              disabled={switchingDraftBusy}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleStartZoneRename(z);
+                              }}
+                            >
+                              <V28SvgIcon name="edit" size={14} />
+                            </button>
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, fontSize: 11.5, color: '#64748b', flexWrap: 'wrap' }}>
+                            <span><strong>{zoneBooths.length}</strong> gian</span>
+                            <span style={{ color: '#059669' }}><strong>{withProducts}</strong> có SP</span>
+                            {emptyCount > 0 && (
+                              <span style={{ color: '#dc2626', fontWeight: 600 }}>{emptyCount} trống</span>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
 
-          {/* Right Panel: Selected Booth Configurator + Inline 6-Slot Product Catalog Assigner */}
-          <div style={{ background: '#fff', borderRadius: 12, padding: 14, border: '1px solid #e2e8f0', alignSelf: 'start' }}>
-            <strong style={{ fontSize: 15, display: 'block', marginBottom: 10 }}>
-              Chi tiết Gian hàng & 6 Vị trí Trưng bày
-            </strong>
-            {!selectedBooth ? (
-              <div style={{ fontSize: 13, color: '#64748b' }}>
-                Chọn một gian hàng từ sơ đồ 2D hoặc bảng danh sách 100 gian hàng bên dưới để chỉnh sửa tên, doanh nghiệp, mẫu kiến trúc và gán sản phẩm vào 6 vị trí.
+          {/* Right Panel: Unified BoothInspectorPanel (slot controls shown ONLY when a booth is selected!) */}
+          {!selectedBooth ? (
+            <div className="v28-card" style={{ padding: 16, alignSelf: 'start' }} data-testid="v28-step3-empty-inspector">
+              <strong style={{ fontSize: 14, display: 'block', color: '#0f172a', marginBottom: 6 }}>
+                Chi tiết gian hàng
+              </strong>
+              <div style={{ fontSize: 12.5, color: '#64748b', lineHeight: 1.5 }}>
+                Nhấn chọn một gian hàng trực tiếp trên <strong>Sơ đồ 2D</strong> bên trái để xem thông tin và quản lý 6 vị trí trưng bày sản phẩm.
               </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
-                <div style={{ padding: 10, borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontWeight: 700, color: '#0f172a' }}>
-                    {selectedBooth.boothName} <span style={{ color: '#64748b', fontWeight: 500 }}>({selectedBooth.boothId})</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>
-                    {selectedBooth.zoneName} · Tọa độ ({selectedBooth.positionX}m, {selectedBooth.positionZ}m) · {selectedBooth.assignedSlotCount}/6 SP
-                  </div>
-                </div>
-
-                {/* Booth Rename (Draft) */}
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <input
-                    value={editBoothName}
-                    disabled={!isDraft}
-                    onChange={(e) => setEditBoothName(e.target.value)}
-                    placeholder="Tên gian hàng..."
-                    style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1' }}
-                  />
-                  {isDraft && (
-                    <button
-                      type="button"
-                      onClick={() => handleUpdateBooth(selectedBooth.boothId, { boothName: editBoothName.trim() })}
-                      style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: '#0f172a', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
-                    >
-                      Đổi tên
-                    </button>
-                  )}
-                </div>
-
-                {versionDetail.ownerCompanyId ? (
-                  <div style={{ padding: '7px 10px', borderRadius: 7, background: '#f0f9ff', border: '1px solid #bae6fd', fontSize: 12.5, color: '#0369a1' }}>
-                    <strong>Doanh nghiệp sở hữu:</strong>{' '}
-                    {versionDetail.ownerCompany?.name || selectedBooth.companyName}{' '}
-                    <span style={{ color: '#64748b' }}>(cố định theo mô hình 1 doanh nghiệp)</span>
-                  </div>
-                ) : (
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    Doanh nghiệp sở hữu {isDraft ? '' : '(tạo Draft để đổi)'}:
-                    <select
-                      disabled={!isDraft}
-                      value={selectedBooth.companyId || ''}
-                      onChange={(e) => handleUpdateBooth(selectedBooth.boothId, { companyId: e.target.value })}
-                      style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1' }}
-                    >
-                      {companies.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  Mẫu Gian hàng (6 V27.4 Archetypes):
-                  <select
-                    disabled={!isDraft}
-                    value={selectedBooth.archetypeId}
-                    onChange={(e) =>
-                      handleUpdateBooth(selectedBooth.boothId, { archetypeId: e.target.value as V28ArchetypeId })
-                    }
-                    style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1' }}
-                  >
-                    {archetypes.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.label} ({a.width}m × {a.depth}m)
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                {/* Inline 6 Product Display Slots (Catalog filtered strictly to owning company!) */}
-                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
-                    <div style={{ fontWeight: 700 }}>
-                      Gán sản phẩm từ Catalog của {selectedBooth.companyName} ({companyCatalogProducts.length} SP):
-                    </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {onManageCatalog && (
-                        <button
-                          type="button"
-                          onClick={() => onManageCatalog(selectedBooth.companyId || undefined)}
-                          style={{
-                            padding: '4px 8px',
-                            borderRadius: 6,
-                            border: '1px solid #cbd5e1',
-                            background: '#f8fafc',
-                            color: '#0f172a',
-                            fontSize: 11.5,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          ✏️ Thêm/Sửa SP
-                        </button>
-                      )}
-                      {onManageCompanies && (
-                        <button
-                          type="button"
-                          onClick={onManageCompanies}
-                          style={{
-                            padding: '4px 8px',
-                            borderRadius: 6,
-                            border: '1px solid #cbd5e1',
-                            background: '#f8fafc',
-                            color: '#0f172a',
-                            fontSize: 11.5,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          🏢 Doanh nghiệp
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {selectedBooth.slots.map((s) => (
-                      <div key={s.slotId} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                        <span style={{ width: 58, fontSize: 12, fontWeight: 700, color: '#475569' }}>{s.slotId}</span>
-                        <select
-                          value={s.product?.id || ''}
-                          onChange={(e) => handleAssignSlot(selectedBooth.boothId, s.slotId, e.target.value)}
-                          style={{ flex: 1, padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
-                        >
-                          <option value="">— Vị trí trống —</option>
-                          {s.product && !companyCatalogProducts.some((p) => p.id === s.product!.id) && (
-                            <option value={s.product.id}>
-                              {s.product.name} ({s.product.price.toLocaleString('vi-VN')} {s.product.currency})
-                            </option>
-                          )}
-                          {companyCatalogProducts.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name} ({p.price.toLocaleString('vi-VN')} {p.currency})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <BoothInspectorPanel
+              booth={selectedBooth}
+              isDraft={isDraft}
+              archetypes={archetypes}
+              onClose={() => setSelectedBooth(null)}
+              onAssignSlot={handleAssignSlot}
+              onUpdateBooth={(bId, patch) => handleUpdateBooth(bId, patch)}
+              onSwitchToWorkingDraft={async () => {
+                await handleEnsureWorkingDraft();
+              }}
+              onProductMutated={async () => {
+                if (selectedExhId && selectedVersionId) {
+                  await loadVersionDetail(selectedExhId, selectedVersionId);
+                }
+                notifyV28WorldSync('product_updated');
+                onDataChanged?.();
+              }}
+              onRequestDeleteBooth={(b) => setConfirmDeleteBooth(b)}
+            />
+          )}
         </div>
       )}
 
-      {/* Interactive Zone Cards Overview (Dashboard only — keeps Wizard steps laser-focused!) */}
+      {/* Interactive Zone Cards Overview (Dashboard) — Compact, Pencil Rename, Zero Repeated Status Pills */}
       {viewMode === 'dashboard' && versionDetail && (
-        <div className="v28-card" style={{ padding: 16 }}>
+        <div className="v28-card" style={{ padding: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-            <strong style={{ fontSize: 15, color: '#111827' }}>
-              Phân khu triển lãm ({versionDetail.zones.length} khu · {versionDetail.booths.length} gian)
-            </strong>
-            {filterZoneCode !== 'ALL' && versionDetail.zones.length > 1 && (
+            <div>
+              <strong style={{ fontSize: 14.5, color: '#111827' }}>
+                Phân khu triển lãm ({versionDetail.zones.length})
+              </strong>
+              <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                Chọn một phân khu bên dưới để xem và quản lý các gian hàng trong khu đó.
+              </div>
+            </div>
+            {filterZoneCode && versionDetail.zones.length > 1 && (
               <button
                 type="button"
                 onClick={() => {
-                  setFilterZoneCode('ALL');
+                  setFilterZoneCode('');
+                  setSelectedBooth(null);
                   setPage(1);
                 }}
-                style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#f8fafc', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+                style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #cbd5e1', background: '#f8fafc', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
               >
-                Hiện tất cả {versionDetail.zones.length} khu
+                Bỏ chọn khu {filterZoneCode}
               </button>
             )}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 10 }}>
+          <div className="v28-zone-grid">
             {versionDetail.zones.map((z) => {
               const zoneBooths = versionDetail.booths.filter((b) => b.zoneCode === z.code);
               const withProducts = zoneBooths.filter((b) => b.assignedSlotCount > 0).length;
               const emptyCount = zoneBooths.length - withProducts;
               const isSelected = filterZoneCode === z.code;
+              const isEditingThis = renamingZoneCode === z.code;
               return (
-                <button
+                <div
                   key={z.id}
-                  type="button"
+                  data-testid={`v28-overview-zone-card-${z.code}`}
                   onClick={() => {
-                    setFilterZoneCode(isSelected ? 'ALL' : z.code);
+                    if (isEditingThis) return;
+                    setFilterZoneCode(isSelected ? '' : z.code);
                     setPage(1);
                   }}
-                  style={{
-                    textAlign: 'left',
-                    padding: '11px 13px',
-                    borderRadius: 12,
-                    border: isSelected ? '2px solid #0ea5e9' : '1px solid #e2e8f0',
-                    background: isSelected ? '#f0f9ff' : '#f8fafc',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4,
-                  }}
+                  className={`v28-zone-card ${isSelected ? 'v28-zone-card--active' : ''} ${withProducts === 0 ? 'v28-zone-card--empty' : ''}`}
+                  style={{ cursor: isEditingThis ? 'default' : 'pointer' }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
-                    <strong style={{ fontSize: 13.5, color: '#0f172a' }}>{z.displayName}</strong>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 999, background: versionDetail.status === 'published' ? '#dcfce7' : '#e0f2fe', color: versionDetail.status === 'published' ? '#166534' : '#0369a1' }}>
-                      {versionDetail.status === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 12, color: '#64748b' }}>{z.categoryTag || `Khu ${z.code}`}</div>
-                  <div style={{ display: 'flex', gap: 8, fontSize: 12, marginTop: 2, flexWrap: 'wrap' }}>
-                    <span><strong>{zoneBooths.length}</strong> gian</span>
-                    <span style={{ color: '#059669' }}><strong>{withProducts}</strong> có SP</span>
-                    {emptyCount > 0 && (
-                      <span style={{ color: '#dc2626', fontWeight: 700 }}>🔴 {emptyCount} trống</span>
-                    )}
-                  </div>
-                </button>
+                  {isEditingThis ? (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+                    >
+                      <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 800, color: '#0284c7', flexShrink: 0 }}>{z.code}</span>
+                        <input
+                          type="text"
+                          autoFocus
+                          data-testid={`v28-zone-rename-input-${z.code}`}
+                          value={renameZoneInput}
+                          disabled={renamingZoneBusy}
+                          onChange={(e) => {
+                            setRenameZoneInput(e.target.value);
+                            if (renameZoneError) setRenameZoneError('');
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              void handleCommitZoneRename(z);
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              handleCancelZoneRename();
+                            }
+                          }}
+                          className="v28-input"
+                          style={{ padding: '4px 7px', fontSize: 12.5, minWidth: 0, flex: 1 }}
+                        />
+                      </div>
+                      {renameZoneError && (
+                        <div data-testid="v28-zone-rename-error" style={{ fontSize: 11.5, color: '#dc2626', fontWeight: 600 }}>
+                          {renameZoneError}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          data-testid={`v28-zone-cancel-btn-${z.code}`}
+                          disabled={renamingZoneBusy}
+                          onClick={handleCancelZoneRename}
+                          style={{ padding: '3px 9px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}
+                        >
+                          Hủy
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`v28-zone-save-btn-${z.code}`}
+                          disabled={renamingZoneBusy}
+                          onClick={() => void handleCommitZoneRename(z)}
+                          style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: '#0284c7', color: '#fff', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}
+                        >
+                          {renamingZoneBusy ? '...' : 'Lưu'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0, flex: 1 }}>
+                          <span
+                            style={{
+                              minWidth: 22,
+                              padding: '1px 5px',
+                              borderRadius: 5,
+                              background: isSelected ? '#0284c7' : '#e2e8f0',
+                              color: isSelected ? '#fff' : '#0f172a',
+                              fontWeight: 800,
+                              fontSize: 11,
+                              textAlign: 'center',
+                              flexShrink: 0,
+                              marginTop: 1,
+                            }}
+                          >
+                            {z.code}
+                          </span>
+                          <span className="v28-zone-title-clamp" title={z.displayName}>
+                            {z.displayName}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="v28-icon-btn"
+                          data-testid={`v28-zone-edit-btn-${z.code}`}
+                          title={`Đổi tên phân khu ${z.displayName}`}
+                          aria-label={`Đổi tên phân khu ${z.displayName}`}
+                          disabled={switchingDraftBusy}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleStartZoneRename(z);
+                          }}
+                        >
+                          <V28SvgIcon name="edit" size={14} />
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, fontSize: 11.5, color: '#526071', flexWrap: 'wrap' }}>
+                        <span><strong>{zoneBooths.length}</strong> gian</span>
+                        <span style={{ color: withProducts > 0 ? '#059669' : '#94a3b8' }}>
+                          <strong>{withProducts}</strong> có SP
+                        </span>
+                        {emptyCount > 0 && (
+                          <span style={{ color: '#dc2626', fontWeight: 600 }}>{emptyCount} trống</span>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
               );
             })}
           </div>
         </div>
       )}
 
-      {/* Inline Overview Workspace: Booth Cards (filtered by selected Zone) + Right-Side 6-Slot Booth Inspector */}
-      {viewMode === 'dashboard' && versionDetail && (
+      {/* Phase 4: Zone-first Hierarchy — Prompt when no zone is selected, show Booths + Inspector ONLY for selected Zone */}
+      {viewMode === 'dashboard' && versionDetail && !filterZoneCode && (
+        <div
+          className="v28-card"
+          data-testid="v28-select-zone-prompt"
+          style={{
+            padding: '22px 16px',
+            textAlign: 'center',
+            color: '#475569',
+            fontSize: 13.5,
+            background: '#f8fafc',
+            border: '1px dashed #cbd5e1',
+          }}
+        >
+          <strong style={{ display: 'block', color: '#0f172a', marginBottom: 4 }}>
+            Chọn một phân khu phía trên để xem danh sách gian hàng
+          </strong>
+          <span>
+            Mỗi khu hiển thị gọn các gian hàng thuộc khu đó; nhấn vào gian hàng để quản lý 6 vị trí sản phẩm và tự động đồng bộ World 3D.
+          </span>
+        </div>
+      )}
+
+      {/* Inline Overview Workspace: Zone-Scoped Booth Cards + Right-Side 6-Slot Booth Inspector */}
+      {viewMode === 'dashboard' && versionDetail && Boolean(filterZoneCode) && (
         <div
           className={`v28-overview-workspace ${selectedBooth ? 'v28-overview-workspace--with-inspector' : ''}`}
+          data-testid="v28-zone-booths-workspace"
         >
-          <div className="v28-card" style={{ padding: 16 }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div className="v28-card" style={{ padding: 14, minWidth: 0 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
               <div>
-                <strong style={{ fontSize: 15, color: '#111827' }}>
-                  Danh sách gian hàng ({filteredBooths.length})
+                <strong style={{ fontSize: 14.5, color: '#111827' }}>
+                  Gian hàng Khu {filterZoneCode}
+                  {activeSelectedZone ? ` — ${activeSelectedZone.displayName}` : ''} ({filteredBooths.length})
                 </strong>
-                <div style={{ fontSize: 12, color: '#526071', marginTop: 2 }}>
-                  Chọn gian để quản lý sản phẩm.
-                </div>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 <input
                   value={searchQuery}
                   onChange={(e) => {
                     setSearchQuery(e.target.value);
                     setPage(1);
                   }}
-                  placeholder="Tìm gian hàng..."
+                  placeholder="Tìm gian, phân khu..."
                   className="v28-input"
-                  style={{ width: 180 }}
+                  style={{ width: 170, padding: '6px 9px', fontSize: 12.5 }}
                 />
                 <select
+                  aria-label="Lọc trạng thái gian hàng"
                   value={filterAssign}
                   onChange={(e) => {
                     setFilterAssign(e.target.value as typeof filterAssign);
                     setPage(1);
                   }}
                   className="v28-input"
-                  style={{ width: 'auto' }}
+                  style={{ width: 'auto', padding: '6px 9px', fontSize: 12.5 }}
                 >
-                  <option value="all">Tất cả</option>
-                  <option value="has_products">Đang trưng bày</option>
-                  <option value="empty_slots">Gian trống</option>
+                  <option value="all">Tất cả trạng thái</option>
+                  <option value="full_slots">Gian đầy (6/6)</option>
+                  <option value="partial_slots">Gian thiếu (1–5/6)</option>
+                  <option value="empty_slots">Gian trống (0/6)</option>
+                  <option value="has_products">Có sản phẩm (1–6/6)</option>
                 </select>
                 <select
+                  aria-label="Số gian mỗi trang"
                   value={pageSize}
                   onChange={(e) => {
                     setPageSize(Number(e.target.value));
                     setPage(1);
                   }}
                   className="v28-input"
-                  style={{ width: 'auto' }}
+                  style={{ width: 'auto', padding: '6px 9px', fontSize: 12.5 }}
                 >
                   <option value={12}>12 / trang</option>
                   <option value={25}>25 / trang</option>
@@ -1970,25 +2578,40 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
             </div>
 
             {pagedBooths.length === 0 ? (
-              <div style={{ padding: '24px 12px', textAlign: 'center', color: '#526071', fontSize: 13.5 }}>
+              <div style={{ padding: '20px 12px', textAlign: 'center', color: '#526071', fontSize: 13 }}>
                 Không có gian hàng nào khớp bộ lọc.
               </div>
             ) : (
               <div className="v28-booth-grid">
                 {pagedBooths.map((b) => {
                   const isEmptyBooth = b.assignedSlotCount === 0;
+                  const isFullBooth = b.assignedSlotCount >= 6;
+                  const stateClass = isEmptyBooth
+                    ? 'v28-booth-card--empty'
+                    : isFullBooth
+                      ? 'v28-booth-card--full'
+                      : 'v28-booth-card--partial';
+                  const badgeBg = isEmptyBooth ? '#fef2f2' : isFullBooth ? '#ecfdf5' : '#fffbeb';
+                  const badgeColor = isEmptyBooth ? '#dc2626' : isFullBooth ? '#059669' : '#b45309';
+                  const badgeBorder = isEmptyBooth ? '#fecaca' : isFullBooth ? '#a7f3d0' : '#fde68a';
+                  const statusLabel = isEmptyBooth
+                    ? 'Gian trống'
+                    : isFullBooth
+                      ? 'Đầy đủ (6/6)'
+                      : `Thiếu ${6 - b.assignedSlotCount} SP`;
                   const isActive = selectedBooth?.boothId === b.boothId;
                   const shortTitle = `Gian ${String(b.slotIndex + 1).padStart(2, '0')}`;
                   return (
                     <button
                       key={b.boothId}
                       type="button"
-                      title={b.boothName}
+                      data-testid={`v28-booth-card-${b.slotIndex + 1}`}
+                      title={`${b.boothName} (${b.zoneName})`}
                       onClick={() => handleSelectBooth(b)}
-                      className={`v28-booth-card ${isActive ? 'v28-booth-card--active' : ''} ${isEmptyBooth ? 'v28-booth-card--empty' : ''}`}
+                      className={`v28-booth-card ${isActive ? 'v28-booth-card--active' : ''} ${stateClass}`}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
-                        <strong style={{ fontSize: 13.5, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <strong style={{ fontSize: 13, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {shortTitle}
                         </strong>
                         <span
@@ -1999,22 +2622,23 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                             fontWeight: 700,
                             flexShrink: 0,
                             fontVariantNumeric: 'tabular-nums',
-                            background: isEmptyBooth ? '#fef2f2' : '#ecfdf5',
-                            color: isEmptyBooth ? '#dc2626' : '#059669',
-                            border: `1px solid ${isEmptyBooth ? '#fecaca' : '#a7f3d0'}`,
+                            background: badgeBg,
+                            color: badgeColor,
+                            border: `1px solid ${badgeBorder}`,
                           }}
                         >
-                          {b.assignedSlotCount}/6 SP
+                          {b.assignedSlotCount}/6
                         </span>
                       </div>
-                      {filterZoneCode === 'ALL' && (
-                        <div style={{ fontSize: 11.5, color: '#526071', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {b.zoneName}
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11.5, marginTop: 2 }}>
-                        <span style={{ color: isEmptyBooth ? '#dc2626' : '#059669', fontWeight: 600 }}>
-                          {isEmptyBooth ? 'Chưa có sản phẩm' : 'Đang trưng bày'}
+                      <div
+                        title={b.zoneName}
+                        style={{ fontSize: 11.5, color: '#526071', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      >
+                        {b.zoneName}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, marginTop: 1 }}>
+                        <span style={{ color: badgeColor, fontWeight: 600 }}>
+                          {statusLabel}
                         </span>
                         <span style={{ color: '#0284c7', fontWeight: 700 }}>
                           {isActive ? 'Đang mở' : '→'}
@@ -2027,9 +2651,9 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
             )}
 
             {/* Pagination Controls */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, fontSize: 13 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, fontSize: 12.5, flexWrap: 'wrap', gap: 8 }}>
               <span style={{ color: '#526071', fontVariantNumeric: 'tabular-nums' }}>
-                Trang {safePage} / {totalPages} (Tổng {filteredBooths.length} gian hàng)
+                Trang {safePage} / {totalPages} (Tổng {filteredBooths.length} gian)
               </span>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button
@@ -2037,7 +2661,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                   className="v28-btn v28-btn--secondary"
                   disabled={safePage <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  style={{ minHeight: 32, padding: '0 12px', fontSize: 12.5 }}
+                  style={{ minHeight: 30, padding: '0 10px', fontSize: 12 }}
                 >
                   ← Trước
                 </button>
@@ -2046,7 +2670,7 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
                   className="v28-btn v28-btn--secondary"
                   disabled={safePage >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  style={{ minHeight: 32, padding: '0 12px', fontSize: 12.5 }}
+                  style={{ minHeight: 30, padding: '0 10px', fontSize: 12 }}
                 >
                   Sau →
                 </button>
@@ -2059,8 +2683,13 @@ export const ExhibitionConfigurator: React.FC<ExhibitionConfiguratorProps> = ({
             <BoothInspectorPanel
               booth={selectedBooth}
               isDraft={isDraft}
+              archetypes={archetypes}
               onClose={() => setSelectedBooth(null)}
               onAssignSlot={handleAssignSlot}
+              onUpdateBooth={(bId, patch) => handleUpdateBooth(bId, patch)}
+              onSwitchToWorkingDraft={async () => {
+                await handleEnsureWorkingDraft();
+              }}
               onProductMutated={async () => {
                 if (selectedExhId && selectedVersionId) {
                   await loadVersionDetail(selectedExhId, selectedVersionId);

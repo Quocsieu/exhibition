@@ -1,11 +1,18 @@
 import React, { useRef, useState } from 'react';
-import type { V28BoothPlacementView, V28Product } from '../../services/v28Api';
+import { resolveV28ProductImageUrl, type V28BoothPlacementView, type V28Product } from '../../services/v28Api';
+import type { NpcSessionState } from '../../hooks/useNpcConsultationSession';
 
 export interface MobileProductBottomSheetProps {
   booth: V28BoothPlacementView;
   product: V28Product;
   slotId: string;
   contactUrl: string | null;
+  npcSessionState?: NpcSessionState;
+  npcSubtitle?: string | null;
+  npcIsMuted?: boolean;
+  onToggleMute?: () => void;
+  onReplayConsultation?: () => void;
+  onOpenChat?: () => void;
   onClose: () => void;
   onOpenNpc?: () => void;
 }
@@ -22,6 +29,12 @@ export const MobileProductBottomSheet: React.FC<MobileProductBottomSheetProps> =
   product,
   slotId,
   contactUrl,
+  npcSessionState = 'IDLE',
+  npcSubtitle = null,
+  npcIsMuted = false,
+  onToggleMute,
+  onReplayConsultation,
+  onOpenChat,
   onClose,
   onOpenNpc,
 }) => {
@@ -216,7 +229,7 @@ export const MobileProductBottomSheet: React.FC<MobileProductBottomSheetProps> =
             }}
           >
             <img
-              src={product.images[0]}
+              src={resolveV28ProductImageUrl(product.images[0])}
               alt={product.name}
               onError={(e) => {
                 (e.currentTarget.parentElement as HTMLElement).style.display = 'none';
@@ -253,6 +266,91 @@ export const MobileProductBottomSheet: React.FC<MobileProductBottomSheetProps> =
         <p style={{ margin: 0, fontSize: 14, color: '#334155', lineHeight: 1.55 }}>
           {product.description || 'Sản phẩm trưng bày chính thức tại gian hàng.'}
         </p>
+
+        {/* Compact NPC Product Consultation Status & Synced Subtitle */}
+        {(npcSubtitle || npcSessionState !== 'IDLE') && (
+          <div
+            data-testid="v28-product-npc-bar"
+            style={{
+              borderRadius: 12,
+              background: '#f0f9ff',
+              border: '1px solid #bae6fd',
+              padding: '9px 11px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: '#0369a1' }}>
+                {npcSessionState === 'LOADING'
+                  ? '⏳ Đang chuẩn bị giọng tư vấn...'
+                  : npcSessionState === 'SPEAKING'
+                    ? '🔊 NPC đang tư vấn sản phẩm'
+                    : npcSessionState === 'PAUSED'
+                      ? '⏸ Tạm dừng tư vấn'
+                      : npcSessionState === 'ERROR'
+                        ? '⚠️ Tạm chưa phát được giọng đọc'
+                        : '✓ Đã giới thiệu sản phẩm'}
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {onToggleMute && (
+                  <button
+                    type="button"
+                    onClick={onToggleMute}
+                    aria-label={npcIsMuted ? 'Bật âm thanh tư vấn' : 'Tắt âm thanh tư vấn'}
+                    style={{
+                      minHeight: 32,
+                      padding: '2px 8px',
+                      borderRadius: 8,
+                      border: '1px solid #bae6fd',
+                      background: '#ffffff',
+                      color: '#0369a1',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {npcIsMuted ? '🔇' : '🔊'}
+                  </button>
+                )}
+                {onReplayConsultation && (
+                  <button
+                    type="button"
+                    onClick={onReplayConsultation}
+                    aria-label="Nghe lại tư vấn sản phẩm"
+                    style={{
+                      minHeight: 32,
+                      padding: '2px 9px',
+                      borderRadius: 8,
+                      border: '1px solid #bae6fd',
+                      background: '#ffffff',
+                      color: '#0369a1',
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ↻ Nghe lại
+                  </button>
+                )}
+              </div>
+            </div>
+            {npcSubtitle && (
+              <p
+                data-testid="v28-product-npc-subtitle"
+                style={{
+                  margin: 0,
+                  fontSize: 12.5,
+                  color: '#0f172a',
+                  lineHeight: 1.45,
+                }}
+              >
+                “{npcSubtitle}”
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Thumb-friendly Action Footer */}
@@ -265,7 +363,30 @@ export const MobileProductBottomSheet: React.FC<MobileProductBottomSheetProps> =
           flexShrink: 0,
         }}
       >
-        {productLink ? (
+        {onOpenChat ? (
+          <button
+            type="button"
+            data-testid="v28-product-open-chat"
+            onClick={onOpenChat}
+            style={{
+              flex: 1,
+              minHeight: 44,
+              borderRadius: 12,
+              border: 'none',
+              background: '#0284c7',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: 14,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+            }}
+          >
+            💬 Hỏi AI về sản phẩm
+          </button>
+        ) : productLink ? (
           <a
             href={productLink}
             target="_blank"
@@ -314,14 +435,11 @@ export const MobileProductBottomSheet: React.FC<MobileProductBottomSheetProps> =
           </button>
         )}
 
-        {onOpenNpc && productLink && (
-          <button
-            type="button"
-            onClick={() => {
-              onClose();
-              onOpenNpc();
-            }}
-            aria-label="Hỏi tư vấn viên"
+        {onOpenChat && productLink && (
+          <a
+            href={productLink}
+            target="_blank"
+            rel="noopener noreferrer"
             style={{
               minHeight: 44,
               padding: '0 14px',
@@ -331,12 +449,15 @@ export const MobileProductBottomSheet: React.FC<MobileProductBottomSheetProps> =
               color: '#0f172a',
               fontWeight: 700,
               fontSize: 13.5,
-              cursor: 'pointer',
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               flexShrink: 0,
             }}
           >
-            👩‍💼 Tư vấn
-          </button>
+            Mua ↗
+          </a>
         )}
       </div>
     </section>

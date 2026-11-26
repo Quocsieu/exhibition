@@ -194,8 +194,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           setIsAuthenticated(true);
           await loadData();
         }
-      } catch {
-        localStorage.removeItem('expo_admin_token');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '';
+        if (/401|không hợp lệ|hết hạn|xác thực/i.test(msg)) {
+          localStorage.removeItem('expo_admin_token');
+        }
       } finally {
         setAuthChecking(false);
       }

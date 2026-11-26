@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import express, { Router, type Request, type Response } from 'express';
 import {
@@ -24,7 +25,17 @@ import {
 } from '../schemas/v28Schemas.js';
 import { V28ExhibitionService, type ExhibitionVersionDetail } from '../services/v28/exhibitionService.js';
 import { V28CategoryService } from '../services/v28/categoryService.js';
-import { V28AudioCacheService } from '../services/v28/audioCacheService.js';
+import { V28AudioCacheService, MAX_ADMIN_AUDIO_UPLOAD_BYTES, type AudioMode } from '../services/v28/audioCacheService.js';
+import { V28VoiceApprovalService } from '../services/v28/tts/voiceApprovalService.js';
+import { V28AudioBatchManager } from '../services/v28/tts/audioBatchManager.js';
+import {
+  isNeutralVoiceProfileId,
+  NEUTRAL_VOICE_PROFILES,
+  VIETNAMESE_TTS_TEST_SENTENCES,
+  type NeutralVoiceProfileId,
+  type TtsProviderId,
+} from '../services/v28/tts/ttsTypes.js';
+import { V28SupertonicTtsService } from '../services/v28/supertonicTtsService.js';
 import { V28AiConsultantService } from '../services/v28/aiConsultantService.js';
 import { V28VisitorJourneyService } from '../services/v28/visitorJourneyService.js';
 import { V28RewardRedemptionService } from '../services/v28/rewardRedemptionService.js';
@@ -100,7 +111,8 @@ export function createV28ApiRoutes(
   audioCacheService = new V28AudioCacheService(v28Db),
   aiConsultantService = new V28AiConsultantService(v28Db, exhibitionService),
   visitorJourneyService = new V28VisitorJourneyService(v28Db, exhibitionService),
-  productImageService = V28ProductImageService.fromEnv()
+  productImageService = V28ProductImageService.fromEnv(),
+  supertonicTtsService = new V28SupertonicTtsService()
 ): Router {
   const categoryService = new V28CategoryService(v28Db);
   const rewardRedemptionService = new V28RewardRedemptionService(
@@ -108,12 +120,15 @@ export function createV28ApiRoutes(
     exhibitionService,
     visitorJourneyService
   );
+  const voiceApprovalService = new V28VoiceApprovalService(v28Db, audioCacheService);
+  const audioBatchManager = new V28AudioBatchManager(v28Db, audioCacheService, voiceApprovalService);
   const router = Router();
-  // Phase 5 Hardening: Strict 512kb default for V28 routes; 8mb ONLY on /imports/excel/preview
+  // Phase 5 Hardening: Strict 512kb default for V28 routes; 8mb on /imports/excel/preview, 15mb on /admin/audio/upload
   const excelUploadJsonParser = express.json({ limit: '8mb' });
+  const adminAudioUploadJsonParser = express.json({ limit: '15mb' });
   const defaultV28JsonParser = express.json({ limit: '512kb' });
   router.use((req, res, next) => {
-    if (req.path === '/imports/excel/preview') {
+    if (req.path === '/imports/excel/preview' || req.path === '/admin/audio/upload') {
       next();
       return;
     }
@@ -125,6 +140,7 @@ export function createV28ApiRoutes(
   let publishedWorldCache: {
     versionId: string;
     jsonBody: string;
+    gzipBody: Buffer;
     etag: string;
     builtAt: number;
   } | null = null;
@@ -171,6 +187,41 @@ export function createV28ApiRoutes(
         productCount: c.productCount ?? 0,
       })),
     });
+  });
+
+  router.patch('/company', requireAdminAuth, (req: Request, res: Response) => {
+    const parsed = UpdateCompanyInputSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message || 'Dữ liệu cập nhật không hợp lệ.' });
+      return;
+    }
+    try {
+      const activeCompanies = v28Db.listCompanies({ status: 'active' });
+      let activeWorld: ReturnType<typeof exhibitionService.getActiveExhibitionWorld> | null = null;
+      try {
+        activeWorld = exhibitionService.getActiveExhibitionWorld();
+      } catch {
+        activeWorld = null;
+      }
+      const ownerId =
+        activeWorld?.ownerCompanyId ||
+        activeWorld?.booths.find((b) => b.companyId)?.companyId ||
+        activeCompanies[0]?.id ||
+        null;
+      const ownerCompany = activeCompanies.find((c) => c.id === ownerId) || activeCompanies[0] || null;
+      if (!ownerCompany) {
+        res.status(409).json({
+          error: 'Chưa có doanh nghiệp chủ sở hữu để chỉnh sửa.',
+          errorCode: 'OWNER_COMPANY_REQUIRED',
+        });
+        return;
+      }
+      const company = v28Db.updateCompany(ownerCompany.id, parsed.data);
+      invalidatePublishedWorldCache();
+      res.json({ company });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
   });
 
   router.post('/company/select-owner', requireAdminAuth, (req: Request, res: Response) => {
@@ -355,23 +406,22 @@ export function createV28ApiRoutes(
       return;
     }
     try {
+      const prevProduct = v28Db.getProductById(getParam(req.params.id));
       const product = v28Db.updateProduct(getParam(req.params.id), parsed.data);
       if (!product) {
         res.status(404).json({ error: 'Không tìm thấy sản phẩm.' });
         return;
       }
       invalidatePublishedWorldCache();
-      // Trigger non-blocking incremental audio cache refresh for active booths displaying this product
-      try {
-        const activeWorld = exhibitionService.getActiveExhibitionWorld();
-        const affectedBooths = activeWorld.booths.filter((b) =>
-          b.slots.some((s) => s.product?.id === product.id)
-        );
-        for (const b of affectedBooths) {
-          void audioCacheService.getOrPrepareBoothAudioPack(b).catch(() => { });
-        }
-      } catch {
-        // ignore if no active exhibition yet
+      // Mark linked product audio as needs_update when speech-relevant fields change (NEVER auto-delete manual recordings)
+      const speechChanged =
+        !prevProduct ||
+        prevProduct.name !== product.name ||
+        prevProduct.price !== product.price ||
+        prevProduct.currency !== product.currency ||
+        prevProduct.description !== product.description;
+      if (speechChanged) {
+        audioCacheService.markEntityAudioNeedsUpdate('product', product.id);
       }
       res.json({ product });
     } catch (err) {
@@ -851,7 +901,7 @@ export function createV28ApiRoutes(
 
   if (!process.env.VITEST) {
     setTimeout(() => {
-      void mirrorMissingProductImagesInBackground().catch(() => {});
+      void mirrorMissingProductImagesInBackground().catch(() => { });
     }, 3_000).unref();
   }
 
@@ -1037,7 +1087,7 @@ export function createV28ApiRoutes(
         errors,
       });
       if (!process.env.VITEST && uniqueExternalPrimaryUrls.length > mirroredPrimaryUrl.size) {
-        void mirrorMissingProductImagesInBackground().catch(() => {});
+        void mirrorMissingProductImagesInBackground().catch(() => { });
       }
     } catch (err) {
       res.status(getHttpStatus(err, 500)).json({
@@ -1128,7 +1178,8 @@ export function createV28ApiRoutes(
           const jsonBody = JSON.stringify({ world });
           if (world.status === 'published') {
             const etag = `"v28-${world.versionId}-${crypto.createHash('sha1').update(jsonBody).digest('hex').slice(0, 12)}"`;
-            publishedWorldCache = { versionId: world.versionId, jsonBody, etag, builtAt: Date.now() };
+            const gzipBody = zlib.gzipSync(Buffer.from(jsonBody, 'utf8'), { level: 6 });
+            publishedWorldCache = { versionId: world.versionId, jsonBody, gzipBody, etag, builtAt: Date.now() };
           } else {
             // Never cache Draft/Archived responses in public cache
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -1138,11 +1189,18 @@ export function createV28ApiRoutes(
         }
         res.setHeader('ETag', publishedWorldCache.etag);
         res.setHeader('Cache-Control', 'public, max-age=5, stale-while-revalidate=30');
+        res.setHeader('Vary', 'Accept-Encoding');
         if (req.headers['if-none-match'] === publishedWorldCache.etag) {
           res.status(304).end();
           return;
         }
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        if (String(req.headers['accept-encoding'] || '').includes('gzip')) {
+          res.setHeader('Content-Encoding', 'gzip');
+          res.setHeader('Content-Length', String(publishedWorldCache.gzipBody.length));
+          res.end(publishedWorldCache.gzipBody);
+          return;
+        }
         res.send(publishedWorldCache.jsonBody);
         return;
       }
@@ -1724,7 +1782,34 @@ export function createV28ApiRoutes(
   // ============================================================================
   router.get('/audio/overview', requireAdminAuth, (req: Request, res: Response) => {
     const limit = Number(req.query.limit || 50);
-    res.json({ overview: audioCacheService.getAdminAudioOverview(limit) });
+    const activeOwner = resolveActiveOwnerCompany();
+    let occupiedBoothCount = 0;
+    let totalBoothSlots = 0;
+    let activeProductCount = 0;
+    try {
+      const world = exhibitionService.getActiveExhibitionWorld();
+      totalBoothSlots = world.booths.length;
+      const productIds = new Set<string>();
+      for (const b of world.booths) {
+        const hasProduct = b.slots.some((s) => Boolean(s.product));
+        if (hasProduct) occupiedBoothCount++;
+        for (const s of b.slots) {
+          if (s.product?.id) productIds.add(s.product.id);
+        }
+      }
+      activeProductCount = productIds.size;
+    } catch {
+      // Fallback if no published world yet
+    }
+    res.json({
+      overview: audioCacheService.getAdminAudioOverview(limit, {
+        companyId: activeOwner.companyId,
+        exhibitionTitle: activeOwner.companyName,
+        occupiedBoothCount,
+        totalBoothSlots,
+        activeProductCount,
+      }),
+    });
   });
 
   router.post('/booths/:id/audio/retry', requireAdminAuth, async (req: Request, res: Response) => {
@@ -1869,7 +1954,12 @@ export function createV28ApiRoutes(
 
   router.post('/ai/chat', async (req: Request, res: Response) => {
     try {
-      const body = (req.body || {}) as { boothId?: string; userId?: string; message?: string };
+      const body = (req.body || {}) as {
+        boothId?: string;
+        productId?: string;
+        userId?: string;
+        message?: string;
+      };
       if (!body.boothId || !body.message) {
         res.status(400).json({ error: 'Thiếu boothId hoặc nội dung câu hỏi.' });
         return;
@@ -1880,8 +1970,191 @@ export function createV28ApiRoutes(
         boothId: body.boothId,
         userId: serverIdentity,
         message: body.message,
+        productId: typeof body.productId === 'string' && body.productId.trim() ? body.productId.trim() : undefined,
       });
       res.json(response);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  // Phase A: Product-Specific NPC Consultation (Audio-First + Gemini -> Vbee -> Edge Neural TTS)
+  router.get('/booths/:id/products/:productId/consultation', async (req: Request, res: Response) => {
+    try {
+      const boothId = getParam(req.params.id);
+      const productId = getParam(req.params.productId);
+      if (!boothId || !productId) {
+        res.status(400).json({ error: 'Thiếu boothId hoặc productId.' });
+        return;
+      }
+
+      const activeWorld = exhibitionService.getActiveExhibitionWorld();
+      const booth = activeWorld.booths.find((b) => b.boothId === boothId);
+      if (!booth) {
+        res.status(404).json({ error: 'Gian hàng không thuộc phiên bản đang công bố.' });
+        return;
+      }
+
+      // Strictly resolve by exact productId (never by product name!)
+      const matchedSlot = booth.slots.find((s) => s.product && s.product.id === productId);
+      if (!matchedSlot || !matchedSlot.product) {
+        res.status(404).json({ error: 'Sản phẩm không được trưng bày tại gian hàng này.' });
+        return;
+      }
+
+      const product = matchedSlot.product;
+      const cleanName = String(product.name || '')
+        .split(/\s*\|\s*/)[0]
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() || product.name;
+      const priceClause =
+        product.price > 0
+          ? `có giá niêm yết ${product.price.toLocaleString('vi-VN')} ${product.currency || 'VND'}`
+          : 'có giá liên hệ trực tiếp tại gian hàng';
+      const stockClause = product.inStock
+        ? 'Hiện đang còn hàng.'
+        : 'Hiện tạm hết hàng, quý khách có thể liên hệ đặt trước.';
+      const rawDesc = String(product.description || '')
+        .split(/\s*\|\s*/)[0]
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const shortDesc =
+        rawDesc && rawDesc.toLowerCase() !== cleanName.toLowerCase()
+          ? rawDesc.length > 180
+            ? `${rawDesc.slice(0, 177).replace(/[,;:\s]+$/, '')}...`
+            : rawDesc
+          : '';
+      const descClause = shortDesc ? ` ${shortDesc.endsWith('.') ? shortDesc : `${shortDesc}.`}` : '';
+      const hostName = (booth.companyName || booth.boothName || '').trim();
+      const script = `Sản phẩm ${cleanName}${hostName ? ` tại gian hàng ${hostName}` : ''} ${priceClause}. ${stockClause}${descClause}`
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // Priority 1: Uploaded / pre-generated / cached valid audio by exact productId (ZERO TTS/AI calls!)
+      let resolved = await audioCacheService.resolveAudioFirst({
+        entityType: 'product',
+        entityId: product.id,
+        slotKey: matchedSlot.slotId,
+      });
+      if (!resolved) {
+        resolved = await audioCacheService.resolveAudioFirst({
+          entityType: 'product',
+          entityId: product.id,
+        });
+      }
+
+      if (resolved) {
+        const effectiveScript =
+          resolved.asset.transcript && resolved.asset.transcript.trim().length > 0
+            ? resolved.asset.transcript.trim()
+            : script;
+        res.json({
+          boothId: booth.boothId,
+          productId: product.id,
+          slotId: matchedSlot.slotId,
+          product: {
+            id: product.id,
+            name: product.name,
+            sku: product.sku,
+            price: product.price,
+            currency: product.currency,
+            inStock: product.inStock,
+            description: product.description,
+            images: product.images,
+            sourceUrl: product.sourceUrl,
+          },
+          script: effectiveScript,
+          audio: resolved.asset,
+          source: resolved.source,
+          cacheHit: true,
+          fallbackUsed: false,
+        });
+        return;
+      }
+
+      // Priority 2: Lazy Generation for AUTO / AI_GENERATED (NEVER calls TTS when mode is RECORDED!)
+      const entityAudioCfg = audioCacheService.getEntityAudioConfig('product', product.id);
+      const effectiveScript =
+        entityAudioCfg.customTranscript && entityAudioCfg.customTranscript.trim().length > 0
+          ? entityAudioCfg.customTranscript.trim()
+          : script;
+      const cfg = audioCacheService.ttsService.getConfigSnapshot();
+      const isAdmin = isRequestAuthenticatedAdmin(req);
+      const actorKey = `${isAdmin ? 'admin' : 'pub'}:${req.ip || req.socket.remoteAddress || 'anon'}`;
+      const limitPerMin = isAdmin ? Math.max(cfg.rateLimitPerMin, 60) : Math.min(cfg.rateLimitPerMin, 20);
+      const canSynthesize =
+        entityAudioCfg.audioMode !== 'RECORDED' &&
+        audioCacheService.ttsService.hasAnyAvailableProvider() &&
+        checkTtsSynthRateLimit(actorKey, limitPerMin);
+
+      if (canSynthesize) {
+        try {
+          const synthRes = await audioCacheService.synthesizeRealtimeCached({
+            text: effectiveScript,
+            entityType: 'product',
+            entityId: product.id,
+            slotKey: matchedSlot.slotId,
+            preferredProvider:
+              entityAudioCfg.preferredProvider &&
+                ['gemini', 'vbee', 'edge', 'fpt'].includes(entityAudioCfg.preferredProvider)
+                ? (entityAudioCfg.preferredProvider as TtsProviderId)
+                : undefined,
+            modelId: entityAudioCfg.modelId || undefined,
+            voiceId: entityAudioCfg.voiceId || undefined,
+            speed: entityAudioCfg.speed || undefined,
+            style: entityAudioCfg.style || undefined,
+          });
+          res.json({
+            boothId: booth.boothId,
+            productId: product.id,
+            slotId: matchedSlot.slotId,
+            product: {
+              id: product.id,
+              name: product.name,
+              sku: product.sku,
+              price: product.price,
+              currency: product.currency,
+              inStock: product.inStock,
+              description: product.description,
+              images: product.images,
+              sourceUrl: product.sourceUrl,
+            },
+            script: effectiveScript,
+            audio: synthRes.asset,
+            source: synthRes.cacheHit ? 'cached' : 'synthesized',
+            cacheHit: synthRes.cacheHit,
+            fallbackUsed: synthRes.fallbackUsed,
+          });
+          return;
+        } catch {
+          // Graceful fallback to client TTS if all server providers are unavailable
+        }
+      }
+
+      res.json({
+        boothId: booth.boothId,
+        productId: product.id,
+        slotId: matchedSlot.slotId,
+        product: {
+          id: product.id,
+          name: product.name,
+          sku: product.sku,
+          price: product.price,
+          currency: product.currency,
+          inStock: product.inStock,
+          description: product.description,
+          images: product.images,
+          sourceUrl: product.sourceUrl,
+        },
+        script,
+        audio: null,
+        source: 'client_fallback',
+        cacheHit: false,
+        fallbackUsed: true,
+        legacyFallbackEnabled: cfg.legacyFallbackEnabled,
+      });
     } catch (err) {
       res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
     }
@@ -2190,6 +2463,638 @@ export function createV28ApiRoutes(
       res.json({ redemption: updated });
     } catch (err) {
       res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  // ============================================================================
+  // G2. PHASE 1 — HYBRID MULTI-PROVIDER TTS & ADMIN AUDIO MANAGEMENT
+  // ============================================================================
+  const ttsSynthHistory = new Map<string, number[]>();
+  const checkTtsSynthRateLimit = (actorKey: string, maxPerMin: number): boolean => {
+    const now = Date.now();
+    const recent = (ttsSynthHistory.get(actorKey) || []).filter((ts) => now - ts < 60_000);
+    if (recent.length >= maxPerMin) {
+      ttsSynthHistory.set(actorKey, recent);
+      return false;
+    }
+    recent.push(now);
+    ttsSynthHistory.set(actorKey, recent);
+    if (ttsSynthHistory.size > 500) {
+      for (const [k, arr] of ttsSynthHistory.entries()) {
+        if (arr.every((ts) => now - ts >= 60_000)) ttsSynthHistory.delete(k);
+      }
+    }
+    return true;
+  };
+
+  router.get('/tts/providers', (_req: Request, res: Response) => {
+    const cfg = audioCacheService.ttsService.getConfigSnapshot();
+    res.json({
+      priority: audioCacheService.ttsService.getProviderOrder(),
+      providers: audioCacheService.ttsService.listProviderStatuses(),
+      voices: audioCacheService.ttsService.listAllVoices(),
+      voiceProfiles: NEUTRAL_VOICE_PROFILES,
+      legacyFallbackEnabled: cfg.legacyFallbackEnabled,
+      storageDriver: audioCacheService.storage.driverName,
+    });
+  });
+
+  router.get('/tts/test-sentences', (_req: Request, res: Response) => {
+    res.json({ sentences: VIETNAMESE_TTS_TEST_SENTENCES });
+  });
+
+  router.get('/audio/resolve', async (req: Request, res: Response) => {
+    try {
+      const entityTypeRaw = String(req.query.entityType || '').trim();
+      const entityId = String(req.query.entityId || '').trim();
+      const slotKey = typeof req.query.slotKey === 'string' && req.query.slotKey.trim()
+        ? req.query.slotKey.trim()
+        : undefined;
+      if (!['product', 'booth', 'welcome', 'faq'].includes(entityTypeRaw) || !entityId) {
+        res.status(400).json({ error: 'Thiếu entityType hoặc entityId hợp lệ.' });
+        return;
+      }
+      const found = await audioCacheService.resolveAudioFirst({
+        entityType: entityTypeRaw as 'product' | 'booth' | 'welcome' | 'faq',
+        entityId,
+        slotKey,
+      });
+      if (!found) {
+        res.json({ found: false, asset: null, source: null });
+        return;
+      }
+      res.json({ found: true, asset: found.asset, source: found.source });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/tts/synthesize', async (req: Request, res: Response) => {
+    try {
+      const isAdmin = isRequestAuthenticatedAdmin(req);
+      const cfg = audioCacheService.ttsService.getConfigSnapshot();
+      const actorKey = `${isAdmin ? 'admin' : 'pub'}:${req.ip || req.socket.remoteAddress || 'anon'}`;
+      const limitPerMin = isAdmin ? Math.max(cfg.rateLimitPerMin, 60) : Math.min(cfg.rateLimitPerMin, 15);
+      if (!checkTtsSynthRateLimit(actorKey, limitPerMin)) {
+        res.status(429).json({
+          error: 'Vượt quá giới hạn tần suất tạo giọng đọc. Vui lòng thử lại sau ít phút.',
+          legacyFallbackEnabled: cfg.legacyFallbackEnabled,
+        });
+        return;
+      }
+
+      const body = (req.body || {}) as {
+        text?: unknown;
+        entityType?: unknown;
+        entityId?: unknown;
+        slotKey?: unknown;
+        voiceId?: unknown;
+        speed?: unknown;
+        style?: unknown;
+        preferredProvider?: unknown;
+      };
+      const text = typeof body.text === 'string' ? body.text.replace(/\s+/g, ' ').trim() : '';
+      const maxLen = isAdmin ? cfg.maxTextLength : cfg.publicMaxTextLength;
+      if (!text) {
+        res.status(400).json({ error: 'Nội dung văn bản không được để trống.' });
+        return;
+      }
+      if (text.length > maxLen) {
+        res.status(400).json({
+          error: `Nội dung vượt quá giới hạn tối đa ${maxLen} ký tự.`,
+        });
+        return;
+      }
+
+      const entityType =
+        typeof body.entityType === 'string' && ['product', 'booth', 'welcome', 'faq'].includes(body.entityType)
+          ? (body.entityType as 'product' | 'booth' | 'welcome' | 'faq')
+          : 'faq';
+      const entityId =
+        typeof body.entityId === 'string' && body.entityId.trim() ? body.entityId.trim().slice(0, 120) : 'realtime';
+      const slotKey =
+        typeof body.slotKey === 'string' && body.slotKey.trim() ? body.slotKey.trim().slice(0, 60) : 'realtime';
+
+      // Audio-first check if entityId is specific (never calls TTS when uploaded/pre-generated audio exists!)
+      if (entityId !== 'realtime') {
+        const preExisting = await audioCacheService.resolveAudioFirst({
+          entityType,
+          entityId,
+          slotKey,
+        });
+        if (preExisting) {
+          res.json({
+            asset: preExisting.asset,
+            source: preExisting.source,
+            cacheHit: true,
+            fallbackUsed: false,
+          });
+          return;
+        }
+      }
+
+      const preferredProvider =
+        isAdmin &&
+          typeof body.preferredProvider === 'string' &&
+          ['gemini', 'vbee', 'edge', 'fpt'].includes(body.preferredProvider)
+          ? (body.preferredProvider as TtsProviderId)
+          : undefined;
+
+      const result = await audioCacheService.synthesizeRealtimeCached({
+        text,
+        entityType,
+        entityId,
+        slotKey,
+        voiceId: typeof body.voiceId === 'string' ? body.voiceId.trim() : undefined,
+        speed: typeof body.speed === 'number' && Number.isFinite(body.speed) ? body.speed : undefined,
+        style: typeof body.style === 'string' ? body.style.trim() : undefined,
+        preferredProvider,
+      });
+
+      res.json({
+        asset: result.asset,
+        source: result.cacheHit ? 'cached' : 'synthesized',
+        cacheHit: result.cacheHit,
+        fallbackUsed: result.fallbackUsed,
+      });
+    } catch (err) {
+      const cfg = audioCacheService.ttsService.getConfigSnapshot();
+      res.status(getHttpStatus(err, 503)).json({
+        error: (err as Error).message || 'Không thể tạo giọng đọc tiếng Việt lúc này.',
+        legacyFallbackEnabled: cfg.legacyFallbackEnabled,
+      });
+    }
+  });
+
+  // Helper: resolve active published exhibition's owner company so Admin Audio Management never mixes legacy demo companies
+  const resolveActiveOwnerCompany = (): { companyId?: string; companyName?: string } => {
+    try {
+      const activeWorld = exhibitionService.getActiveExhibitionWorld();
+      const ownerId =
+        activeWorld.ownerCompanyId ||
+        activeWorld.booths.find((b) => b.companyId)?.companyId ||
+        undefined;
+      if (!ownerId) return {};
+      const comp = v28Db.getCompanyById(ownerId);
+      return { companyId: ownerId, companyName: comp?.name || '' };
+    } catch {
+      return {};
+    }
+  };
+
+  router.post('/admin/audio/providers/check', requireAdminAuth, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as { provider?: unknown; runLiveSynthesis?: unknown };
+      const provider =
+        typeof body.provider === 'string' && ['gemini', 'vbee', 'edge', 'fpt'].includes(body.provider)
+          ? (body.provider as TtsProviderId)
+          : null;
+      if (!provider) {
+        res.status(400).json({ error: 'Thiếu provider hợp lệ (gemini, vbee, edge, fpt).' });
+        return;
+      }
+      const result = await audioCacheService.ttsService.checkProviderConnection({
+        provider,
+        runLiveSynthesis: body.runLiveSynthesis === true,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  // Admin Audio Management Endpoints
+  router.get('/admin/audio/items', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const rawType = String(req.query.entityType || 'product').trim();
+      const entityType =
+        rawType === 'product' || rawType === 'booth' || rawType === 'welcome' || rawType === 'all'
+          ? rawType
+          : 'product';
+      const rawStatus = String(req.query.status || 'all').trim();
+      const status =
+        rawStatus === 'missing' ||
+          rawStatus === 'generating' ||
+          rawStatus === 'ready' ||
+          rawStatus === 'needs_update' ||
+          rawStatus === 'failed'
+          ? rawStatus
+          : 'all';
+      const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+      const page = Number(req.query.page || 1);
+      const limit = Number(req.query.limit || 25);
+      const rawCompanyId = typeof req.query.companyId === 'string' ? req.query.companyId.trim() : '';
+      const activeOwner = resolveActiveOwnerCompany();
+      const effectiveCompanyId =
+        rawCompanyId === 'all' ? undefined : rawCompanyId || activeOwner.companyId;
+      const listRes = audioCacheService.listAdminAudioItems({
+        entityType,
+        companyId: effectiveCompanyId,
+        status,
+        q,
+        page,
+        limit,
+      });
+      res.json({
+        ...listRes,
+        scopedCompanyId: effectiveCompanyId || null,
+        scopedCompanyName: activeOwner.companyName || null,
+      });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/admin/audio/generate', requireAdminAuth, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        entityType?: unknown;
+        entityId?: unknown;
+        slotKey?: unknown;
+        transcript?: unknown;
+        voiceId?: unknown;
+        preferredProvider?: unknown;
+        speed?: unknown;
+      };
+      const entityType =
+        body.entityType === 'product' || body.entityType === 'booth' || body.entityType === 'welcome'
+          ? body.entityType
+          : null;
+      const entityId = typeof body.entityId === 'string' ? body.entityId.trim() : '';
+      const transcript = typeof body.transcript === 'string' ? body.transcript.trim() : '';
+      if (!entityType || !entityId || !transcript) {
+        res.status(400).json({ error: 'Thiếu entityType, entityId hoặc nội dung giới thiệu (transcript).' });
+        return;
+      }
+      const preferredProvider =
+        typeof body.preferredProvider === 'string' &&
+          ['gemini', 'vbee', 'edge', 'fpt'].includes(body.preferredProvider)
+          ? (body.preferredProvider as TtsProviderId)
+          : undefined;
+      const result = await audioCacheService.generateAdminAudio({
+        entityType,
+        entityId,
+        slotKey: typeof body.slotKey === 'string' ? body.slotKey.trim() : undefined,
+        transcript,
+        voiceId: typeof body.voiceId === 'string' ? body.voiceId.trim() : undefined,
+        preferredProvider,
+        speed: typeof body.speed === 'number' && Number.isFinite(body.speed) ? body.speed : undefined,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(getHttpStatus(err, 503)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post(
+    '/admin/audio/upload',
+    requireAdminAuth,
+    adminAudioUploadJsonParser,
+    async (req: Request, res: Response) => {
+      try {
+        const body = (req.body || {}) as {
+          entityType?: unknown;
+          entityId?: unknown;
+          slotKey?: unknown;
+          transcript?: unknown;
+          filename?: unknown;
+          mimeType?: unknown;
+          fileBase64?: unknown;
+        };
+        const entityType =
+          body.entityType === 'product' || body.entityType === 'booth' || body.entityType === 'welcome'
+            ? body.entityType
+            : null;
+        const entityId = typeof body.entityId === 'string' ? body.entityId.trim() : '';
+        const rawBase64 = typeof body.fileBase64 === 'string' ? body.fileBase64 : '';
+        if (!entityType || !entityId || !rawBase64) {
+          res.status(400).json({ error: 'Thiếu thông tin đối tượng hoặc dữ liệu tệp âm thanh.' });
+          return;
+        }
+        const cleaned = rawBase64.replace(/^data:[^;]+;base64,/, '');
+        const fileBuffer = Buffer.from(cleaned, 'base64');
+        if (fileBuffer.length > MAX_ADMIN_AUDIO_UPLOAD_BYTES) {
+          res.status(413).json({ error: 'Dung lượng tệp vượt quá giới hạn tối đa 10 MB.' });
+          return;
+        }
+        const asset = await audioCacheService.uploadAdminAudio({
+          entityType,
+          entityId,
+          slotKey: typeof body.slotKey === 'string' ? body.slotKey.trim() : undefined,
+          transcript: typeof body.transcript === 'string' ? body.transcript : '',
+          filename: typeof body.filename === 'string' ? body.filename : 'recorded.mp3',
+          mimeType: typeof body.mimeType === 'string' ? body.mimeType : '',
+          fileBuffer,
+        });
+        res.status(201).json({ asset });
+      } catch (err) {
+        res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+      }
+    }
+  );
+
+  router.post('/admin/audio/:audioId/confirm', requireAdminAuth, (req: Request, res: Response) => {
+    const updated = audioCacheService.confirmUploadedAudio(getParam(req.params.audioId));
+    if (!updated) {
+      res.status(404).json({ error: 'Không tìm thấy bản ghi âm thanh.' });
+      return;
+    }
+    res.json({ asset: updated });
+  });
+
+  router.delete('/admin/audio/:audioId', requireAdminAuth, async (req: Request, res: Response) => {
+    try {
+      const result = await audioCacheService.deleteAdminAudio(getParam(req.params.audioId));
+      if (!result.deleted) {
+        res.status(404).json({ error: 'Không tìm thấy bản ghi âm thanh.' });
+        return;
+      }
+      res.json(result);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  // Phase 1.1: Per-entity Audio Mode (AUTO | AI_GENERATED | RECORDED) & Voice Approval endpoints
+  router.put('/admin/audio/mode', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        entityType?: unknown;
+        entityId?: unknown;
+        audioMode?: unknown;
+        preferredProvider?: unknown;
+        modelId?: unknown;
+        voiceId?: unknown;
+        speed?: unknown;
+        style?: unknown;
+        customTranscript?: unknown;
+      };
+      const entityType =
+        body.entityType === 'product' || body.entityType === 'booth' || body.entityType === 'welcome'
+          ? body.entityType
+          : null;
+      const entityId = typeof body.entityId === 'string' ? body.entityId.trim() : '';
+      const rawMode = typeof body.audioMode === 'string' ? body.audioMode.trim().toUpperCase() : '';
+      if (!entityType || !entityId || !['AUTO', 'AI_GENERATED', 'RECORDED'].includes(rawMode)) {
+        res.status(400).json({ error: 'Thiếu entityType, entityId hoặc audioMode hợp lệ (AUTO, AI_GENERATED, RECORDED).' });
+        return;
+      }
+      const config = audioCacheService.setEntityAudioMode({
+        entityType,
+        entityId,
+        audioMode: rawMode as AudioMode,
+        preferredProvider: typeof body.preferredProvider === 'string' ? body.preferredProvider : undefined,
+        modelId: typeof body.modelId === 'string' ? body.modelId : undefined,
+        voiceId: typeof body.voiceId === 'string' ? body.voiceId : undefined,
+        speed: typeof body.speed === 'number' ? body.speed : undefined,
+        style: typeof body.style === 'string' ? body.style : undefined,
+        customTranscript: typeof body.customTranscript === 'string' ? body.customTranscript : undefined,
+      });
+      res.json({ config });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/admin/audio/mode/bulk', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        entityType?: unknown;
+        entityIds?: unknown;
+        audioMode?: unknown;
+        preferredProvider?: unknown;
+        modelId?: unknown;
+        voiceId?: unknown;
+        speed?: unknown;
+        style?: unknown;
+      };
+      const entityType =
+        body.entityType === 'product' || body.entityType === 'booth' || body.entityType === 'welcome'
+          ? body.entityType
+          : 'product';
+      const entityIds = Array.isArray(body.entityIds)
+        ? body.entityIds.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+        : [];
+      const rawMode = typeof body.audioMode === 'string' ? body.audioMode.trim().toUpperCase() : '';
+      if (entityIds.length === 0 || !['AUTO', 'AI_GENERATED', 'RECORDED'].includes(rawMode)) {
+        res.status(400).json({ error: 'Vui lòng chọn ít nhất 1 mục và chế độ âm thanh hợp lệ.' });
+        return;
+      }
+      const result = audioCacheService.bulkSetEntityAudioMode({
+        entityType,
+        entityIds,
+        audioMode: rawMode as AudioMode,
+        preferredProvider: typeof body.preferredProvider === 'string' ? body.preferredProvider : undefined,
+        modelId: typeof body.modelId === 'string' ? body.modelId : undefined,
+        voiceId: typeof body.voiceId === 'string' ? body.voiceId : undefined,
+        speed: typeof body.speed === 'number' ? body.speed : undefined,
+        style: typeof body.style === 'string' ? body.style : undefined,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get('/admin/audio/voice/approvals', requireAdminAuth, (_req: Request, res: Response) => {
+    res.json({ approvals: voiceApprovalService.listApprovals(30) });
+  });
+
+  router.post('/admin/audio/voice/preview', requireAdminAuth, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        provider?: unknown;
+        modelId?: unknown;
+        voiceId?: unknown;
+        voiceProfile?: unknown;
+        speed?: unknown;
+        style?: unknown;
+        productId?: unknown;
+        transcript?: unknown;
+      };
+      const provider =
+        typeof body.provider === 'string' && ['gemini', 'vbee', 'edge', 'fpt'].includes(body.provider)
+          ? (body.provider as TtsProviderId)
+          : undefined;
+      const voiceProfile = isNeutralVoiceProfileId(body.voiceProfile)
+        ? (body.voiceProfile as NeutralVoiceProfileId)
+        : undefined;
+      const result = await voiceApprovalService.createVoicePreview({
+        provider,
+        modelId: typeof body.modelId === 'string' ? body.modelId : undefined,
+        voiceId: typeof body.voiceId === 'string' ? body.voiceId : undefined,
+        voiceProfile,
+        speed: typeof body.speed === 'number' && Number.isFinite(body.speed) ? body.speed : undefined,
+        style: typeof body.style === 'string' ? body.style : undefined,
+        productId: typeof body.productId === 'string' ? body.productId : undefined,
+        transcript: typeof body.transcript === 'string' ? body.transcript : undefined,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(getHttpStatus(err, 503)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/admin/audio/voice/approve', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as { configSignature?: unknown };
+      const configSignature = typeof body.configSignature === 'string' ? body.configSignature.trim() : '';
+      const approval = voiceApprovalService.approveVoiceConfig({
+        configSignature,
+        adminUsername: String(res.locals.adminUsername || 'admin'),
+      });
+      res.json({ approval });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/admin/audio/batch/estimate', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        entityType?: 'product' | 'booth' | 'welcome' | 'all';
+        companyId?: string;
+        entityIds?: string[];
+        includeNeedsUpdate?: boolean;
+        onlyMissing?: boolean;
+        limit?: number;
+        providerOverride?: TtsProviderId;
+        modelId?: string;
+        voiceId?: string;
+        speed?: number;
+        style?: string;
+      };
+      const activeOwner = resolveActiveOwnerCompany();
+      const estimate = audioBatchManager.estimateBatch({
+        ...body,
+        companyId: body.companyId || activeOwner.companyId,
+      });
+      res.json({ estimate });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/admin/audio/batch/start', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as {
+        confirmed?: boolean;
+        entityType?: 'product' | 'booth' | 'welcome' | 'all';
+        companyId?: string;
+        entityIds?: string[];
+        includeNeedsUpdate?: boolean;
+        onlyMissing?: boolean;
+        configSignature?: string;
+        approvalId?: string;
+        providerOverride?: TtsProviderId;
+        modelId?: string;
+        voiceId?: string;
+        speed?: number;
+        style?: string;
+        concurrency?: number;
+        limit?: number;
+      };
+      const activeOwner = resolveActiveOwnerCompany();
+      const job = audioBatchManager.startBatch({
+        confirmed: Boolean(body.confirmed),
+        entityType: body.entityType,
+        companyId: body.companyId || activeOwner.companyId,
+        entityIds: body.entityIds,
+        includeNeedsUpdate: body.includeNeedsUpdate,
+        onlyMissing: body.onlyMissing,
+        configSignature: typeof body.configSignature === 'string' ? body.configSignature : undefined,
+        approvalId: typeof body.approvalId === 'string' ? body.approvalId : undefined,
+        providerOverride: body.providerOverride,
+        modelId: body.modelId,
+        voiceId: body.voiceId,
+        speed: body.speed,
+        style: body.style,
+        concurrency: body.concurrency,
+        limit: body.limit,
+        createdBy: String(res.locals.adminUsername || 'admin'),
+      });
+      res.status(202).json({ job });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get('/admin/audio/batch', requireAdminAuth, (req: Request, res: Response) => {
+    const limit = Number(req.query.limit || 20);
+    res.json({ jobs: audioBatchManager.listJobs(limit) });
+  });
+
+  router.get('/admin/audio/batch/:jobId', requireAdminAuth, (req: Request, res: Response) => {
+    const job = audioBatchManager.getJob(getParam(req.params.jobId));
+    if (!job) {
+      res.status(404).json({ error: 'Không tìm thấy tác vụ tạo audio hàng loạt.' });
+      return;
+    }
+    res.json({ job });
+  });
+
+  router.post('/admin/audio/batch/:jobId/resume', requireAdminAuth, (req: Request, res: Response) => {
+    try {
+      const jobId = getParam(req.params.jobId);
+      const activeOwner = resolveActiveOwnerCompany();
+      const body = (req.body || {}) as { limit?: number };
+      const job = audioBatchManager.resumeJob(jobId, {
+        companyId: activeOwner.companyId,
+        limit: typeof body.limit === 'number' && Number.isFinite(body.limit) ? body.limit : undefined,
+      });
+      res.status(202).json({ job });
+    } catch (err) {
+      res.status(getHttpStatus(err, 400)).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post('/admin/audio/batch/:jobId/cancel', requireAdminAuth, (req: Request, res: Response) => {
+    const job = audioBatchManager.cancelJob(getParam(req.params.jobId));
+    if (!job) {
+      res.status(404).json({ error: 'Không tìm thấy tác vụ tạo audio hàng loạt.' });
+      return;
+    }
+    res.json({ job });
+  });
+
+  // Supertonic 3 Vietnamese Female NPC Voice Adapter (automatic fallback to Hybrid Piper when unavailable)
+  router.get('/tts/supertonic/status', (_req: Request, res: Response) => {
+    res.json(supertonicTtsService.getStatus());
+  });
+
+  router.post('/tts/supertonic', async (req: Request, res: Response) => {
+    const body = (req.body || {}) as {
+      text?: unknown;
+      voicePreset?: unknown;
+      speed?: unknown;
+      totalStep?: unknown;
+    };
+    if (typeof body.text !== 'string' || !body.text.trim()) {
+      res.status(400).json({ error: 'Thiếu nội dung câu thoại (text).', fallback: 'hybrid-piper' });
+      return;
+    }
+    try {
+      const result = await supertonicTtsService.synthesizeVietnameseChunk({
+        text: body.text,
+        voicePreset: typeof body.voicePreset === 'string' ? body.voicePreset : undefined,
+        speed: typeof body.speed === 'number' ? body.speed : undefined,
+        totalStep: typeof body.totalStep === 'number' ? body.totalStep : undefined,
+      });
+      res.setHeader('Content-Type', result.mimeType);
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('X-TTS-Provider', result.provider);
+      res.setHeader('X-TTS-Voice', result.voicePreset);
+      res.setHeader('X-TTS-Speed', result.speed.toFixed(2));
+      res.setHeader('X-TTS-Lang', result.lang);
+      res.setHeader('X-TTS-Cache', result.cacheStatus);
+      res.setHeader('X-TTS-Synth-Ms', String(result.synthMs));
+      res.send(result.audioBuffer);
+    } catch (err) {
+      const status = getHttpStatus(err, 503);
+      res.status(status).json({
+        error: (err as Error).message || 'Supertonic 3 tạm thời không khả dụng.',
+        fallback: 'hybrid-piper',
+      });
     }
   });
 

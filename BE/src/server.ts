@@ -1,5 +1,6 @@
 import http from 'node:http';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import express, { type Express } from 'express';
@@ -96,10 +97,40 @@ export function createApp(
       ],
     })
   );
-  // Phase 5 Hardening: Skip global 1mb JSON parser ONLY for the Excel base64 upload endpoint so valid <=5MB Excel (~7MB base64) is not rejected before v28Routes
+
+  // Phase B.5: Lightweight gzip compression for JSON API payloads >= 1 KB (cuts /exhibitions/active ~85%)
+  app.use((req, res, next) => {
+    const acceptEnc = String(req.headers['accept-encoding'] || '');
+    if (!acceptEnc.includes('gzip') || req.method === 'HEAD') {
+      next();
+      return;
+    }
+    const origJson = res.json.bind(res);
+    res.json = ((body: unknown) => {
+      if (res.headersSent || res.getHeader('Content-Encoding')) {
+        return origJson(body);
+      }
+      const rawStr = JSON.stringify(body);
+      const rawBuf = Buffer.from(rawStr, 'utf8');
+      if (rawBuf.length < 1024) {
+        return origJson(body);
+      }
+      const gz = zlib.gzipSync(rawBuf, { level: 6 });
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Vary', 'Accept-Encoding');
+      res.setHeader('Content-Length', String(gz.length));
+      return res.end(gz);
+    }) as typeof res.json;
+    next();
+  });
+  // Phase 5 Hardening: Skip global 1mb JSON parser ONLY for the Excel & Admin Audio base64 upload endpoints
   const globalJsonParser = express.json({ limit: '1mb' });
   app.use((req, res, next) => {
-    if (req.path === '/api/v28/imports/excel/preview') {
+    if (
+      req.path === '/api/v28/imports/excel/preview' ||
+      req.path === '/api/v28/admin/audio/upload'
+    ) {
       next();
       return;
     }

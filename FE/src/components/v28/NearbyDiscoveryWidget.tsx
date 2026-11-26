@@ -23,6 +23,7 @@ export const NEARBY_DISMISS_REOPEN_MOVE_M = 4.0;
 export interface NearbyDiscoveryWidgetProps {
   world: V28ExhibitionVersionDetail;
   playerPos: V28PlayerState;
+  visitedBoothIds?: ReadonlySet<string>;
   isMobileUi: boolean;
   isMobileLandscape: boolean;
   /** True when user is focused on a booth, viewing 2D map, menu, NPC, or product detail. */
@@ -42,6 +43,7 @@ function formatPriceBadge(product: V28Product): string | null {
 export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
   world,
   playerPos,
+  visitedBoothIds,
   isMobileUi,
   isMobileLandscape,
   suppressed,
@@ -51,17 +53,12 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
 }) => {
   const index = useMemo(() => buildNearbyDiscoveryIndex(world), [world]);
   const [matches, setMatches] = useState<NearbyBoothMatch[]>([]);
-  // Desktop starts open (compact corner card); Mobile starts collapsed as a single slim pill
-  const [expanded, setExpanded] = useState<boolean>(() => !isMobileUi);
+  // H1: Default collapsed on BOTH Desktop and Mobile to maximize 3D viewport
+  const [expanded, setExpanded] = useState<boolean>(false);
   const [dismissedState, setDismissedState] = useState<{ key: string; x: number; z: number } | null>(null);
 
   const lastEvalPosRef = useRef<{ x: number; z: number } | null>(null);
   const prevIdsRef = useRef<Set<string>>(new Set());
-
-  // Reset mobile expansion state if switching between desktop and mobile breakpoints
-  useEffect(() => {
-    setExpanded(!isMobileUi);
-  }, [isMobileUi]);
 
   // Re-evaluate nearby booths ONLY when world changes or avatar moves >= 0.45m
   useEffect(() => {
@@ -140,210 +137,183 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
   };
 
   const closest = matches[0];
+  const isClosestVisited = Boolean(visitedBoothIds?.has(closest.booth.boothId));
+  const shortTitle = closest.booth.companyName || closest.booth.boothName;
+  const bottomOffset = isMobileUi ? 'max(10px, env(safe-area-inset-bottom, 10px))' : 14;
+  const leftOffset = isMobileUi ? 'max(10px, env(safe-area-inset-left, 10px))' : 16;
 
   // =========================================================================
-  // MOBILE PORTRAIT & LANDSCAPE: Slim non-intrusive pill below top bar
-  // Never overlaps bottom joystick, right camera swipe zone, or bottom-right dock.
+  // H1: UNIFIED COMPACT BOTTOM-LEFT CARD (Collapsed by default on Desktop & Mobile)
+  // Shows closest booth + short name + distance + Chỉ đường / Đi tới + Expand.
+  // Never renders long product list while collapsed; clears joystick & camera dock.
   // =========================================================================
-  if (isMobileUi) {
-    const mobileTop = 'max(64px, calc(env(safe-area-inset-top, 8px) + 56px))';
-    if (!expanded) {
-      return (
-        <div
-          data-testid="v28-nearby-discovery-pill"
-          onPointerDown={(e) => e.stopPropagation()}
-          style={{
-            pointerEvents: 'auto',
-            position: 'fixed',
-            top: mobileTop,
-            left: 10,
-            zIndex: 21,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            maxWidth: isMobileLandscape ? '62vw' : 'calc(100vw - 20px)',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setDismissedState(null);
-              setExpanded(true);
-            }}
-            aria-label={`Xem ${matches.length} gian hàng gần bạn`}
-            style={{
-              minHeight: 40,
-              padding: '0 12px',
-              borderRadius: 999,
-              border: '1px solid rgba(56, 189, 248, 0.45)',
-              background: 'rgba(15, 23, 42, 0.86)',
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
-              color: '#f8fafc',
-              fontSize: 12,
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              cursor: 'pointer',
-              boxShadow: '0 6px 18px rgba(15, 23, 42, 0.25)',
-              maxWidth: '100%',
-              overflow: 'hidden',
-            }}
-          >
-            <span style={{ flexShrink: 0 }}>📍</span>
-            <span
-              style={{
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              Gần bạn: #{closest.boothNumber} {closest.booth.companyName || closest.booth.boothName}
-            </span>
-            <span style={{ color: '#38bdf8', flexShrink: 0 }}>
-              ~{Math.round(closest.approachDistanceM)}m
-            </span>
-            {matches.length > 1 && (
-              <span
-                style={{
-                  background: 'var(--v28-youth-blue, #0057b8)',
-                  color: '#fff',
-                  borderRadius: 999,
-                  padding: '1px 6px',
-                  fontSize: 10.5,
-                  flexShrink: 0,
-                }}
-              >
-                +{matches.length - 1}
-              </span>
-            )}
-          </button>
-        </div>
-      );
-    }
-
+  if (!expanded) {
     return (
-      <section
-        data-testid="v28-nearby-discovery-panel"
-        aria-label="Gian hàng và sản phẩm gần bạn"
+      <aside
+        data-testid="v28-nearby-discovery-pill"
+        aria-label="Gian hàng gần bạn"
         onPointerDown={(e) => e.stopPropagation()}
         onWheel={(e) => e.stopPropagation()}
         style={{
           pointerEvents: 'auto',
           position: 'fixed',
-          top: mobileTop,
-          left: 10,
+          left: leftOffset,
+          bottom: bottomOffset,
           zIndex: 21,
-          width: isMobileLandscape ? 'min(360px, 66vw)' : 'min(350px, calc(100vw - 20px))',
-          maxHeight: isMobileLandscape ? '56dvh' : '44dvh',
-          overflowY: 'auto',
-          background: 'rgba(255, 255, 255, 0.96)',
+          width: isMobileUi
+            ? isMobileLandscape
+              ? 'min(260px, 44vw)'
+              : 'min(218px, calc(100vw - 182px))'
+            : 'min(276px, 30vw)',
+          background: 'rgba(15, 23, 42, 0.88)',
           backdropFilter: 'blur(12px)',
           WebkitBackdropFilter: 'blur(12px)',
-          borderRadius: 14,
-          border: '1px solid #cbd5e1',
-          boxShadow: '0 12px 30px rgba(15, 23, 42, 0.26)',
-          padding: 10,
+          borderRadius: 13,
+          border: isClosestVisited ? '1px solid rgba(52, 211, 153, 0.55)' : '1px solid rgba(56, 189, 248, 0.36)',
+          boxShadow: '0 10px 26px rgba(15, 23, 42, 0.32)',
+          padding: isMobileUi ? '7px 8px' : '8px 10px',
+          color: '#f8fafc',
           display: 'flex',
           flexDirection: 'column',
-          gap: 8,
+          gap: 6,
           boxSizing: 'border-box',
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
-          <strong style={{ fontSize: 13, color: '#0f172a' }}>
-            📍 Gian hàng gần bạn ({matches.length})
-          </strong>
+        {/* Row 1: Closest booth badge + short name + distance + dismiss */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1 }}>
+            <span
+              style={{
+                background: isClosestVisited ? '#059669' : '#0284c7',
+                color: '#fff',
+                fontSize: 10.5,
+                fontWeight: 800,
+                padding: '1px 6px',
+                borderRadius: 5,
+                flexShrink: 0,
+              }}
+            >
+              #{closest.boothNumber}
+            </span>
+            <span
+              title={shortTitle}
+              style={{
+                fontSize: isMobileUi ? 11.5 : 12.5,
+                fontWeight: 700,
+                color: '#f8fafc',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                minWidth: 0,
+                flex: 1,
+              }}
+            >
+              {shortTitle}
+            </span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', flexShrink: 0 }}>
+              ~{Math.round(closest.approachDistanceM)}m
+            </span>
+          </div>
           <button
             type="button"
             data-testid="v28-nearby-close-btn"
             onClick={handleClose}
             aria-label="Đóng thông báo gian hàng gần bạn"
+            title="Ẩn thẻ gian gần bạn"
             style={{
-              minWidth: 36,
-              minHeight: 36,
-              borderRadius: 8,
-              border: '1px solid #cbd5e1',
-              background: '#f8fafc',
-              color: '#0f172a',
+              minWidth: 24,
+              minHeight: 24,
+              borderRadius: 6,
+              border: '1px solid rgba(148, 163, 184, 0.28)',
+              background: 'rgba(255, 255, 255, 0.08)',
+              color: '#cbd5e1',
+              fontSize: 11,
               fontWeight: 700,
               cursor: 'pointer',
+              flexShrink: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
             ✕
           </button>
         </div>
-        {matches.map((match) => (
-          <NearbyBoothCard
-            key={match.booth.boothId}
-            match={match}
-            compact
-            onNavigate={() => {
-              setExpanded(false);
-              onNavigateToBooth(match.booth);
+        {isClosestVisited && (
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <span
+              data-testid="v28-nearby-visited-badge"
+              style={{
+                fontSize: 10.5,
+                fontWeight: 800,
+                padding: '1px 7px',
+                borderRadius: 999,
+                background: 'rgba(16, 185, 129, 0.2)',
+                border: '1px solid rgba(52, 211, 153, 0.55)',
+                color: '#a7f3d0',
+              }}
+            >
+              ✓ Đã xem qua
+            </span>
+          </div>
+        )}
+
+        {/* Row 2: Single Đi tới action (teleports in front of booth without entering focus) + Expand */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <button
+            type="button"
+            data-testid={`v28-nearby-compact-go-${closest.boothNumber}`}
+            onClick={() => (onGuideToBooth ?? onNavigateToBooth)(closest.booth)}
+            title="Nhảy tới trước gian hàng này"
+            style={{
+              flex: 1,
+              minHeight: isMobileUi ? 30 : 28,
+              padding: '0 7px',
+              borderRadius: 8,
+              border: 'none',
+              background: '#0284c7',
+              color: '#ffffff',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
             }}
-            onGuide={
-              onGuideToBooth
-                ? () => {
-                    setExpanded(false);
-                    onGuideToBooth(match.booth);
-                  }
-                : undefined
-            }
-            onSelectProduct={(prod, slotId) => {
-              setExpanded(false);
-              onSelectProduct(match.booth, prod, slotId);
+          >
+            Đi tới
+          </button>
+          <button
+            type="button"
+            data-testid="v28-nearby-expand-btn"
+            onClick={() => {
+              setDismissedState(null);
+              setExpanded(true);
             }}
-          />
-        ))}
-      </section>
+            aria-label={`Mở rộng xem ${matches.length} gian hàng gần bạn`}
+            title={`Xem thêm (${matches.length} gian gần)`}
+            style={{
+              minHeight: isMobileUi ? 30 : 28,
+              padding: '0 7px',
+              borderRadius: 8,
+              border: '1px solid rgba(148, 163, 184, 0.34)',
+              background: 'rgba(255, 255, 255, 0.1)',
+              color: '#f8fafc',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+          >
+            {matches.length > 1 ? `+${matches.length - 1} ▴` : '▴'}
+          </button>
+        </div>
+      </aside>
     );
   }
 
   // =========================================================================
-  // DESKTOP: Compact bottom-left floating card (never blocks center 3D or bottom-right dock)
+  // EXPANDED PANEL (Bottom-Left on BOTH Desktop & Mobile; max 3 nearby booths)
   // =========================================================================
-  if (!expanded) {
-    return (
-      <div
-        data-testid="v28-nearby-discovery-pill"
-        onPointerDown={(e) => e.stopPropagation()}
-        style={{
-          pointerEvents: 'auto',
-          position: 'fixed',
-          left: 18,
-          bottom: 14,
-          zIndex: 21,
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            setDismissedState(null);
-            setExpanded(true);
-          }}
-          aria-label={`Mở danh sách ${matches.length} gian hàng gần bạn`}
-          style={{
-            height: 40,
-            padding: '0 14px',
-            borderRadius: 999,
-            border: '1px solid rgba(56, 189, 248, 0.45)',
-            background: 'rgba(15, 23, 42, 0.86)',
-            backdropFilter: 'blur(10px)',
-            color: '#f8fafc',
-            fontSize: 12.5,
-            fontWeight: 700,
-            cursor: 'pointer',
-            boxShadow: '0 8px 22px rgba(15, 23, 42, 0.28)',
-          }}
-        >
-          📍 Gần bạn ({matches.length}) · #{closest.boothNumber} ~{Math.round(closest.approachDistanceM)}m
-        </button>
-      </div>
-    );
-  }
-
   return (
     <aside
       data-testid="v28-nearby-discovery-panel"
@@ -353,18 +323,22 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
       style={{
         pointerEvents: 'auto',
         position: 'fixed',
-        left: 18,
-        bottom: 14,
-        zIndex: 21,
-        width: 'min(330px, 34vw)',
-        maxHeight: '42vh',
+        left: leftOffset,
+        bottom: bottomOffset,
+        zIndex: 22,
+        width: isMobileUi
+          ? isMobileLandscape
+            ? 'min(330px, 56vw)'
+            : 'min(320px, calc(100vw - 20px))'
+          : 'min(324px, 32vw)',
+        maxHeight: isMobileUi ? (isMobileLandscape ? '56dvh' : '42dvh') : '44vh',
         overflowY: 'auto',
-        background: 'rgba(255, 255, 255, 0.95)',
+        background: 'rgba(255, 255, 255, 0.96)',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
         borderRadius: 14,
         border: '1px solid #cbd5e1',
-        boxShadow: '0 12px 32px rgba(15, 23, 42, 0.24)',
+        boxShadow: '0 12px 32px rgba(15, 23, 42, 0.26)',
         padding: 10,
         display: 'flex',
         flexDirection: 'column',
@@ -378,39 +352,74 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
             📍 Gian hàng gần bạn ({matches.length})
           </strong>
           <span style={{ fontSize: 10.5, color: '#64748b' }}>
-            Khoảng cách ước tính tới mặt tiền gian hàng
+            Tối đa 3 gian hàng gần vị trí của bạn
           </span>
         </div>
-        <button
-          type="button"
-          data-testid="v28-nearby-close-btn"
-          onClick={handleClose}
-          aria-label="Đóng thông báo gian hàng gần bạn"
-          title="Đóng thông báo"
-          style={{
-            minWidth: 30,
-            minHeight: 30,
-            borderRadius: 8,
-            border: '1px solid #cbd5e1',
-            background: '#f8fafc',
-            color: '#334155',
-            fontWeight: 800,
-            cursor: 'pointer',
-            flexShrink: 0,
-          }}
-        >
-          ✕
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+          <button
+            type="button"
+            data-testid="v28-nearby-collapse-btn"
+            onClick={() => setExpanded(false)}
+            aria-label="Thu gọn bảng gian hàng gần bạn"
+            title="Thu gọn"
+            style={{
+              minHeight: 28,
+              padding: '0 8px',
+              borderRadius: 7,
+              border: '1px solid #cbd5e1',
+              background: '#f1f5f9',
+              color: '#334155',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Thu gọn ▾
+          </button>
+          <button
+            type="button"
+            data-testid="v28-nearby-close-btn"
+            onClick={handleClose}
+            aria-label="Đóng thông báo gian hàng gần bạn"
+            title="Đóng thông báo"
+            style={{
+              minWidth: 28,
+              minHeight: 28,
+              borderRadius: 7,
+              border: '1px solid #cbd5e1',
+              background: '#f8fafc',
+              color: '#334155',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {matches.map((match) => (
         <NearbyBoothCard
           key={match.booth.boothId}
           match={match}
-          compact={false}
-          onNavigate={() => onNavigateToBooth(match.booth)}
-          onGuide={onGuideToBooth ? () => onGuideToBooth(match.booth) : undefined}
-          onSelectProduct={(prod, slotId) => onSelectProduct(match.booth, prod, slotId)}
+          isVisited={Boolean(visitedBoothIds?.has(match.booth.boothId))}
+          compact={isMobileUi}
+          onNavigate={() => {
+            setExpanded(false);
+            onNavigateToBooth(match.booth);
+          }}
+          onGuide={
+            onGuideToBooth
+              ? () => {
+                  setExpanded(false);
+                  onGuideToBooth(match.booth);
+                }
+              : undefined
+          }
+          onSelectProduct={(prod, slotId) => {
+            setExpanded(false);
+            onSelectProduct(match.booth, prod, slotId);
+          }}
         />
       ))}
     </aside>
@@ -419,6 +428,7 @@ export const NearbyDiscoveryWidget: React.FC<NearbyDiscoveryWidgetProps> = ({
 
 interface NearbyBoothCardProps {
   match: NearbyBoothMatch;
+  isVisited: boolean;
   compact: boolean;
   onNavigate: () => void;
   onGuide?: () => void;
@@ -427,6 +437,7 @@ interface NearbyBoothCardProps {
 
 const NearbyBoothCard: React.FC<NearbyBoothCardProps> = ({
   match,
+  isVisited,
   compact,
   onNavigate,
   onGuide,
@@ -441,8 +452,8 @@ const NearbyBoothCard: React.FC<NearbyBoothCardProps> = ({
       data-booth-id={booth.boothId}
       style={{
         borderRadius: 10,
-        border: '1px solid #e2e8f0',
-        background: '#f8fafc',
+        border: isVisited ? '1px solid #86efac' : '1px solid #e2e8f0',
+        background: isVisited ? '#f0fdf4' : '#f8fafc',
         padding: compact ? 8 : 9,
         display: 'flex',
         flexDirection: 'column',
@@ -454,7 +465,7 @@ const NearbyBoothCard: React.FC<NearbyBoothCardProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
             <span
               style={{
-                background: '#0f172a',
+                background: isVisited ? '#059669' : '#0f172a',
                 color: '#fff',
                 fontSize: 10.5,
                 fontWeight: 800,
@@ -470,6 +481,22 @@ const NearbyBoothCard: React.FC<NearbyBoothCardProps> = ({
             <span style={{ fontSize: 10.5, color: '#64748b' }}>
               ~{Math.round(approachDistanceM)}m
             </span>
+            {isVisited && (
+              <span
+                data-testid={`v28-nearby-booth-visited-${boothNumber}`}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  padding: '1px 6px',
+                  borderRadius: 999,
+                  background: '#dcfce7',
+                  border: '1px solid #86efac',
+                  color: '#047857',
+                }}
+              >
+                ✓ Đã xem qua
+              </span>
+            )}
           </div>
           <div
             style={{
@@ -486,32 +513,11 @@ const NearbyBoothCard: React.FC<NearbyBoothCardProps> = ({
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-          {onGuide && (
-            <button
-              type="button"
-              data-testid={`v28-nearby-guide-${boothNumber}`}
-              onClick={onGuide}
-              title="Dẫn đường 3D tới gian hàng này"
-              style={{
-                minHeight: compact ? 36 : 32,
-                padding: '0 8px',
-                borderRadius: 8,
-                border: '1px solid #0284c7',
-                background: '#e0f2fe',
-                color: '#0369a1',
-                fontSize: 11.5,
-                fontWeight: 700,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              🧭 Chỉ đường
-            </button>
-          )}
           <button
             type="button"
             data-testid={`v28-nearby-go-${boothNumber}`}
-            onClick={onNavigate}
+            onClick={() => (onGuide ?? onNavigate)()}
+            title="Nhảy tới trước gian hàng này"
             style={{
               minHeight: compact ? 36 : 32,
               padding: '0 10px',

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { v28Api, type V28BoothPlacementView } from '../../services/v28Api';
+import { v28Api, type V28BoothPlacementView, type V28Product } from '../../services/v28Api';
 import { getNpcAssistantProfile } from '../../services/npcPresentationService';
 import type { V28NpcAnimState } from '../../scene/v28/DynamicBoothNpc3D';
 
@@ -9,20 +9,58 @@ interface ChatMessage {
   meta?: string;
 }
 
+const MAX_STORED_CHAT_MESSAGES = 50;
+
+function getChatStorageKey(boothId: string): string {
+  return `v28_npc_chat_history_${boothId}`;
+}
+
+function loadBoothChatHistory(boothId: string): ChatMessage[] | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const raw = localStorage.getItem(getChatStorageKey(boothId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    const valid = parsed.filter(
+      (m): m is ChatMessage =>
+        Boolean(m) &&
+        (m.role === 'user' || m.role === 'npc') &&
+        typeof m.text === 'string' &&
+        m.text.length > 0
+    );
+    return valid.length > 0 ? valid.slice(-MAX_STORED_CHAT_MESSAGES) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveBoothChatHistory(boothId: string, messages: readonly ChatMessage[]): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const trimmed = messages.slice(-MAX_STORED_CHAT_MESSAGES);
+    localStorage.setItem(getChatStorageKey(boothId), JSON.stringify(trimmed));
+  } catch {
+    // Ignore storage quota/private mode errors
+  }
+}
+
 export interface V28NpcChatModalProps {
   booth: V28BoothPlacementView;
+  product?: V28Product | null;
   isMobileUi: boolean;
   onAnimStateChange: (state: V28NpcAnimState) => void;
   onClose: () => void;
 }
 
 /**
- * Compact, user-initiated Chat modal for the booth NPC (Phase 1.1).
- * Only opens when the visitor explicitly clicks the "💬 Chat" button.
- * Does NOT render narration controls, subtitles, or auto-start narration audio.
+ * Compact, user-initiated Chat modal for the booth NPC (Phase 1.1 + Phase A).
+ * Only opens when the visitor explicitly clicks the "Chat" button.
+ * Persists conversation history per booth across close/exit and reload.
  */
 export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
   booth,
+  product = null,
   isMobileUi,
   onAnimStateChange,
   onClose,
@@ -38,19 +76,35 @@ export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
     [booth.boothId, booth.boothName, booth.category, booth.color]
   );
 
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [
-    {
-      role: 'npc',
-      text: `Xin chào quý khách! Tôi là ${profile.assistantName} (${profile.roleTitle}) của gian hàng ${booth.boothName}. Quý khách cần hỏi thêm thông tin sản phẩm nào?`,
-    },
-  ]);
+  const buildGreeting = (targetProduct: V28Product | null): string => {
+    if (targetProduct) {
+      const priceLabel =
+        targetProduct.price > 0
+          ? `${targetProduct.price.toLocaleString('vi-VN')} ${targetProduct.currency || 'VND'}`
+          : 'liên hệ báo giá';
+      return `Xin chào quý khách! Tôi là ${profile.assistantName} tại gian hàng ${booth.boothName}. Quý khách cần hỏi thêm gì về sản phẩm "${targetProduct.name}" (${priceLabel}) ạ?`;
+    }
+    return `Xin chào quý khách! Tôi là ${profile.assistantName} (${profile.roleTitle}) của gian hàng ${booth.boothName}. Quý khách cần hỏi thêm thông tin sản phẩm nào?`;
+  };
+
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
+    const saved = loadBoothChatHistory(booth.boothId);
+    if (saved) return saved;
+    return [
+      {
+        role: 'npc',
+        text: buildGreeting(product),
+      },
+    ];
+  });
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
-  const activeBoothIdRef = useRef(booth.boothId);
-  activeBoothIdRef.current = booth.boothId;
+  const contextKey = `${booth.boothId}::${product?.id || ''}`;
+  const activeContextKeyRef = useRef(contextKey);
+  activeContextKeyRef.current = contextKey;
 
   const visitorIdRef = useRef<string>(
     sessionStorage.getItem('v28_visitor_uid') ||
@@ -69,17 +123,31 @@ export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
     };
   }, [onAnimStateChange]);
 
+  // Load persisted history when switching to another booth (never wipe existing history on reopen)
   useEffect(() => {
-    setChatMessages([
-      {
-        role: 'npc',
-        text: `Xin chào quý khách! Tôi là ${profile.assistantName} (${profile.roleTitle}) của gian hàng ${booth.boothName}. Quý khách cần hỏi thêm thông tin sản phẩm nào?`,
-      },
-    ]);
+    const saved = loadBoothChatHistory(booth.boothId);
+    if (saved) {
+      setChatMessages(saved);
+    } else {
+      setChatMessages([
+        {
+          role: 'npc',
+          text: buildGreeting(product),
+        },
+      ]);
+    }
     setChatInput('');
     setChatError('');
     setChatLoading(false);
-  }, [booth.boothId, booth.boothName, profile.assistantName, profile.roleTitle]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booth.boothId]);
+
+  // Persist messages whenever chatMessages changes
+  useEffect(() => {
+    if (chatMessages.length > 0) {
+      saveBoothChatHistory(booth.boothId, chatMessages);
+    }
+  }, [booth.boothId, chatMessages]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -91,8 +159,14 @@ export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
     if (e) e.preventDefault();
     const msg = chatInput.trim();
     if (!msg || chatLoading) return;
+    const reqContextKey = contextKey;
     const reqBoothId = booth.boothId;
-    setChatMessages((prev) => [...prev, { role: 'user', text: msg }]);
+    const reqProductId = product?.id;
+    setChatMessages((prev) => {
+      const next: ChatMessage[] = [...prev, { role: 'user', text: msg }];
+      saveBoothChatHistory(reqBoothId, next);
+      return next;
+    });
     setChatInput('');
     setChatError('');
     setChatLoading(true);
@@ -100,25 +174,30 @@ export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
     try {
       const res = await v28Api.chatWithBoothNpc({
         boothId: reqBoothId,
+        productId: reqProductId,
         userId: visitorIdRef.current,
         message: msg,
       });
-      if (!mountedRef.current || activeBoothIdRef.current !== reqBoothId) return;
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          role: 'npc',
-          text: res.reply,
-          meta: res.liveGeminiVerified ? `Gemini Live (${res.modelId})` : undefined,
-        },
-      ]);
+      if (!mountedRef.current || activeContextKeyRef.current !== reqContextKey) return;
+      setChatMessages((prev) => {
+        const next: ChatMessage[] = [
+          ...prev,
+          {
+            role: 'npc',
+            text: res.reply,
+            meta: res.liveGeminiVerified ? `Gemini Live (${res.modelId})` : undefined,
+          },
+        ];
+        saveBoothChatHistory(reqBoothId, next);
+        return next;
+      });
       onAnimStateChange('talk');
     } catch (err) {
-      if (!mountedRef.current || activeBoothIdRef.current !== reqBoothId) return;
+      if (!mountedRef.current || activeContextKeyRef.current !== reqContextKey) return;
       setChatError((err as Error).message || 'Không thể kết nối trợ lý tư vấn.');
       onAnimStateChange('idle');
     } finally {
-      if (mountedRef.current && activeBoothIdRef.current === reqBoothId) {
+      if (mountedRef.current && activeContextKeyRef.current === reqContextKey) {
         setChatLoading(false);
       }
     }
@@ -127,19 +206,21 @@ export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
   return (
     <aside
       data-testid="v28-npc-chat-modal"
+      data-product-id={product?.id || ''}
       aria-label={`Chat với trợ lý ${profile.assistantName}`}
       style={{
         pointerEvents: 'auto',
         marginLeft: 'auto',
-        width: isMobileUi ? '100%' : 'min(380px, 92vw)',
+        width: '100%',
         maxWidth: '100%',
-        maxHeight: isMobileUi ? '52vh' : '56vh',
-        background: 'rgba(255, 255, 255, 0.97)',
+        height: isMobileUi ? 'auto' : '100%',
+        maxHeight: isMobileUi ? '42vh' : '100%',
+        background: 'rgba(255, 255, 255, 0.96)',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
-        borderRadius: 16,
+        borderRadius: 13,
         border: '1px solid #cbd5e1',
-        boxShadow: '0 14px 36px rgba(15, 23, 42, 0.28)',
+        boxShadow: '0 10px 26px rgba(15, 23, 42, 0.24)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -150,18 +231,18 @@ export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 8,
-          padding: '10px 12px',
+          gap: 6,
+          padding: '7px 10px',
           background: '#0f172a',
           color: '#ffffff',
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             💬 Chat với {profile.assistantName}
           </div>
-          <div style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {booth.companyName || booth.boothName}
+          <div style={{ fontSize: 10.5, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {product ? `SP: ${product.name}` : booth.companyName || booth.boothName}
           </div>
         </div>
         <button
@@ -170,14 +251,16 @@ export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
           onClick={onClose}
           aria-label="Đóng cửa sổ chat"
           style={{
-            minWidth: 32,
-            minHeight: 32,
-            borderRadius: 8,
+            minWidth: 26,
+            minHeight: 26,
+            borderRadius: 7,
             border: '1px solid rgba(148,163,184,0.4)',
             background: 'rgba(255,255,255,0.12)',
             color: '#fff',
             cursor: 'pointer',
             fontWeight: 700,
+            fontSize: 12,
+            flexShrink: 0,
           }}
         >
           ✕
@@ -189,10 +272,10 @@ export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: 10,
+          padding: 8,
           display: 'flex',
           flexDirection: 'column',
-          gap: 8,
+          gap: 6,
           background: '#f8fafc',
         }}
       >
@@ -201,30 +284,30 @@ export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
             key={idx}
             style={{
               alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '86%',
-              padding: '8px 10px',
-              borderRadius: 12,
-              fontSize: 12.5,
-              lineHeight: 1.45,
+              maxWidth: '88%',
+              padding: '6px 8px',
+              borderRadius: 10,
+              fontSize: 11.5,
+              lineHeight: 1.4,
               background: m.role === 'user' ? '#0284c7' : '#ffffff',
               color: m.role === 'user' ? '#ffffff' : '#0f172a',
               border: m.role === 'user' ? 'none' : '1px solid #e2e8f0',
             }}
           >
             <div>{m.text}</div>
-            {m.meta && <div style={{ fontSize: 10, opacity: 0.65, marginTop: 3 }}>{m.meta}</div>}
+            {m.meta && <div style={{ fontSize: 9.5, opacity: 0.65, marginTop: 2 }}>{m.meta}</div>}
           </div>
         ))}
-        {chatLoading && <div style={{ fontSize: 12, color: '#64748b' }}>⏳ Trợ lý đang trả lời...</div>}
-        {chatError && <div style={{ fontSize: 12, color: '#dc2626' }}>⚠️ {chatError}</div>}
+        {chatLoading && <div style={{ fontSize: 11, color: '#64748b' }}>⏳ Trợ lý đang trả lời...</div>}
+        {chatError && <div style={{ fontSize: 11, color: '#dc2626' }}>⚠️ {chatError}</div>}
       </div>
 
       <form
         onSubmit={handleSendChat}
         style={{
           display: 'flex',
-          gap: 6,
-          padding: 8,
+          gap: 5,
+          padding: 6,
           borderTop: '1px solid #e2e8f0',
           background: '#ffffff',
         }}
@@ -233,15 +316,16 @@ export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
           type="text"
           value={chatInput}
           onChange={(e) => setChatInput(e.target.value)}
-          placeholder="Nhập câu hỏi về sản phẩm..."
+          placeholder="Nhập câu hỏi..."
           aria-label="Nhập câu hỏi cho trợ lý tư vấn"
           style={{
             flex: 1,
-            minHeight: 36,
-            padding: '6px 10px',
-            borderRadius: 9,
+            minWidth: 0,
+            minHeight: 30,
+            padding: '4px 8px',
+            borderRadius: 8,
             border: '1px solid #cbd5e1',
-            fontSize: 13,
+            fontSize: 12,
             outline: 'none',
           }}
         />
@@ -249,16 +333,17 @@ export const V28NpcChatModal: React.FC<V28NpcChatModalProps> = ({
           type="submit"
           disabled={chatLoading || !chatInput.trim()}
           style={{
-            minHeight: 36,
-            padding: '0 12px',
-            borderRadius: 9,
+            minHeight: 30,
+            padding: '0 10px',
+            borderRadius: 8,
             border: 'none',
             background: '#0284c7',
             color: '#ffffff',
             fontWeight: 700,
-            fontSize: 12.5,
+            fontSize: 11.5,
             cursor: chatLoading ? 'wait' : 'pointer',
             opacity: chatLoading || !chatInput.trim() ? 0.6 : 1,
+            flexShrink: 0,
           }}
         >
           Gửi

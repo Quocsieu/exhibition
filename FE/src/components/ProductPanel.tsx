@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { Booth, Product } from '../types/expo';
+import { resolveV28ProductImageUrl } from '../services/v28Api';
 
 export function formatCurrency(price: number, currency = 'VND'): string {
   try {
@@ -21,6 +22,15 @@ export interface ProductPanelProps {
 
 export const ProductPanel: React.FC<ProductPanelProps> = ({ booth, product, onBack }) => {
   const [activeImageIdx, setActiveImageIdx] = useState(0);
+  const [brokenUrls, setBrokenUrls] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setActiveImageIdx(0);
+  }, [product.id]);
+
+  const rawMainUrl = product.images[activeImageIdx] || product.images[0] || '';
+  const resolvedMainUrl = resolveV28ProductImageUrl(rawMainUrl);
+  const showMainImg = Boolean(resolvedMainUrl && !brokenUrls[resolvedMainUrl]);
 
   return (
     <div className="product-detail">
@@ -34,35 +44,49 @@ export const ProductPanel: React.FC<ProductPanelProps> = ({ booth, product, onBa
 
       <div className="product-detail__layout">
         <div className="product-detail__media-col">
-          {product.images.length > 0 ? (
+          {showMainImg ? (
             <div className="product-detail__main-image-wrap">
               <img
-                src={product.images[activeImageIdx] || product.images[0]}
+                src={resolvedMainUrl}
                 alt={product.name}
                 className="product-detail__main-image"
+                onError={() =>
+                  setBrokenUrls((prev) => ({ ...prev, [resolvedMainUrl]: true }))
+                }
               />
             </div>
           ) : (
             <div className="product-card__placeholder product-detail__placeholder">
-              📦 Sản phẩm chưa có hình ảnh
+              {product.images.length > 0
+                ? 'Không tải được hình ảnh sản phẩm'
+                : 'Sản phẩm chưa có hình ảnh'}
             </div>
           )}
 
           {product.images.length > 1 && (
             <div className="product-detail__thumbs">
-              {product.images.map((imgUrl, idx) => (
-                <button
-                  key={imgUrl + idx}
-                  type="button"
-                  className={`product-detail__thumb-btn ${
-                    idx === activeImageIdx ? 'product-detail__thumb-btn--active' : ''
-                  }`}
-                  onClick={() => setActiveImageIdx(idx)}
-                  aria-label={`Xem ảnh ${idx + 1}`}
-                >
-                  <img src={imgUrl} alt="" />
-                </button>
-              ))}
+              {product.images.map((imgUrl, idx) => {
+                const resolvedThumb = resolveV28ProductImageUrl(imgUrl);
+                return (
+                  <button
+                    key={imgUrl + idx}
+                    type="button"
+                    className={`product-detail__thumb-btn ${
+                      idx === activeImageIdx ? 'product-detail__thumb-btn--active' : ''
+                    }`}
+                    onClick={() => setActiveImageIdx(idx)}
+                    aria-label={`Xem ảnh ${idx + 1}`}
+                  >
+                    <img
+                      src={resolvedThumb}
+                      alt=""
+                      onError={() =>
+                        setBrokenUrls((prev) => ({ ...prev, [resolvedThumb]: true }))
+                      }
+                    />
+                  </button>
+                );
+              })}
             </div>
           )}
 

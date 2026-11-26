@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '../services/api';
 import {
+  resolveV28ProductImageUrl,
   v28Api,
   type V28ExhibitionVersionDetail,
 } from '../services/v28Api';
@@ -8,17 +9,25 @@ import { ExhibitionConfigurator } from '../components/adminV28/ExhibitionConfigu
 import { CompanyManagement } from '../components/adminV28/CompanyManagement';
 import { ProductCatalog } from '../components/adminV28/ProductCatalog';
 import { RewardRedemptionAdmin } from '../components/adminV28/RewardRedemptionAdmin';
+import { AudioManagementPanel } from '../components/adminV28/AudioManagementPanel';
 import { EmptyBoothManager } from '../components/adminV28/EmptyBoothManager';
+import { V28SvgIcon } from '../components/v28/V28SvgIcon';
 import './adminV28.css';
+
+function computeBrandInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'GE';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
+}
 
 export interface AdminV28PageProps {
   onOpenDynamicWorld: () => void;
-  onOpenLegacyAdmin: () => void;
+  onOpenLegacyAdmin?: () => void;
 }
 
 export const AdminV28Page: React.FC<AdminV28PageProps> = ({
   onOpenDynamicWorld,
-  onOpenLegacyAdmin,
 }) => {
   const [authToken, setAuthToken] = useState<string>(() => localStorage.getItem('expo_admin_token') || '');
   const [username, setUsername] = useState<string>('admin');
@@ -28,13 +37,22 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
   const [demoConfig, setDemoConfig] = useState<{ demoEnabled: boolean; label?: string; username?: string; password?: string }>({
     demoEnabled: false,
   });
-  const [logoFailed, setLogoFailed] = useState<boolean>(false);
 
-  const [activeSection, setActiveSection] = useState<'overview' | 'wizard' | 'products' | 'company' | 'rewards'>('overview');
+  const [activeSection, setActiveSection] = useState<'overview' | 'wizard' | 'products' | 'company' | 'rewards' | 'audio'>('overview');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
+  const [boundOwnerName, setBoundOwnerName] = useState<string>('');
+  const [boundOwnerLogoUrl, setBoundOwnerLogoUrl] = useState<string>('');
+  const [logoLoadFailed, setLogoLoadFailed] = useState<boolean>(false);
   const [activeWorld, setActiveWorld] = useState<V28ExhibitionVersionDetail | null>(null);
   const [worldLoadError, setWorldLoadError] = useState<boolean>(false);
-  const [viewedVersionMeta, setViewedVersionMeta] = useState<{ status: string; zones: number; booths: number; ownerName?: string } | null>(null);
+  const [viewedVersionMeta, setViewedVersionMeta] = useState<{
+    exhibitionId?: string;
+    versionId?: string;
+    status: string;
+    zones: number;
+    booths: number;
+    ownerName?: string;
+  } | null>(null);
   const [refreshNonce, setRefreshNonce] = useState<number>(0);
   const [navRequest, setNavRequest] = useState<{ mode: 'dashboard' | 'wizard'; step?: 1 | 2 | 3 | 4; nonce: number }>({
     mode: 'dashboard',
@@ -64,9 +82,29 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
   const refreshActiveSummary = useCallback(async () => {
     try {
       setWorldLoadError(false);
-      const worldRes = await v28Api.getActiveWorld();
-      setActiveWorld(worldRes.world);
-      setLogoFailed(false);
+      const [worldRes, ownerRes] = await Promise.all([
+        v28Api.getActiveWorld().catch(() => null),
+        v28Api.getOwnerCompany().catch(() => null),
+      ]);
+      if (worldRes?.world) {
+        setActiveWorld(worldRes.world);
+      } else {
+        setWorldLoadError(true);
+      }
+      if (ownerRes?.company) {
+        setSelectedCompanyId(ownerRes.company.id);
+        setBoundOwnerName(ownerRes.company.name);
+        setBoundOwnerLogoUrl(ownerRes.company.logoUrl || worldRes?.world?.ownerCompany?.logoUrl || '');
+        setLogoLoadFailed(false);
+      } else if (worldRes?.world?.ownerCompany) {
+        setBoundOwnerName(worldRes.world.ownerCompany.name || '');
+        setBoundOwnerLogoUrl(worldRes.world.ownerCompany.logoUrl || '');
+        setLogoLoadFailed(false);
+      } else {
+        setBoundOwnerName('');
+        setBoundOwnerLogoUrl('');
+        setLogoLoadFailed(false);
+      }
     } catch {
       setWorldLoadError(true);
     }
@@ -138,8 +176,9 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
             </p>
           </div>
           {authError && (
-            <div style={{ padding: 10, borderRadius: 8, background: '#fef2f2', color: '#b91c1c', fontSize: 13 }}>
-              ⚠️ {authError}
+            <div style={{ padding: 10, borderRadius: 8, background: '#fef2f2', color: '#b91c1c', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <V28SvgIcon name="warning" size={15} />
+              <span>{authError}</span>
             </div>
           )}
           {demoConfig.demoEnabled && demoConfig.username && demoConfig.password && (
@@ -255,6 +294,15 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
     );
   }
 
+  const brandDisplayName =
+    boundOwnerName.trim() ||
+    activeWorld?.ownerCompany?.name?.trim() ||
+    'Grand Expo';
+  const resolvedBrandLogoUrl = resolveV28ProductImageUrl(
+    boundOwnerLogoUrl || activeWorld?.ownerCompany?.logoUrl || ''
+  );
+  const brandInitials = computeBrandInitials(brandDisplayName);
+
   return (
     <div className="v28-admin-shell">
       {/* Left Minimal SaaS Sidebar Navigation — 3 Core Entries */}
@@ -264,10 +312,45 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
       >
         <div>
           <div className="v28-brand" style={{ justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div className="v28-brand-mark">GE</div>
-              <div>
-                <div className="v28-brand-title">Grand Expo</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <div
+                className="v28-brand-mark"
+                style={
+                  resolvedBrandLogoUrl && !logoLoadFailed
+                    ? {
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        padding: 3,
+                        overflow: 'hidden',
+                        flexShrink: 0,
+                      }
+                    : { flexShrink: 0 }
+                }
+              >
+                {resolvedBrandLogoUrl && !logoLoadFailed ? (
+                  <img
+                    src={resolvedBrandLogoUrl}
+                    alt={brandDisplayName}
+                    onError={() => setLogoLoadFailed(true)}
+                    style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                  />
+                ) : (
+                  brandInitials
+                )}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div
+                  className="v28-brand-title"
+                  title={brandDisplayName}
+                  style={{
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    maxWidth: 165,
+                  }}
+                >
+                  {brandDisplayName}
+                </div>
                 <div className="v28-brand-sub">Quản trị triển lãm</div>
               </div>
             </div>
@@ -294,7 +377,7 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
                   setMobileNavOpen(false);
                 }}
               >
-                <span>📊</span>
+                <V28SvgIcon name="dashboard" size={16} />
                 <span>Tổng quan</span>
               </button>
               <button
@@ -306,7 +389,7 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
                   setMobileNavOpen(false);
                 }}
               >
-                <span>✨</span>
+                <V28SvgIcon name="sparkles" size={16} />
                 <span>Tạo triển lãm</span>
               </button>
               <button
@@ -318,8 +401,20 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
                   setMobileNavOpen(false);
                 }}
               >
-                <span>🎁</span>
+                <V28SvgIcon name="gift" size={16} />
                 <span>Đổi quà</span>
+              </button>
+              <button
+                type="button"
+                className={`v28-nav-item ${activeSection === 'audio' ? 'v28-nav-item--active' : ''}`}
+                data-testid="v28-admin-nav-audio"
+                onClick={() => {
+                  setActiveSection('audio');
+                  setMobileNavOpen(false);
+                }}
+              >
+                <V28SvgIcon name="sparkles" size={16} />
+                <span>Âm thanh & Giọng đọc</span>
               </button>
               <button
                 type="button"
@@ -329,7 +424,7 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
                   onOpenDynamicWorld();
                 }}
               >
-                <span>🌐</span>
+                <V28SvgIcon name="globe" size={16} />
                 <span>Xem triển lãm</span>
               </button>
             </nav>
@@ -337,11 +432,14 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
         </div>
 
         <div className="v28-sidebar-footer v28-nav-collapse">
-          <button type="button" className="v28-btn v28-btn--secondary" onClick={onOpenLegacyAdmin}>
-            🏛️ Quản trị bản cũ
-          </button>
-          <button type="button" className="v28-btn v28-btn--danger" onClick={handleLogout}>
-            Đăng xuất
+          <button
+            type="button"
+            className="v28-btn v28-btn--danger"
+            onClick={handleLogout}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          >
+            <V28SvgIcon name="logout" size={15} />
+            <span>Đăng xuất</span>
           </button>
         </div>
       </aside>
@@ -359,30 +457,25 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
                     ? 'Thông tin doanh nghiệp'
                     : activeSection === 'rewards'
                       ? 'Xác minh & Đổi quà'
-                      : 'Tổng quan'}
+                      : activeSection === 'audio'
+                        ? 'Âm thanh & Giọng đọc'
+                        : 'Tổng quan'}
             </h1>
             <div className="v28-topbar-meta">
               {viewedVersionMeta
-                ? `${viewedVersionMeta.ownerName ? `${viewedVersionMeta.ownerName} · ` : ''}${viewedVersionMeta.zones} khu · ${viewedVersionMeta.booths} gian`
+                ? `${boundOwnerName || viewedVersionMeta.ownerName ? `${boundOwnerName || viewedVersionMeta.ownerName} · ` : ''}${viewedVersionMeta.zones} khu · ${viewedVersionMeta.booths} gian`
                 : activeWorld
-                  ? `${activeWorld.ownerCompany ? `${activeWorld.ownerCompany.name} · ` : ''}${activeWorld.zones.length} khu · ${activeWorld.booths.length} gian`
+                  ? `${boundOwnerName || activeWorld.ownerCompany?.name ? `${boundOwnerName || activeWorld.ownerCompany?.name} · ` : ''}${activeWorld.zones.length} khu · ${activeWorld.booths.length} gian`
                   : worldLoadError
-                    ? 'Không thể tải thông tin triển lãm'
+                    ? 'Chưa có phiên bản triển lãm xuất bản'
                     : 'Đang tải thông tin triển lãm...'}
             </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             {(viewedVersionMeta || activeWorld) && (
-              <span
-                className="v28-status-pill"
-                style={
-                  viewedVersionMeta?.status === 'draft'
-                    ? { background: '#fef3c7', color: '#92400e', borderColor: '#fde68a' }
-                    : undefined
-                }
-              >
-                {viewedVersionMeta?.status === 'draft' ? '● Bản nháp (Draft)' : '● Đã xuất bản'}
+              <span className="v28-status-pill">
+                ● Đang hoạt động
               </span>
             )}
             <button
@@ -419,12 +512,12 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
               onManageCompanies={() => setActiveSection('company')}
             />
 
-            {/* Phase 8 Revision: Permanent Empty Booth Management integrated directly into Admin Tổng quan */}
+            {/* Phase 8 Revision: Permanent Empty Booth Management synchronized strictly with currently viewed version */}
             {activeSection === 'overview' && (
-              <div style={{ marginTop: 20 }}>
+              <div style={{ marginTop: 16 }}>
                 <EmptyBoothManager
-                  exhibitionId={activeWorld?.exhibitionId}
-                  versionId={activeWorld?.versionId}
+                  exhibitionId={viewedVersionMeta?.exhibitionId || activeWorld?.exhibitionId}
+                  versionId={viewedVersionMeta?.versionId || activeWorld?.versionId}
                   onWorldUpdated={() => {
                     setRefreshNonce((n) => n + 1);
                     void refreshActiveSummary();
@@ -438,6 +531,9 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
           {activeSection === 'rewards' && (
             <RewardRedemptionAdmin activeVersionId={activeWorld?.versionId} />
           )}
+
+          {/* Admin Voice & Audio Management Workspace */}
+          {activeSection === 'audio' && <AudioManagementPanel activeWorld={activeWorld} />}
 
           {/* Dedicated In-Page Product Catalog Workspace (Replaces Giant Popup) */}
           {activeSection === 'products' && (
@@ -463,33 +559,12 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
             </div>
           )}
 
-          {/* Dedicated In-Page Single-Business Owner Workspace + Collapsible Historical Records (Replaces Giant Popup) */}
+          {/* Dedicated In-Page Single-Business Owner Workspace */}
           {activeSection === 'company' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div className="v28-card" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  {activeWorld?.ownerCompany?.logoUrl && !logoFailed ? (
-                    <img
-                      src={activeWorld.ownerCompany.logoUrl}
-                      alt={activeWorld.ownerCompany.name}
-                      onError={() => setLogoFailed(true)}
-                      style={{ width: 52, height: 52, borderRadius: 12, objectFit: 'contain', background: '#f8fafc', border: '1px solid rgba(17,24,39,0.1)', padding: 4 }}
-                    />
-                  ) : (
-                    <div style={{ width: 52, height: 52, borderRadius: 12, background: '#e0f2fe', color: '#0369a1', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 20 }}>
-                      {(activeWorld?.ownerCompany?.name || 'E').slice(0, 1).toUpperCase()}
-                    </div>
-                  )}
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#526071' }}>Doanh nghiệp sở hữu triển lãm (1 doanh nghiệp duy nhất)</div>
-                    <div style={{ fontSize: 19, fontWeight: 800, color: '#111827' }}>
-                      {activeWorld?.ownerCompany?.name || 'Chưa xác định doanh nghiệp sở hữu'}
-                    </div>
-                    <div style={{ fontSize: 13, color: '#0284c7', marginTop: 2 }}>
-                      {activeWorld?.ownerCompany?.contactUrl || 'Chưa có URL website'}
-                      {activeWorld?.ownerCompany?.contactEmail ? ` · ${activeWorld.ownerCompany.contactEmail}` : ''}
-                    </div>
-                  </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ fontSize: 13, color: '#526071' }}>
+                  Quản lý hồ sơ doanh nghiệp duy nhất sở hữu triển lãm hiện tại.
                 </div>
                 <button
                   type="button"
@@ -505,17 +580,21 @@ export const AdminV28Page: React.FC<AdminV28PageProps> = ({
                 </button>
               </div>
 
-              <details className="v28-advanced-details" open={!activeWorld?.ownerCompany}>
-                <summary>Quản trị hồ sơ doanh nghiệp (Chỉnh sửa thông tin / Hồ sơ lịch sử)</summary>
-                <div style={{ marginTop: 14 }}>
-                  <CompanyManagement
-                    onSelectCompanyForCatalog={(cid) => {
-                      setSelectedCompanyId(cid);
-                      setActiveSection('products');
-                    }}
-                  />
-                </div>
-              </details>
+              <CompanyManagement
+                exhibitionId={activeWorld?.exhibitionId}
+                onSelectCompanyForCatalog={(cid) => {
+                  setSelectedCompanyId(cid);
+                  setActiveSection('products');
+                }}
+                onOwnerChanged={(comp) => {
+                  if (comp) {
+                    setSelectedCompanyId(comp.id);
+                    setBoundOwnerName(comp.name);
+                  }
+                  setRefreshNonce((n) => n + 1);
+                  void refreshActiveSummary();
+                }}
+              />
             </div>
           )}
         </div>

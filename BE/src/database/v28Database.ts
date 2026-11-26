@@ -594,6 +594,117 @@ export class V28CatalogDatabase {
       }
     }
 
+    // Phase 1 Hybrid TTS & Audio Management: Additive, non-destructive extension of audio_assets
+    // Preserves 100% of existing audio_assets rows while adding provider, source_type, staleness, and batch job tracking.
+    const audioCols = this.db.prepare('PRAGMA table_info(audio_assets)').all() as { name: string }[];
+    const hasAudioCol = (name: string) => audioCols.some((c) => c.name === name);
+    if (audioCols.length > 0) {
+      const additiveColumns: Array<[string, string]> = [
+        ['source_type', "TEXT NOT NULL DEFAULT 'pre_generated'"],
+        ['provider', "TEXT NOT NULL DEFAULT 'gemini'"],
+        ['speed', 'REAL NOT NULL DEFAULT 1.0'],
+        ['style', "TEXT NOT NULL DEFAULT ''"],
+        ['config_version', "TEXT NOT NULL DEFAULT 'v1'"],
+        ['needs_update', 'INTEGER NOT NULL DEFAULT 0'],
+        ['is_active', 'INTEGER NOT NULL DEFAULT 1'],
+        ['original_filename', "TEXT NOT NULL DEFAULT ''"],
+        ['error_message', "TEXT NOT NULL DEFAULT ''"],
+        ['updated_at', "TEXT NOT NULL DEFAULT ''"],
+      ];
+      for (const [colName, colDef] of additiveColumns) {
+        if (!hasAudioCol(colName)) {
+          this.db.exec(`ALTER TABLE audio_assets ADD COLUMN ${colName} ${colDef};`);
+        }
+      }
+      this.db.exec(`
+        UPDATE audio_assets
+        SET updated_at = COALESCE(NULLIF(updated_at, ''), created_at)
+        WHERE updated_at = '';
+        UPDATE audio_assets
+        SET provider = 'local-fallback'
+        WHERE provider = 'gemini' AND model_id LIKE '%local-fallback%';
+        CREATE INDEX IF NOT EXISTS idx_audio_entity_active
+          ON audio_assets(entity_type, entity_id, slot_key, is_active, status);
+        CREATE INDEX IF NOT EXISTS idx_audio_storage_key
+          ON audio_assets(storage_key);
+      `);
+    }
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS audio_batch_jobs (
+        job_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'queued',
+        total_items INTEGER NOT NULL DEFAULT 0,
+        completed_items INTEGER NOT NULL DEFAULT 0,
+        succeeded_items INTEGER NOT NULL DEFAULT 0,
+        failed_items INTEGER NOT NULL DEFAULT 0,
+        skipped_items INTEGER NOT NULL DEFAULT 0,
+        concurrency INTEGER NOT NULL DEFAULT 2,
+        provider_override TEXT NOT NULL DEFAULT '',
+        voice_id TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL DEFAULT 'admin',
+        errors_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Phase 1.1: Per-entity audio mode management (AUTO | AI_GENERATED | RECORDED)
+      CREATE TABLE IF NOT EXISTS audio_entity_configs (
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        audio_mode TEXT NOT NULL DEFAULT 'AUTO',
+        preferred_provider TEXT NOT NULL DEFAULT '',
+        model_id TEXT NOT NULL DEFAULT '',
+        voice_id TEXT NOT NULL DEFAULT '',
+        speed REAL NOT NULL DEFAULT 1.0,
+        style TEXT NOT NULL DEFAULT '',
+        custom_transcript TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+
+      -- Phase 1.1: Backend-enforced Voice Sample Approval registry
+      CREATE TABLE IF NOT EXISTS audio_voice_approvals (
+        approval_id TEXT PRIMARY KEY,
+        config_signature TEXT NOT NULL UNIQUE,
+        provider TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        voice_id TEXT NOT NULL,
+        speed REAL NOT NULL DEFAULT 1.0,
+        style TEXT NOT NULL DEFAULT '',
+        sample_audio_id TEXT NOT NULL DEFAULT '',
+        sample_transcript TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'previewed',
+        approved_by TEXT NOT NULL DEFAULT '',
+        approved_at TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Phase 1.1 additive column on audio_batch_jobs for pause_reason & approval_id
+    const batchCols = this.db.prepare('PRAGMA table_info(audio_batch_jobs)').all() as { name: string }[];
+    if (!batchCols.some((c) => c.name === 'pause_reason')) {
+      this.db.exec("ALTER TABLE audio_batch_jobs ADD COLUMN pause_reason TEXT NOT NULL DEFAULT '';");
+    }
+    if (!batchCols.some((c) => c.name === 'approval_id')) {
+      this.db.exec("ALTER TABLE audio_batch_jobs ADD COLUMN approval_id TEXT NOT NULL DEFAULT '';");
+    }
+
+    // Safe non-destructive backfill for existing entities that already have uploaded or pre_generated audio
+    this.db.exec(`
+      INSERT OR IGNORE INTO audio_entity_configs (entity_type, entity_id, audio_mode, updated_at)
+      SELECT DISTINCT entity_type, entity_id, 'RECORDED', CURRENT_TIMESTAMP
+      FROM audio_assets
+      WHERE is_active = 1 AND status = 'ready' AND source_type = 'uploaded';
+
+      INSERT OR IGNORE INTO audio_entity_configs (entity_type, entity_id, audio_mode, preferred_provider, model_id, voice_id, updated_at)
+      SELECT entity_type, entity_id, 'AI_GENERATED', provider, model_id, voice_id, CURRENT_TIMESTAMP
+      FROM audio_assets
+      WHERE is_active = 1 AND status = 'ready' AND source_type = 'pre_generated'
+        AND model_id NOT LIKE '%local-fallback%' AND provider != 'local-fallback'
+      GROUP BY entity_type, entity_id;
+    `);
+
     // Additive, idempotent per-version snapshot tables (V28-AUDIT-001: strict Draft/Published isolation)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS exhibition_version_booth_meta (

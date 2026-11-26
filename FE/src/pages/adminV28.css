@@ -262,44 +262,112 @@
 
 .v28-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+  gap: 10px;
 }
 
 .v28-kpi-card {
   background: var(--v28-surface);
   border: 1px solid var(--v28-hairline);
   border-radius: var(--v28-r-md);
-  padding: 16px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+  min-width: 0;
 }
 
 .v28-kpi-label {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--v28-muted);
 }
 
 .v28-kpi-value {
-  font-size: 24px;
+  font-size: 21px;
   font-weight: 800;
   color: var(--v28-ink);
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+  line-height: 1.25;
 }
 
 .v28-kpi-sub {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--v28-muted);
 }
 
 .v28-preview-split {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.75fr) minmax(300px, 376px);
+  gap: 14px;
   align-items: start;
+}
+
+.v28-zone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.v28-zone-card {
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--v28-hairline);
+  background: var(--v28-surface-alt);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.v28-zone-card:hover {
+  border-color: rgba(2, 132, 199, 0.42);
+}
+
+.v28-zone-card--active {
+  border: 1.5px solid var(--v28-accent);
+  background: #f0f9ff;
+}
+
+.v28-zone-card--empty {
+  border-left: 3px solid #f59e0b;
+}
+
+.v28-zone-title-clamp {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--v28-ink);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.v28-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--v28-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.v28-icon-btn:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: var(--v28-ink);
+  border-color: rgba(17, 24, 39, 0.12);
 }
 
 .v28-advanced-details {
@@ -326,18 +394,18 @@
 }
 
 .v28-overview-workspace--with-inspector {
-  grid-template-columns: minmax(0, 1fr) 400px;
+  grid-template-columns: minmax(0, 1fr) minmax(310px, 384px);
 }
 
 .v28-booth-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   gap: 8px;
 }
 
 .v28-booth-card {
   text-align: left;
-  padding: 10px 12px;
+  padding: 9px 11px;
   border-radius: var(--v28-r-sm);
   border: 1px solid var(--v28-hairline);
   background: var(--v28-surface);
@@ -345,6 +413,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
   transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
 }
 
@@ -358,6 +427,14 @@
   background: #f0f9ff;
 }
 
+.v28-booth-card--full {
+  border-left: 3px solid var(--v28-success);
+}
+
+.v28-booth-card--partial {
+  border-left: 3px solid #f59e0b;
+}
+
 .v28-booth-card--empty {
   border-left: 3px solid var(--v28-danger);
 }
@@ -366,14 +443,17 @@
   background: var(--v28-surface);
   border: 1px solid var(--v28-hairline);
   border-radius: var(--v28-r-lg);
-  padding: 18px;
+  padding: 15px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   position: sticky;
   top: 20px;
   max-height: calc(100vh - 40px);
   overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .v28-inspector-header {
@@ -381,15 +461,18 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 10px;
-  padding-bottom: 12px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--v28-hairline);
+  min-width: 0;
 }
 
 .v28-slot-row {
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-radius: var(--v28-r-sm);
   border: 1px solid var(--v28-hairline);
   background: var(--v28-surface-alt);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .v28-slot-row--filled {

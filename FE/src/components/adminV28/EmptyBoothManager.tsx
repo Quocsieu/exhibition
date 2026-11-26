@@ -129,7 +129,9 @@ export const EmptyBoothManager: React.FC<EmptyBoothManagerProps> = ({
     };
   }, [version, isRemovableEmptyBooth]);
 
+  const isDraft = Boolean(version && version.status !== 'archived');
   const canDeleteAllEmpty =
+    isDraft &&
     summary.emptyRemovableCount > 0 &&
     summary.activeBoothCount - summary.emptyRemovableCount >= 1;
 
@@ -177,7 +179,7 @@ export const EmptyBoothManager: React.FC<EmptyBoothManagerProps> = ({
   };
 
   const executeRemoval = async () => {
-    if (!version || !confirmAction || submitting) return;
+    if (!version || version.status === 'archived' || !confirmAction || submitting) return;
     setSubmitting(true);
     setError('');
     setMessage('');
@@ -323,6 +325,7 @@ export const EmptyBoothManager: React.FC<EmptyBoothManagerProps> = ({
           {summary.byZone.map(({ zone, booths, emptyBooths, productBoothCount, willDisappearIfZoneCleared }) => {
             const isExpanded = expandedZoneId === zone.id;
             const canClearZone =
+              isDraft &&
               emptyBooths.length > 0 &&
               summary.activeBoothCount - emptyBooths.length >= 1;
 
@@ -429,7 +432,7 @@ export const EmptyBoothManager: React.FC<EmptyBoothManagerProps> = ({
                       <tbody>
                         {booths.map((b) => {
                           const removable = isRemovableEmptyBooth(b);
-                          const canDeleteThis = removable && summary.activeBoothCount > 1;
+                          const canDeleteThis = isDraft && removable && summary.activeBoothCount > 1;
                           return (
                             <tr
                               key={b.boothId}

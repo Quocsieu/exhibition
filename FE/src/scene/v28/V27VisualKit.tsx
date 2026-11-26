@@ -41,40 +41,17 @@ function loadV27PlazaPrototype(url: string): Promise<THREE.Group> {
   return p;
 }
 
-const V27PlazaGlb: React.FC<{
-  url: string;
-  position?: [number, number, number];
-  rotation?: [number, number, number];
-  targetHeight?: number;
-}> = React.memo(({ url, position = [0, 0, 0], rotation = [0, 0, 0], targetHeight }) => {
-  const [group, setGroup] = useState<THREE.Group | null>(() => {
-    const cached = plazaProtoResolved.get(url);
-    return cached ? cached.clone(true) : null;
-  });
+const plazaProtoNormalized = new Map<string, THREE.Group>();
 
-  useEffect(() => {
-    let cancelled = false;
-    const cached = plazaProtoResolved.get(url);
-    if (cached) {
-      setGroup(cached.clone(true));
-      return;
-    }
-    loadV27PlazaPrototype(url)
-      .then((proto) => {
-        if (!cancelled) setGroup(proto.clone(true));
-      })
-      .catch((err) => {
-        console.warn(`[V28 Env] Failed to load GLB ${url}:`, err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [url]);
-
-  const normalizedGroup = useMemo(() => {
-    if (!group || !targetHeight) return group;
+function getNormalizedPlazaClone(url: string, proto: THREE.Group, targetHeight?: number): THREE.Group {
+  if (!targetHeight) {
+    return proto.clone(true);
+  }
+  const cacheKey = `${url}|${targetHeight.toFixed(3)}`;
+  let normalizedProto = plazaProtoNormalized.get(cacheKey);
+  if (!normalizedProto) {
     const wrapper = new THREE.Group();
-    const cloned = group.clone(true);
+    const cloned = proto.clone(true);
     cloned.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(cloned);
     const size = new THREE.Vector3();
@@ -86,11 +63,44 @@ const V27PlazaGlb: React.FC<{
     cloned.scale.setScalar(scale);
     cloned.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
     wrapper.add(cloned);
-    return wrapper;
-  }, [group, targetHeight]);
+    plazaProtoNormalized.set(cacheKey, wrapper);
+    normalizedProto = wrapper;
+  }
+  return normalizedProto.clone(true);
+}
 
-  if (!normalizedGroup) return null;
-  return <primitive object={normalizedGroup} position={position} rotation={rotation} dispose={null} />;
+const V27PlazaGlb: React.FC<{
+  url: string;
+  position?: [number, number, number];
+  rotation?: [number, number, number];
+  targetHeight?: number;
+}> = React.memo(({ url, position = [0, 0, 0], rotation = [0, 0, 0], targetHeight }) => {
+  const [group, setGroup] = useState<THREE.Group | null>(() => {
+    const cached = plazaProtoResolved.get(url);
+    return cached ? getNormalizedPlazaClone(url, cached, targetHeight) : null;
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    const cached = plazaProtoResolved.get(url);
+    if (cached) {
+      setGroup(getNormalizedPlazaClone(url, cached, targetHeight));
+      return;
+    }
+    loadV27PlazaPrototype(url)
+      .then((proto) => {
+        if (!cancelled) setGroup(getNormalizedPlazaClone(url, proto, targetHeight));
+      })
+      .catch((err) => {
+        console.warn(`[V28 Env] Failed to load GLB ${url}:`, err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url, targetHeight]);
+
+  if (!group) return null;
+  return <primitive object={group} position={position} rotation={rotation} dispose={null} />;
 });
 
 /**
@@ -187,6 +197,20 @@ export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
 
     const envPlacements = useMemo(() => computeDynamicEnvPlacements(world), [world]);
 
+    // Quantize streaming anchor to 6m buckets so walking does not churn React reconciliation every frame
+    const qX = Math.round(playerX / 6) * 6;
+    const qZ = Math.round(playerZ / 6) * 6;
+
+    const northStageZ = world.hallBounds.minZ + 4.0;
+    const mountNorthStage = isOverview || Math.hypot(qX, northStageZ - qZ) <= 105;
+
+    const visibleEnvPlacements = useMemo(() => {
+      const maxDist = isOverview ? 95 : 78;
+      return envPlacements.filter(
+        (item) => Math.hypot(item.position[0] - qX, item.position[2] - qZ) <= maxDist
+      );
+    }, [envPlacements, qX, qZ, isOverview]);
+
     return (
       <group name="V27VisualKitHeritageLayer">
         {/* North-South Central Main Avenue Spine matching world.centralAvenueBounds */}
@@ -252,17 +276,19 @@ export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
           )}
         </group>
 
-        {/* North Focal Check-In Photo Stage */}
-        <V27PlazaGlb
-          url="/models/plaza/v27_4/checkin_stage_v27_4.glb"
-          position={[0, 0, world.hallBounds.minZ + 4.0]}
-        />
+        {/* North Focal Check-In Photo Stage (progressively streamed as visitor approaches north hall) */}
+        {mountNorthStage && (
+          <V27PlazaGlb
+            url="/models/plaza/v27_4/checkin_stage_v27_4.glb"
+            position={[0, 0, northStageZ]}
+          />
+        )}
 
         {/* 6-Booth U-Shaped Cluster Courtyard Plazas + Streamed V27.5 Centerpiece Variations */}
         {clusters.map((c) => {
-          const dist = Math.hypot(c.centerX - playerX, c.centerZ - playerZ);
-          // Stream heavy V27.5 plaza GLB centerpieces only for nearby clusters (<= 85m, or nearest 6 in Overview)
-          const mountCenterpieceGlb = isOverview ? c.clusterIndex < 6 : dist <= 85;
+          const dist = Math.hypot(c.centerX - qX, c.centerZ - qZ);
+          // Stream heavy V27.5 plaza GLB centerpieces for nearby clusters (<= 72m, or nearest 6 in Overview)
+          const mountCenterpieceGlb = isOverview ? c.clusterIndex < 6 : dist <= 72;
           return (
             <group key={c.clusterId} position={[c.centerX, 0, c.centerZ]}>
               {/* Architectural Courtyard Pad + Champagne Perimeter Inlay */}
@@ -310,9 +336,9 @@ export const V27VisualKitLayer: React.FC<V27VisualKitLayerProps> = React.memo(
           );
         })}
 
-        {/* Phase 4: Dynamic Lightweight Landscaping & Street Furniture from /models/env/ */}
+        {/* Phase 4 + B.4: Distance-Streamed Landscaping & Street Furniture from /models/env/ */}
         <group name="V28DynamicEnvPropsLayer">
-          {envPlacements.map((item) => (
+          {visibleEnvPlacements.map((item) => (
             <V27PlazaGlb
               key={item.id}
               url={item.url}

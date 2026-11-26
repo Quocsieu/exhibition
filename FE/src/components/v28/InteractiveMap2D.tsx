@@ -17,9 +17,11 @@ export interface InteractiveMap2DProps {
    * Phase 2 NEVER fakes visited state or marks a booth visited on map click.
    */
   visitedBoothIds?: ReadonlySet<string>;
+  favoriteBoothIds?: ReadonlySet<string>;
   guidedRoute?: GuidedRouteResult | null;
   suggestedBoothIds?: ReadonlySet<string>;
   onNavigateToBooth: (booth: V28BoothPlacementView) => void;
+  onToggleFavoriteBooth?: (booth: V28BoothPlacementView) => void;
   onGuideToBooth?: (booth: V28BoothPlacementView) => void;
   onClose: () => void;
 }
@@ -242,14 +244,17 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
   isMobileUi,
   isMobileLandscape,
   visitedBoothIds,
+  favoriteBoothIds,
   guidedRoute = null,
   suggestedBoothIds,
   onNavigateToBooth,
+  onToggleFavoriteBooth,
   onGuideToBooth,
   onClose,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedZoneCode, setSelectedZoneCode] = useState<string>('ALL');
+  const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
   const [selectedBoothId, setSelectedBoothId] = useState<string | null>(focusedBooth?.boothId ?? null);
   const [hoveredBoothId, setHoveredBoothId] = useState<string | null>(null);
   const [navFeedback, setNavFeedback] = useState<string | null>(null);
@@ -283,6 +288,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
   });
 
   const visitedSet = useMemo(() => visitedBoothIds ?? new Set<string>(), [visitedBoothIds]);
+  const favoriteSet = useMemo(() => favoriteBoothIds ?? new Set<string>(), [favoriteBoothIds]);
 
   const orderedBooths = useMemo(
     () =>
@@ -297,6 +303,11 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
         })
         .sort((a, b) => a.boothNumber - b.boothNumber),
     [world.booths]
+  );
+
+  const favoriteEntries = useMemo(
+    () => orderedBooths.filter((item) => favoriteSet.has(item.booth.boothId)),
+    [orderedBooths, favoriteSet]
   );
 
   const boothById = useMemo(() => {
@@ -320,6 +331,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
   const filteredBooths = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return orderedBooths.filter(({ booth, boothNumber }) => {
+      if (favoritesOnly && !favoriteSet.has(booth.boothId)) return false;
       if (selectedZoneCode !== 'ALL' && booth.zoneCode !== selectedZoneCode) return false;
       if (!q) return true;
       const numStr = String(boothNumber);
@@ -334,7 +346,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
         booth.slots.some((s) => s.product?.name.toLowerCase().includes(q))
       );
     });
-  }, [orderedBooths, searchQuery, selectedZoneCode]);
+  }, [orderedBooths, searchQuery, selectedZoneCode, favoritesOnly, favoriteSet]);
 
   const filteredBoothIdSet = useMemo(
     () => new Set(filteredBooths.map((item) => item.booth.boothId)),
@@ -402,6 +414,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
     setMapZoom(1);
     setPanOffset({ x: 0, y: 0 });
     setSelectedZoneCode('ALL');
+    setFavoritesOnly(false);
   }, []);
 
   useEffect(() => {
@@ -628,8 +641,8 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
         </button>
       </div>
 
-      {/* Search + Inline Zoom Controls (never covers Booth #1/#2 on top-right of map!) */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+      {/* Search + Favorites Filter + Inline Zoom Controls */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, flexWrap: isMobileUi ? 'wrap' : 'nowrap' }}>
         <input
           type="search"
           aria-label="Tìm gian hàng, số gian, doanh nghiệp, sản phẩm"
@@ -638,7 +651,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
           placeholder="Tìm số gian (1-100), doanh nghiệp, sản phẩm..."
           style={{
             flex: 1,
-            minWidth: 0,
+            minWidth: isMobileUi ? 150 : 0,
             padding: '8px 12px',
             borderRadius: 9,
             border: '1px solid #cbd5e1',
@@ -646,6 +659,43 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
             boxSizing: 'border-box',
           }}
         />
+        <button
+          type="button"
+          data-testid="v28-map-favorites-filter-btn"
+          aria-pressed={favoritesOnly}
+          onClick={() => setFavoritesOnly((prev) => !prev)}
+          style={{
+            minHeight: 38,
+            padding: '0 11px',
+            borderRadius: 9,
+            border: favoritesOnly
+              ? '1.5px solid #e11d48'
+              : favoriteEntries.length > 0
+                ? '1px solid #fda4af'
+                : '1px solid #cbd5e1',
+            background: favoritesOnly
+              ? '#e11d48'
+              : favoriteEntries.length > 0
+                ? '#fff1f2'
+                : '#f8fafc',
+            color: favoritesOnly
+              ? '#ffffff'
+              : favoriteEntries.length > 0
+                ? '#be123c'
+                : '#475569',
+            fontWeight: 700,
+            fontSize: 12.5,
+            cursor: 'pointer',
+            flexShrink: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span aria-hidden="true">{favoritesOnly || favoriteEntries.length > 0 ? '♥' : '♡'}</span>
+          Yêu thích ({favoriteEntries.length})
+        </button>
         <div
           style={{
             display: 'flex',
@@ -692,7 +742,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
           >
             −
           </button>
-          {(mapZoom > 1.01 || selectedZoneCode !== 'ALL') && (
+          {(mapZoom > 1.01 || selectedZoneCode !== 'ALL' || favoritesOnly) && (
             <button
               type="button"
               aria-label="Đặt lại góc nhìn bản đồ 2D"
@@ -713,6 +763,165 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
             </button>
           )}
         </div>
+      </div>
+
+      {/* Favorite / Pinned Booths Quick-Jump Strip */}
+      <div
+        data-testid="v28-map-favorites-list"
+        style={{
+          padding: favoriteEntries.length > 0 ? '8px 10px' : '6px 10px',
+          borderRadius: 10,
+          border: favoriteEntries.length > 0 ? '1px solid #fecdd3' : '1px dashed #cbd5e1',
+          background: favoriteEntries.length > 0 ? '#fff1f2' : '#f8fafc',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          flexShrink: 0,
+        }}
+      >
+        {favoriteEntries.length > 0 ? (
+          <>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                fontSize: 12,
+                fontWeight: 800,
+                color: '#9f1239',
+              }}
+            >
+              <span>♥ Gian hàng yêu thích ({favoriteEntries.length})</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#be123c' }}>
+                Nhấn để đi nhanh tới gian hàng
+              </span>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: 6,
+                overflowX: 'auto',
+                paddingBottom: 2,
+                WebkitOverflowScrolling: 'touch',
+              }}
+            >
+              {favoriteEntries.map(({ booth, boothNumber }) => (
+                <div
+                  key={booth.boothId}
+                  data-testid={`v28-map-favorite-item-${boothNumber}`}
+                  onMouseEnter={() => {
+                    if (!isMobileUi) setHoveredBoothId(booth.boothId);
+                  }}
+                  onMouseLeave={() => {
+                    if (!isMobileUi) {
+                      setHoveredBoothId((prev) => (prev === booth.boothId ? null : prev));
+                    }
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    background: '#ffffff',
+                    border: '1px solid #fda4af',
+                    borderRadius: 9,
+                    padding: '3px 4px 3px 6px',
+                    flexShrink: 0,
+                    boxShadow: '0 1px 3px rgba(190, 18, 60, 0.08)',
+                  }}
+                >
+                  <button
+                    type="button"
+                    data-testid={`v28-map-favorite-go-${boothNumber}`}
+                    onClick={() => handleNavigate(booth, boothNumber)}
+                    aria-label={`Đi nhanh tới Gian #${boothNumber} - ${booth.companyName || booth.boothName}`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      border: 'none',
+                      background: 'transparent',
+                      padding: '3px 4px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      color: '#0f172a',
+                    }}
+                  >
+                    <span
+                      style={{
+                        background: '#e11d48',
+                        color: '#ffffff',
+                        borderRadius: 6,
+                        padding: '1px 6px',
+                        fontSize: 11,
+                        fontWeight: 800,
+                      }}
+                    >
+                      #{boothNumber}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        maxWidth: isMobileUi ? 130 : 180,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {booth.companyName || booth.boothName}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        color: '#0284c7',
+                        background: '#e0f2fe',
+                        borderRadius: 5,
+                        padding: '1px 5px',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Đi nhanh →
+                    </span>
+                  </button>
+                  {onToggleFavoriteBooth && (
+                    <button
+                      type="button"
+                      data-testid={`v28-map-favorite-remove-${boothNumber}`}
+                      aria-label={`Bỏ ghim Gian #${boothNumber}`}
+                      title="Bỏ ghim khỏi yêu thích"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleFavoriteBooth(booth);
+                      }}
+                      style={{
+                        minWidth: 24,
+                        minHeight: 24,
+                        borderRadius: 6,
+                        border: 'none',
+                        background: 'transparent',
+                        color: '#94a3b8',
+                        fontSize: 12,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div style={{ fontSize: 11.5, color: '#64748b' }}>
+            ♡ Chưa có gian hàng yêu thích — nhấn biểu tượng ♥ trên biển hiệu gian hàng để ghim và đi nhanh từ bản đồ.
+          </div>
+        )}
       </div>
 
       {/* MAP VIEW */}
@@ -826,6 +1035,7 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
           {/* Active Booths: Horizontal Numbers, Larger Typography, High-Contrast Visited/Unvisited/Selected */}
           {orderedBooths.map(({ booth, boothNumber, footprint }) => {
             const isVisited = visitedSet.has(booth.boothId);
+            const isFavorite = favoriteSet.has(booth.boothId);
             const isSelected = selectedBoothId === booth.boothId;
             const isHovered = hoveredBoothId === booth.boothId;
             const isFilteredIn = filteredBoothIdSet.has(booth.boothId);
@@ -843,11 +1053,12 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
                 key={booth.boothId}
                 role="button"
                 tabIndex={0}
-                aria-label={`Gian #${boothNumber} - ${booth.companyName || booth.boothName} - ${isVisited ? 'Đã tham quan' : 'Chưa tham quan'} - Nhấn để đi tới`}
+                aria-label={`Gian #${boothNumber} - ${booth.companyName || booth.boothName} - ${isVisited ? 'Đã tham quan' : 'Chưa tham quan'}${isFavorite ? ' - Yêu thích' : ''} - Nhấn để đi tới`}
                 data-testid={`v28-map-booth-${boothNumber}`}
                 data-booth-id={booth.boothId}
                 data-booth-number={boothNumber}
                 data-visited={isVisited ? 'true' : 'false'}
+                data-favorite={isFavorite ? 'true' : 'false'}
                 data-selected={isSelected ? 'true' : 'false'}
                 data-map-tone={styleSpec.tone}
                 onMouseEnter={() => {
@@ -904,6 +1115,29 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
                 >
                   {styleSpec.showVisitedCheck ? `✓${boothNumber}` : boothNumber}
                 </text>
+                {isFavorite && isFilteredIn && (
+                  <g pointerEvents="none" data-testid={`v28-map-booth-fav-badge-${boothNumber}`}>
+                    <circle
+                      cx={footprint.x + footprint.width - 1.1}
+                      cy={footprint.y + 1.1}
+                      r={2.1}
+                      fill="#e11d48"
+                      stroke="#ffffff"
+                      strokeWidth={0.55}
+                    />
+                    <text
+                      x={footprint.x + footprint.width - 1.1}
+                      y={footprint.y + 1.25}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={2.4}
+                      fontWeight="900"
+                      fill="#ffffff"
+                    >
+                      ♥
+                    </text>
+                  </g>
+                )}
               </g>
             );
           })}
@@ -1044,14 +1278,25 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
                 </strong>
                 <span
                   style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
                     fontSize: 10.5,
                     lineHeight: '14px',
                     fontWeight: 700,
                     flexShrink: 0,
-                    color: visitedSet.has(activePreviewEntry.booth.boothId) ? '#0369a1' : '#64748b',
                   }}
                 >
-                  {visitedSet.has(activePreviewEntry.booth.boothId) ? '✓ Đã tham quan' : 'Chưa tham quan'}
+                  {favoriteSet.has(activePreviewEntry.booth.boothId) && (
+                    <span style={{ color: '#e11d48' }}>♥ Đã ghim</span>
+                  )}
+                  <span
+                    style={{
+                      color: visitedSet.has(activePreviewEntry.booth.boothId) ? '#0369a1' : '#64748b',
+                    }}
+                  >
+                    {visitedSet.has(activePreviewEntry.booth.boothId) ? '✓ Đã tham quan' : 'Chưa tham quan'}
+                  </span>
                 </span>
               </div>
               <div
@@ -1139,6 +1384,10 @@ export const InteractiveMap2D: React.FC<InteractiveMap2DProps> = ({
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: 4, background: '#38bdf8', border: '1.5px solid #0284c7', color: '#082f49', fontSize: 11, fontWeight: 900, flexShrink: 0 }}>✓</span>
                 Đã tham quan
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: '50%', background: '#e11d48', color: '#ffffff', fontSize: 10, fontWeight: 900, flexShrink: 0 }}>♥</span>
+                Gian yêu thích
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: 4, background: '#1e293b', border: '2.5px solid #f59e0b', boxSizing: 'border-box', flexShrink: 0 }} />
