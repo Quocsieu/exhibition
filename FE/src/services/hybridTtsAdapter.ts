@@ -9,7 +9,9 @@ export type ResolvedActiveTtsProvider = 'local-korvatts' | 'browser-piper';
 export const PIPER_VOICE_DISPLAY_NAME = 'VAIS-1000 (Piper WASM)';
 export const PIPER_VOICE_ATTRIBUTION_NOTICE =
   'Mô hình giọng đọc vi_VN-vais1000-medium (VAIS-1000 Corpus · Rhasspy Piper Voices, giấy phép CC BY 4.0)';
-export const DEFAULT_PIPER_LENGTH_SCALE = 0.90;
+export const DEFAULT_PIPER_LENGTH_SCALE = 0.87;
+export const DEFAULT_PIPER_NOISE_SCALE = 0.45;
+export const DEFAULT_PIPER_NOISE_W = 0.65;
 
 const MAX_WAV_CACHE_ENTRIES = 36;
 const MAX_WAV_CACHE_BYTES = 16 * 1024 * 1024; // 16 MB bounded RAM cache
@@ -248,7 +250,7 @@ export function computePiperWavCacheKey(
   normalizedSpeechText: string,
   lengthScale = DEFAULT_PIPER_LENGTH_SCALE
 ): string {
-  return `piper-v1|vi_VN-vais1000-medium|1.0.0|ls:${lengthScale.toFixed(2)}|${normalizedSpeechText.trim()}`;
+  return `piper-v2-soft-fast|vi_VN-vais1000-medium|ls:${lengthScale.toFixed(2)}|ns:${DEFAULT_PIPER_NOISE_SCALE}|nw:${DEFAULT_PIPER_NOISE_W}|${normalizedSpeechText.trim()}`;
 }
 
 /**

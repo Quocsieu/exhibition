@@ -8,7 +8,27 @@ import {
 import {
   buildPiperStepPlanFromDisplayText,
   piperBrowserTts,
+  shouldAllowPiperBackgroundPrewarm,
 } from '../services/hybridTtsAdapter';
+import {
+  HybridPlaybackCoordinator,
+  type AttemptAudioContext,
+  type AttemptDirectTtsContext,
+  type LockedAudioVoiceConfig,
+} from '../services/hybridPlaybackController';
+
+function buildAudioVoiceSignature(
+  provider?: string,
+  modelId?: string,
+  voiceId?: string,
+  speed?: number,
+  style?: string,
+  configVersion?: string
+): string {
+  const spd = Number(speed ?? 1.0).toFixed(2);
+  const stylePart = style || configVersion ? `|${(style || '').trim()}|${configVersion || 'v1'}` : '';
+  return `${provider || 'gemini'}|${modelId || 'unknown'}|${voiceId || 'unknown'}|${spd}${stylePart}`;
+}
 import {
   resolveNpcTtsMode,
   resolveNpcTtsProvider,
@@ -65,6 +85,7 @@ export interface UseNpcConsultationSessionResult {
     options?: { forceReplay?: boolean }
   ) => void;
   pauseSession: () => void;
+  stopPlaybackOnly: () => void;
   stopSession: () => void;
   toggleMute: () => void;
 }
@@ -109,6 +130,7 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
 
   const isMountedRef = useRef<boolean>(true);
   const sessionNonceRef = useRef<number>(0);
+  const coordinatorRef = useRef<HybridPlaybackCoordinator>(new HybridPlaybackCoordinator());
   const abortControllerRef = useRef<AbortController | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const activeObjectUrlRef = useRef<string | null>(null);
@@ -165,8 +187,60 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
     return capturedOffset;
   }, []);
 
+  const prewarmDirectTts = useCallback(() => {
+    void npcHybridTtsEngine.warmManifest().catch(() => false);
+    if (shouldAllowPiperBackgroundPrewarm().allowed) {
+      void piperBrowserTts.prewarmInBackground().catch(() => false);
+    }
+  }, []);
+
+  /**
+   * Phase 1.7.3 Fast Fallback: While waiting up to 2,000ms for Audio TTS, prepare ONLY the opening
+   * Piper chunk in background (preferring pregen manifest, else low-priority Worker synthesis).
+   * If 2,000ms expires, DIRECT_TTS starts immediately from RAM cache without cold-starting.
+   */
+  const prepareOpeningDirectChunk = useCallback((steps: BoothConsultationStep[], signal: AbortSignal) => {
+    const firstText = steps[0]?.fallbackText;
+    if (!firstText || signal.aborted) return;
+    const openingChunk = buildPiperStepPlanFromDisplayText(firstText).chunks[0];
+    if (!openingChunk) return;
+    void (async () => {
+      try {
+        const pregen = await npcHybridTtsEngine.tryFetchPregenAudio(openingChunk, signal).catch(() => null);
+        if (pregen || signal.aborted) return;
+        await piperBrowserTts
+          .synthesizeNormalizedChunk({
+            normalizedText: openingChunk,
+            priority: 'low',
+            signal,
+          })
+          .catch(() => null);
+      } catch {
+        // Best-effort predictive pre-synthesis; never throws
+      }
+    })();
+  }, []);
+
+  const stopPlaybackOnly = useCallback(() => {
+    sessionNonceRef.current += 1;
+    coordinatorRef.current.stopPlaybackOnly();
+    cleanupActiveAudio(false);
+    pausedCursorRef.current = null;
+    currentCursorRef.current = { stepIndex: 0, chunkIndex: 0, offsetSec: 0 };
+    if (isMountedRef.current) {
+      setActiveProductId(null);
+      setConsultationMode('idle');
+      setSessionState('IDLE');
+      setAnimState('idle');
+      setHighlightedProduct(null);
+      setCurrentSubtitle(null);
+      setErrorMessage(null);
+    }
+  }, [cleanupActiveAudio]);
+
   const stopSession = useCallback(() => {
     sessionNonceRef.current += 1;
+    coordinatorRef.current.stop({ resetAllLocks: true });
     cleanupActiveAudio(false);
     activeBoothRef.current = null;
     stepsRef.current = [];
@@ -222,12 +296,41 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
       pack: V28BoothAudioPack | null,
       startCursor: PlaybackCursor,
       runNonce: number,
-      playOptions?: { skipBackendSynth?: boolean; allowLegacyFallback?: boolean }
+      playOptions?: {
+        skipBackendSynth?: boolean;
+        allowLegacyFallback?: boolean;
+        directTtsOnly?: boolean;
+        hybridAudioCtx?: AttemptAudioContext;
+        directTtsCtx?: AttemptDirectTtsContext;
+      }
     ) => {
       const isStale = () => !isMountedRef.current || sessionNonceRef.current !== runNonce;
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
+
+      const audioCtx = playOptions?.hybridAudioCtx;
+      const directCtx = playOptions?.directTtsCtx;
+      let effectiveDirectOnly = Boolean(playOptions?.directTtsOnly);
+
+      if (audioCtx) {
+        audioCtx.audioPlaybackSignal.addEventListener(
+          'abort',
+          () => {
+            controller.abort();
+          },
+          { once: true }
+        );
+      }
+      if (directCtx) {
+        directCtx.sessionSignal.addEventListener(
+          'abort',
+          () => {
+            controller.abort();
+          },
+          { once: true }
+        );
+      }
 
       const playHtmlAudio = (blob: Blob, startOffsetSec: number, onStartPlayback: () => void) =>
         new Promise<void>((resolve, reject) => {
@@ -247,13 +350,27 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
 
           const cleanup = () => {
             audio.onplay = null;
+            audio.onplaying = null;
             audio.onpause = null;
             audio.onended = null;
             audio.onerror = null;
           };
 
-          audio.onplay = () => {
+          let playSignaled = false;
+          audio.onplaying = () => {
+            if (playSignaled) return;
+            playSignaled = true;
             if (!controller.signal.aborted && !isStale()) {
+              if (audioCtx && !effectiveDirectOnly) {
+                if (!audioCtx.markAudioStarted()) {
+                  cleanup();
+                  audio.pause();
+                  resolve();
+                  return;
+                }
+              } else if (directCtx) {
+                directCtx.markDirectStarted();
+              }
               setSessionState('SPEAKING');
               onStartPlayback();
             }
@@ -313,14 +430,14 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
         clip: { transcript?: string } | null
       ): string => {
         if (clip?.transcript) return clip.transcript;
-        if (ttsProvider === 'supertonic' && !supertonicTtsAdapter.isCircuitOpen()) {
+        if (!effectiveDirectOnly && ttsProvider === 'supertonic' && !supertonicTtsAdapter.isCircuitOpen()) {
           return step.naturalSpeechText || step.fallbackText;
         }
         return step.fallbackText;
       };
 
       const buildChunksForStep = (stepSpeechText: string): string[] => {
-        if (ttsProvider === 'supertonic' && !supertonicTtsAdapter.isCircuitOpen()) {
+        if (!effectiveDirectOnly && ttsProvider === 'supertonic' && !supertonicTtsAdapter.isCircuitOpen()) {
           return buildSupertonicStepChunks(stepSpeechText);
         }
         return buildPiperStepPlanFromDisplayText(stepSpeechText).chunks;
@@ -400,10 +517,24 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
 
           // Mode 1 (Audio-First): Admin uploaded / pre-generated / cached real backend audio
           // Plays via Web Audio API (with LRU cache so pause/resume NEVER re-fetches or re-calls TTS!)
-          if (isRealBackendSpeechClip(clip) && clip) {
+          if (!effectiveDirectOnly && isRealBackendSpeechClip(clip) && clip) {
+            const clipMeta = clip as typeof clip & { provider?: string; sourceType?: string };
+            const clipProvider = clipMeta.provider || 'gemini';
+            const clipSig = buildAudioVoiceSignature(clipProvider, clip.modelId, clip.voiceId);
+            if (!coordinatorRef.current.lockManager.matchesLockedAudioSignature(booth.boothId, clipSig)) {
+              // Strict ONE BOOTH - ONE VOICE: reject clip with mismatched voice signature
+              if (audioCtx && stepIdx === startCursor.stepIndex) return;
+              return;
+            }
+            const audioVoiceIdentity: LockedAudioVoiceConfig = {
+              engine: 'backend-audio-tts',
+              provider: clipProvider,
+              modelId: clip.modelId,
+              voiceId: clip.voiceId,
+              voiceSignature: clipSig,
+            };
             currentCursorRef.current = { stepIndex: stepIdx, chunkIndex: 0, offsetSec: 0 };
             const resumeOffset = stepIdx === startCursor.stepIndex ? startCursor.offsetSec : 0;
-            const clipMeta = clip as typeof clip & { provider?: string; sourceType?: string };
             const resolvedBlob = await npcAudioFirstService.fetchAudioBlobFromUrl({
               audioId: clip.audioId,
               audioUrl: clip.audioUrl,
@@ -413,12 +544,26 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
                   : clipMeta.sourceType === 'cached'
                     ? 'cached'
                     : 'pre_generated',
-              provider: clipMeta.provider || 'gemini',
+              provider: clipProvider,
               voiceId: clip.voiceId,
-              signal: controller.signal,
+              signal: audioCtx ? audioCtx.sessionSignal : controller.signal,
             });
-            if (controller.signal.aborted || isStale()) return;
+            if (controller.signal.aborted || isStale() || (audioCtx && !audioCtx.isAudioAuthorized())) return;
             if (resolvedBlob) {
+              const mode1Log = {
+                requestedProvider: 'backend-audio-tts',
+                actualProvider: clipProvider,
+                voicePreset: clip.voiceId,
+                voiceSignature: clipSig,
+                lockState: coordinatorRef.current.lockManager.getLockState(booth.boothId),
+                cacheStatus: resolvedBlob.source,
+                audioId: clip.audioId,
+                bytes: resolvedBlob.blob.size,
+              };
+              if (typeof window !== 'undefined') {
+                (window as unknown as { __V28_LAST_TTS_EVENT__?: unknown }).__V28_LAST_TTS_EVENT__ = mode1Log;
+              }
+              console.info('[V28 NPC TTS]', mode1Log);
               if (npcWebAudioPlayer.isSupported()) {
                 const handled = await npcWebAudioPlayer.playBlob(resolvedBlob.cacheKey, resolvedBlob.blob, {
                   signal: controller.signal,
@@ -426,6 +571,8 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
                   startOffsetSec: resumeOffset,
                   onStartPlayback: () => {
                     if (!controller.signal.aborted && !isStale()) {
+                      if (audioCtx && !audioCtx.markAudioStarted(audioVoiceIdentity)) return;
+                      coordinatorRef.current.lockManager.lockBoothToAudioTts(booth.boothId, audioVoiceIdentity);
                       setSessionState('SPEAKING');
                       prefetchNextStep(stepIdx + 1);
                     }
@@ -439,22 +586,48 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
           }
 
           // Mode 2 (Backend Multi-Provider Hybrid TTS: Gemini -> Vbee -> Edge with persistent cache)
-          // Skipped when caller already resolved via /booths/:id/products/:productId/consultation to prevent duplicate TTS calls!
+          // Skipped when caller already resolved via /booths/:id/products/:productId/consultation or when booth is locked!
           const stepEntityType = step.type === 'PRODUCT' && step.product ? 'product' : 'booth';
           const stepEntityId = step.type === 'PRODUCT' && step.product ? step.product.id : booth.boothId;
           const hybridStepText = step.naturalSpeechText || step.fallbackText;
-          if (!playOptions?.skipBackendSynth && hybridStepText) {
+          if (!effectiveDirectOnly && !playOptions?.skipBackendSynth && hybridStepText) {
             const resumeOffset = stepIdx === startCursor.stepIndex ? startCursor.offsetSec : 0;
             const hybridBlob = await npcAudioFirstService.trySynthesizeViaBackendHybrid({
               text: hybridStepText,
               entityType: stepEntityType,
               entityId: stepEntityId,
               slotKey: step.slotKey,
-              signal: controller.signal,
+              signal: audioCtx ? audioCtx.sessionSignal : controller.signal,
             });
-            if (controller.signal.aborted || isStale()) return;
+            if (controller.signal.aborted || isStale() || (audioCtx && !audioCtx.isAudioAuthorized())) return;
             if (hybridBlob) {
+              const hybridSig = buildAudioVoiceSignature(hybridBlob.provider, hybridBlob.provider, hybridBlob.voiceId);
+              if (!coordinatorRef.current.lockManager.matchesLockedAudioSignature(booth.boothId, hybridSig)) {
+                if (audioCtx && stepIdx === startCursor.stepIndex) return;
+                return;
+              }
+              const hybridVoiceIdentity: LockedAudioVoiceConfig = {
+                engine: 'backend-audio-tts',
+                provider: hybridBlob.provider,
+                modelId: hybridBlob.provider,
+                voiceId: hybridBlob.voiceId,
+                voiceSignature: hybridSig,
+              };
               currentCursorRef.current = { stepIndex: stepIdx, chunkIndex: 0, offsetSec: resumeOffset };
+              const mode2Log = {
+                requestedProvider: 'backend-audio-tts',
+                actualProvider: hybridBlob.provider,
+                voicePreset: hybridBlob.voiceId,
+                voiceSignature: hybridSig,
+                lockState: coordinatorRef.current.lockManager.getLockState(booth.boothId),
+                cacheStatus: hybridBlob.source,
+                audioId: hybridBlob.audioId,
+                bytes: hybridBlob.blob.size,
+              };
+              if (typeof window !== 'undefined') {
+                (window as unknown as { __V28_LAST_TTS_EVENT__?: unknown }).__V28_LAST_TTS_EVENT__ = mode2Log;
+              }
+              console.info('[V28 NPC TTS]', mode2Log);
               if (npcWebAudioPlayer.isSupported()) {
                 const handled = await npcWebAudioPlayer.playBlob(hybridBlob.cacheKey, hybridBlob.blob, {
                   signal: controller.signal,
@@ -462,6 +635,8 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
                   startOffsetSec: resumeOffset,
                   onStartPlayback: () => {
                     if (!controller.signal.aborted && !isStale()) {
+                      if (audioCtx && !audioCtx.markAudioStarted(hybridVoiceIdentity)) return;
+                      coordinatorRef.current.lockManager.lockBoothToAudioTts(booth.boothId, hybridVoiceIdentity);
                       setSessionState('SPEAKING');
                       prefetchNextStep(stepIdx + 1);
                     }
@@ -472,6 +647,24 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
               await playHtmlAudio(hybridBlob.blob, resumeOffset, () => prefetchNextStep(stepIdx + 1));
               continue;
             }
+          }
+
+          // Strict ONE BOOTH - ONE VOICE:
+          // - If AUDIO_TTS_LOCKED is already established, NEVER silently fall back to Piper/Supertonic!
+          // - If UNLOCKED on initial step with audioCtx, return so coordinator handles 2000ms/DIRECT_TTS fallback.
+          if (!effectiveDirectOnly) {
+            if (coordinatorRef.current.lockManager.getLockState(booth.boothId) === 'AUDIO_TTS_LOCKED') {
+              if (stepIdx === startCursor.stepIndex) {
+                setSessionState('ERROR');
+                setErrorMessage('Không thể phát đúng giọng đã khóa của gian hàng.');
+              }
+              return;
+            }
+            if (audioCtx && stepIdx === startCursor.stepIndex) {
+              return;
+            }
+            coordinatorRef.current.lockManager.lockBoothToDirectTts(booth.boothId, 'audio_error');
+            effectiveDirectOnly = true;
           }
 
           // Respect legacyFallbackEnabled=false: keep subtitle visible & complete cleanly without calling legacy TTS
@@ -499,9 +692,8 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
               if (prefetchedForCurrentChunk || controller.signal.aborted || isStale()) return;
               prefetchedForCurrentChunk = true;
 
-              // When Supertonic 3 is active and healthy, prefetch 2 upcoming chunks sequentially in background
-              // AND pre-decode them into Web Audio PCM buffers — NEVER spin up Piper WASM on the CPU!
-              if (ttsProvider === 'supertonic' && !supertonicTtsAdapter.isCircuitOpen()) {
+              // When Supertonic 3 is active and healthy (and NOT locked to DIRECT_TTS Piper), prefetch 2 upcoming chunks
+              if (!effectiveDirectOnly && ttsProvider === 'supertonic' && !supertonicTtsAdapter.isCircuitOpen()) {
                 const upcoming = getUpcomingChunks(stepIdx, chunkIdx, chunks, 2);
                 if (upcoming.length === 0) return;
                 void (async () => {
@@ -547,10 +739,10 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
               }
             };
 
-            // Phase B: Supertonic 3 Vietnamese Female Voice Adapter (automatic silent fallback to Hybrid Piper on 503/error)
+            // Phase B: Supertonic 3 Vietnamese Female Voice Adapter (skipped when booth is locked to DIRECT_TTS Piper!)
             let supertonicFallbackReason: string | null = null;
-            if (ttsProvider === 'supertonic') {
-              if (supertonicTtsAdapter.isCircuitOpen()) {
+            if (!effectiveDirectOnly && ttsProvider === 'supertonic') {
+              if (supertonicTtsAdapter.isCircuitOpen() || !(await supertonicTtsAdapter.ensureServerReady(controller.signal))) {
                 supertonicFallbackReason =
                   supertonicTtsAdapter.getLastFailureReason() || 'Supertonic circuit-breaker open';
               } else {
@@ -613,7 +805,7 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
             }
 
             // Hybrid fast-path (Web Audio API real-time OS audio thread + cross-step pre-decode)
-            if (ttsMode === 'hybrid' || ttsProvider === 'hybrid-piper' || Boolean(supertonicFallbackReason)) {
+            if (effectiveDirectOnly || ttsMode === 'hybrid' || ttsProvider === 'hybrid-piper' || Boolean(supertonicFallbackReason)) {
               const pregen = await npcHybridTtsEngine.tryFetchPregenAudio(chunks[chunkIdx], controller.signal);
               if (controller.signal.aborted || isStale()) return;
               if (pregen) {
@@ -639,6 +831,7 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
                       startOffsetSec: resumeOffsetSec,
                       onStartPlayback: () => {
                         if (!controller.signal.aborted && !isStale()) {
+                          directCtx?.markDirectStarted();
                           setSessionState('SPEAKING');
                           scheduleDeferredPrefetch();
                         }
@@ -714,6 +907,11 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
     (booth: V28BoothPlacementView) => {
       // Unlock Web Audio AudioContext synchronously during user gesture before async Supertonic fetch
       npcWebAudioPlayer.unlockFromUserGesture();
+      prewarmDirectTts();
+      const prevBoothId = activeBoothRef.current?.boothId;
+      if (prevBoothId && prevBoothId !== booth.boothId) {
+        coordinatorRef.current.lockManager.resetBooth(prevBoothId);
+      }
       sessionNonceRef.current += 1;
       const runNonce = sessionNonceRef.current;
       cleanupActiveAudio(false);
@@ -726,32 +924,54 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
       currentCursorRef.current = { stepIndex: 0, chunkIndex: 0, offsetSec: 0 };
 
       setActiveBoothId(booth.boothId);
+      setActiveProductId(null);
+      setConsultationMode('booth');
       setErrorMessage(null);
       setHighlightedProduct(null);
       setSessionState('LOADING');
       setAnimState('greet');
 
-      // Audio-First: Always check backend pre-generated / admin-uploaded audio pack first (with fast fallback on error)
-      v28Api
-        .getBoothAudio(booth.boothId)
-        .then((pack) => {
-          if (!isMountedRef.current || sessionNonceRef.current !== runNonce) return;
+      // Phase 1.7: 2,000ms Audio TTS deadline + Booth-Level DIRECT_TTS lock
+      void coordinatorRef.current.start({
+        boothId: booth.boothId,
+        runAudioTts: async (audioCtx) => {
+          prepareOpeningDirectChunk(steps, audioCtx.audioPlaybackSignal);
+          const pack = await v28Api.getBoothAudio(booth.boothId);
+          if (!isMountedRef.current || sessionNonceRef.current !== runNonce || audioCtx.sessionSignal.aborted) {
+            return;
+          }
+          // Phase 1.7.4 Case B: If booth audio is missing, stale, or mixed-voice, lock DIRECT_TTS immediately
+          if (pack.voiceReadiness && !pack.voiceReadiness.ready) {
+            coordinatorRef.current.lockManager.lockBoothToDirectTts(booth.boothId, 'readiness_not_consistent');
+            return;
+          }
           audioPackRef.current = pack;
-          void playFromCursor(booth, steps, pack, { stepIndex: 0, chunkIndex: 0, offsetSec: 0 }, runNonce);
-        })
-        .catch(() => {
-          if (!isMountedRef.current || sessionNonceRef.current !== runNonce) return;
-          audioPackRef.current = null;
-          void playFromCursor(booth, steps, null, { stepIndex: 0, chunkIndex: 0, offsetSec: 0 }, runNonce);
-        });
+          if (!audioCtx.isAudioAuthorized()) {
+            return;
+          }
+          await playFromCursor(booth, steps, pack, { stepIndex: 0, chunkIndex: 0, offsetSec: 0 }, runNonce, {
+            hybridAudioCtx: audioCtx,
+          });
+        },
+        runDirectTts: async (directCtx) => {
+          if (!isMountedRef.current || sessionNonceRef.current !== runNonce || directCtx.sessionSignal.aborted) {
+            return;
+          }
+          await playFromCursor(booth, steps, null, { stepIndex: 0, chunkIndex: 0, offsetSec: 0 }, runNonce, {
+            directTtsOnly: true,
+            directTtsCtx: directCtx,
+          });
+        },
+      });
     },
-    [cleanupActiveAudio, playFromCursor]
+    [cleanupActiveAudio, playFromCursor, prepareOpeningDirectChunk, prewarmDirectTts]
   );
 
   const pauseSession = useCallback(() => {
     const curState = sessionStateRef.current;
     if (curState !== 'SPEAKING' && curState !== 'LOADING') return;
     sessionNonceRef.current += 1;
+    coordinatorRef.current.pause();
     const exactOffset = cleanupActiveAudio(true);
     pausedCursorRef.current = {
       stepIndex: currentCursorRef.current.stepIndex,
@@ -777,8 +997,10 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
     setErrorMessage(null);
     setSessionState('LOADING');
     const isProductMode = consultationModeRef.current === 'product';
-    void playFromCursor(booth, steps, audioPackRef.current, cursor, runNonce, {
-      skipBackendSynth: isProductMode,
+    const lockedDirect = coordinatorRef.current.lockManager.getBoothMode(booth.boothId) === 'DIRECT_TTS';
+    void playFromCursor(booth, steps, lockedDirect ? null : audioPackRef.current, cursor, runNonce, {
+      skipBackendSynth: isProductMode || lockedDirect,
+      directTtsOnly: lockedDirect,
     });
   }, [cleanupActiveAudio, playFromCursor]);
 
@@ -855,7 +1077,9 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
       }
 
       // Explicit replay with existing valid cached audioPack -> replay from 0 with ZERO redundant API/TTS calls!
-      if (isSameProduct && options?.forceReplay && audioPackRef.current && stepsRef.current.length > 0) {
+      // Always honor Booth-Level DIRECT_TTS lock so replay NEVER reverts to Gemini/Supertonic!
+      const lockedDirect = coordinatorRef.current.lockManager.getBoothMode(booth.boothId) === 'DIRECT_TTS';
+      if (isSameProduct && options?.forceReplay && (lockedDirect || audioPackRef.current) && stepsRef.current.length > 0) {
         sessionNonceRef.current += 1;
         const replayNonce = sessionNonceRef.current;
         cleanupActiveAudio(false);
@@ -867,13 +1091,22 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
         void playFromCursor(
           booth,
           stepsRef.current,
-          audioPackRef.current,
+          lockedDirect ? null : audioPackRef.current,
           { stepIndex: 0, chunkIndex: 0, offsetSec: 0 },
           replayNonce,
-          { skipBackendSynth: true }
+          {
+            skipBackendSynth: true,
+            directTtsOnly: lockedDirect,
+          }
         );
         return;
       }
+
+      const prevBoothId = activeBoothRef.current?.boothId;
+      if (prevBoothId && prevBoothId !== booth.boothId) {
+        coordinatorRef.current.lockManager.resetBooth(prevBoothId);
+      }
+      prewarmDirectTts();
 
       sessionNonceRef.current += 1;
       const runNonce = sessionNonceRef.current;
@@ -903,9 +1136,12 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
       const fetchController = new AbortController();
       abortControllerRef.current = fetchController;
 
-      v28Api
-        .getProductConsultation(booth.boothId, resolvedProduct.id, fetchController.signal)
-        .then((res) => {
+      void coordinatorRef.current.start({
+        boothId: booth.boothId,
+        runAudioTts: async (audioCtx) => {
+          prepareOpeningDirectChunk(steps, audioCtx.audioPlaybackSignal);
+          const res = await v28Api
+            .getProductConsultation(booth.boothId, resolvedProduct.id, fetchController.signal);
           // Strict stale-response guard: if user clicked another product or closed, drop immediately!
           if (!isMountedRef.current || sessionNonceRef.current !== runNonce || fetchController.signal.aborted) {
             return;
@@ -945,7 +1181,10 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
             };
           }
           audioPackRef.current = syntheticPack;
-          void playFromCursor(
+          if (!audioCtx.isAudioAuthorized()) {
+            return;
+          }
+          await playFromCursor(
             booth,
             effectiveSteps,
             syntheticPack,
@@ -954,30 +1193,35 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
             {
               skipBackendSynth: true,
               allowLegacyFallback: res.legacyFallbackEnabled !== false,
+              hybridAudioCtx: audioCtx,
             }
           );
-        })
-        .catch(() => {
-          if (!isMountedRef.current || sessionNonceRef.current !== runNonce || fetchController.signal.aborted) {
+        },
+        runDirectTts: async (directCtx) => {
+          if (!isMountedRef.current || sessionNonceRef.current !== runNonce || directCtx.sessionSignal.aborted) {
             return;
           }
-          audioPackRef.current = null;
-          void playFromCursor(
+          await playFromCursor(
             booth,
             steps,
             null,
             { stepIndex: 0, chunkIndex: 0, offsetSec: 0 },
             runNonce,
-            { skipBackendSynth: true }
+            {
+              skipBackendSynth: true,
+              directTtsOnly: true,
+              directTtsCtx: directCtx,
+            }
           );
-        });
+        },
+      });
     },
-    [cleanupActiveAudio, playFromCursor, resumeSession]
+    [cleanupActiveAudio, playFromCursor, prepareOpeningDirectChunk, prewarmDirectTts, resumeSession]
   );
 
   return {
     sessionState,
-    consultationMode: 'booth' as const,
+    consultationMode,
     activeBoothId,
     activeProductId: highlightedProduct?.productId ?? null,
     animState,
@@ -988,6 +1232,7 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
     handleNpcClick,
     startProductConsultation,
     pauseSession,
+    stopPlaybackOnly,
     stopSession,
     toggleMute,
   };

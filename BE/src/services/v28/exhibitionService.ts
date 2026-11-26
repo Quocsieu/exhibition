@@ -72,6 +72,7 @@ export interface ExhibitionBoothPlacementView {
   logoUrl?: string;
   contactUrl?: string;
   contactEmail?: string;
+  contactPhone?: string;
   companyId: string | null;
   companyName: string;
   zoneId: string;
@@ -725,6 +726,7 @@ export class V28ExhibitionService {
                 COALESCE(NULLIF(c.logo_url, ''), b.logo_url, '') as logo_url,
                 COALESCE(NULLIF(c.contact_url, ''), b.contact_url, '') as contact_url,
                 COALESCE(NULLIF(c.contact_email, ''), b.contact_email, '') as contact_email,
+                COALESCE(NULLIF(c.contact_phone, ''), '') as contact_phone,
                 z.code as zone_code, z.display_name as zone_name, z.category_tag as zone_category_tag
          FROM exhibition_version_booths evb
          JOIN booths b ON b.id = evb.booth_id
@@ -816,6 +818,7 @@ export class V28ExhibitionService {
         logoUrl: String(row.logo_url || ''),
         contactUrl: String(row.contact_url || ''),
         contactEmail: String(row.contact_email || ''),
+        contactPhone: String(row.contact_phone || ''),
         companyId: row.company_id ? String(row.company_id) : null,
         companyName: String(row.company_name || row.booth_name),
         zoneId: String(row.zone_id),

@@ -9,6 +9,7 @@ export interface V28Company {
   logoUrl: string;
   bannerUrl: string;
   contactEmail: string;
+  contactPhone?: string;
   contactUrl: string;
   status: 'active' | 'inactive';
   createdAt: string;
@@ -65,6 +66,28 @@ export function resolveV28ProductImageUrl(rawUrl?: string | null): string {
     return `${API_BASE_URL}${trimmed}`;
   }
   return trimmed;
+}
+
+export function getSafeV28HttpUrl(rawUrl?: string | null): string | null {
+  const trimmed = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString();
+    }
+  } catch {
+    // ignore invalid URL
+  }
+  return null;
+}
+
+export function buildZaloChatUrl(rawPhone?: string | null): string | null {
+  const trimmed = typeof rawPhone === 'string' ? rawPhone.trim() : '';
+  if (!trimmed) return null;
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.length < 8 || digits.length > 15) return null;
+  return `https://zalo.me/${digits}`;
 }
 
 export function formatV28ProductPrice(item: {
@@ -302,6 +325,7 @@ export const v28Api = {
     logoUrl?: string;
     bannerUrl?: string;
     contactEmail?: string;
+    contactPhone?: string;
     contactUrl?: string;
   }) =>
     v28Request<
@@ -337,6 +361,7 @@ export const v28Api = {
     logoUrl?: string;
     bannerUrl?: string;
     contactEmail?: string;
+    contactPhone?: string;
     contactUrl?: string;
   }) =>
     v28Request<{
@@ -900,12 +925,25 @@ export interface V28AudioClip {
   slotKey: string;
   contentHash: string;
   language: string;
+  provider?: string;
   voiceId: string;
   modelId: string;
   durationSec: number;
   transcript: string;
   status: string;
+  needsUpdate?: boolean;
   audioUrl: string;
+}
+
+export interface V28BoothVoiceReadiness {
+  ready: boolean;
+  reason: 'consistent_ready' | 'missing_or_fallback' | 'stale_needs_update' | 'mixed_voice_signatures' | 'empty_booth';
+  totalRequired: number;
+  realReadyCount: number;
+  dominantProvider: string | null;
+  dominantModelId: string | null;
+  dominantVoiceId: string | null;
+  voiceSignature: string | null;
 }
 
 export interface V28BoothAudioPack {
@@ -915,6 +953,7 @@ export interface V28BoothAudioPack {
   clips: V28AudioClip[];
   cacheHits: number;
   generatedCount: number;
+  voiceReadiness?: V28BoothVoiceReadiness;
 }
 
 export interface V28AdminAudioOverview {
@@ -1068,6 +1107,7 @@ export interface V28BoothPlacementView {
   logoUrl?: string;
   contactUrl?: string;
   contactEmail?: string;
+  contactPhone?: string;
   companyId: string | null;
   companyName: string;
   zoneId: string;

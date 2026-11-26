@@ -4,7 +4,11 @@ import { createPiperPhonemize } from '@piper-phonemize-internal';
 export const PIPER_CACHE_PREFIX = 'virtual-expo-piper-tts-';
 export const PIPER_CACHE_BUCKET = `${PIPER_CACHE_PREFIX}v1`;
 export const PIPER_VOICE_ID = 'vi_VN-vais1000-medium';
-export const PIPER_MODEL_VERSION = '1.0.0';
+export const PIPER_VOICE_PROFILE = 'female_soft_fast';
+export const PIPER_MODEL_VERSION = 'v2-soft-fast';
+export const PIPER_DEFAULT_LENGTH_SCALE = 0.87;
+export const PIPER_DEFAULT_NOISE_SCALE = 0.45;
+export const PIPER_DEFAULT_NOISE_W = 0.65;
 
 const DEFAULT_ONNX_URL =
   'https://huggingface.co/rhasspy/piper-voices/resolve/main/vi/vi_VN/vais1000/medium/vi_VN-vais1000-medium.onnx';
@@ -587,11 +591,11 @@ self.onmessage = async (ev: MessageEvent) => {
 
         const bigIds = BigInt64Array.from(phonemeIds.map((x) => BigInt(x)));
         const bigLen = BigInt64Array.from([BigInt(phonemeIds.length)]);
-        const effectiveLengthScale = lengthScaleOverride ?? cfg.inference.length_scale ?? 0.90;
+        const effectiveLengthScale = lengthScaleOverride ?? PIPER_DEFAULT_LENGTH_SCALE;
         const scales = Float32Array.from([
-          cfg.inference.noise_scale ?? 0.667,
+          PIPER_DEFAULT_NOISE_SCALE,
           effectiveLengthScale,
-          cfg.inference.noise_w ?? 0.8,
+          PIPER_DEFAULT_NOISE_W,
         ]);
 
         const feeds: Record<string, ort.Tensor> = {

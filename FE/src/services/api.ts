@@ -285,6 +285,7 @@ export const apiClient = {
     };
 
     const isLocalHost =
+      Boolean(import.meta.env.DEV) &&
       typeof window !== 'undefined' &&
       (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
     const candidateUrls = isLocalHost
@@ -378,6 +379,7 @@ export const apiClient = {
     };
 
     const isLocalHost =
+      Boolean(import.meta.env.DEV) &&
       typeof window !== 'undefined' &&
       (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
     const candidateUrls = isLocalHost

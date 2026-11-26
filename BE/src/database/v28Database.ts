@@ -200,6 +200,11 @@ export class V28CatalogDatabase {
     const vRow = this.db.prepare('PRAGMA user_version').get() as { user_version: number } | undefined;
     const fromVersion = Number(vRow?.user_version || 0);
 
+    const preCompanyCols = this.db.prepare('PRAGMA table_info(companies)').all() as { name: string }[];
+    if (preCompanyCols.length > 0 && !preCompanyCols.some((c) => c.name === 'contact_phone')) {
+      this.db.exec("ALTER TABLE companies ADD COLUMN contact_phone TEXT NOT NULL DEFAULT '';");
+    }
+
     if (fromVersion < 3) {
       this.db.exec('PRAGMA foreign_keys = OFF;');
       this.db.exec('BEGIN IMMEDIATE;');
@@ -215,12 +220,18 @@ export class V28CatalogDatabase {
             logo_url TEXT NOT NULL DEFAULT '',
             banner_url TEXT NOT NULL DEFAULT '',
             contact_email TEXT NOT NULL DEFAULT '',
+            contact_phone TEXT NOT NULL DEFAULT '',
             contact_url TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'active',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
           );
         `);
+
+        const companyCols = this.db.prepare('PRAGMA table_info(companies)').all() as { name: string }[];
+        if (!companyCols.some((c) => c.name === 'contact_phone')) {
+          this.db.exec("ALTER TABLE companies ADD COLUMN contact_phone TEXT NOT NULL DEFAULT '';");
+        }
 
         // 2. Extend booths table non-destructively
         const boothCols = this.db.prepare('PRAGMA table_info(booths)').all() as { name: string }[];
@@ -862,6 +873,7 @@ export class V28CatalogDatabase {
       logoUrl: String(row.logo_url || ''),
       bannerUrl: String(row.banner_url || ''),
       contactEmail: String(row.contact_email || ''),
+      contactPhone: String(row.contact_phone || ''),
       contactUrl: String(row.contact_url || ''),
       status: row.status === 'inactive' ? 'inactive' : 'active',
       createdAt: String(row.created_at || ''),
@@ -929,8 +941,8 @@ export class V28CatalogDatabase {
     this.db
       .prepare(
         `INSERT INTO companies (
-          id, name, slug, description, category, logo_url, banner_url, contact_email, contact_url, status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+          id, name, slug, description, category, logo_url, banner_url, contact_email, contact_phone, contact_url, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
       )
       .run(
         id,
@@ -941,6 +953,7 @@ export class V28CatalogDatabase {
         input.logoUrl || '',
         input.bannerUrl || '',
         input.contactEmail || '',
+        input.contactPhone || '',
         input.contactUrl || ''
       );
     const created = this.db.prepare('SELECT * FROM companies WHERE id = ?').get(id) as Record<string, unknown>;
@@ -1012,6 +1025,7 @@ export class V28CatalogDatabase {
       logoUrl: input.logoUrl || '',
       bannerUrl: '',
       contactEmail: input.contactEmail || '',
+      contactPhone: '',
       contactUrl: input.websiteUrl || (cleanDomain ? `https://${cleanDomain}` : ''),
     });
     return { company: created, created: true, matchedBy: 'created' };
@@ -1038,7 +1052,7 @@ export class V28CatalogDatabase {
       .prepare(
         `UPDATE companies
          SET name = ?, slug = ?, description = ?, category = ?, logo_url = ?, banner_url = ?,
-             contact_email = ?, contact_url = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+             contact_email = ?, contact_phone = ?, contact_url = ?, status = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`
       )
       .run(
@@ -1049,6 +1063,7 @@ export class V28CatalogDatabase {
         patch.logoUrl ?? String(current.logo_url || ''),
         patch.bannerUrl ?? String(current.banner_url || ''),
         patch.contactEmail ?? String(current.contact_email || ''),
+        patch.contactPhone ?? String(current.contact_phone || ''),
         patch.contactUrl ?? String(current.contact_url || ''),
         patch.status ?? (current.status === 'inactive' ? 'inactive' : 'active'),
         id

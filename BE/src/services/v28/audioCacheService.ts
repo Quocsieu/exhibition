@@ -1577,6 +1577,16 @@ export class V28AudioCacheService {
     clips: AudioAssetRecord[];
     cacheHits: number;
     generatedCount: number;
+    voiceReadiness: {
+      ready: boolean;
+      reason: 'consistent_ready' | 'missing_or_fallback' | 'stale_needs_update' | 'mixed_voice_signatures' | 'empty_booth';
+      totalRequired: number;
+      realReadyCount: number;
+      dominantProvider: string | null;
+      dominantModelId: string | null;
+      dominantVoiceId: string | null;
+      voiceSignature: string | null;
+    };
   }> {
     const clips: AudioAssetRecord[] = [];
     let cacheHits = 0;
@@ -1625,9 +1635,62 @@ export class V28AudioCacheService {
       else generatedCount++;
     }
 
-    const hasRealAudio = clips.some(
-      (c) => c.status === 'ready' && !c.needsUpdate && c.provider !== 'local-fallback' && !c.modelId.includes('local-fallback')
+    const buildClipVoiceSignature = (c: AudioAssetRecord): string => {
+      const spd = Number(c.speed ?? 1.0).toFixed(2);
+      const styleHash = crypto
+        .createHash('sha1')
+        .update(`${c.style || ''}|${c.configVersion || 'v1'}`)
+        .digest('hex')
+        .slice(0, 8);
+      return `${c.provider || 'unknown'}|${c.modelId || 'unknown'}|${c.voiceId || 'unknown'}|${spd}|${styleHash}`;
+    };
+
+    const candidateClips = clips.filter(
+      (c) =>
+        c.status === 'ready' &&
+        !c.needsUpdate &&
+        c.provider !== 'local-fallback' &&
+        !c.modelId.includes('local-fallback') &&
+        c.durationSec > 0 &&
+        Boolean(c.storageKey) &&
+        Boolean(c.audioUrl)
     );
+    const existenceChecks = await Promise.all(
+      candidateClips.map(async (c) => ({
+        clip: c,
+        exists: await this.storage.exists(c.storageKey).catch(() => false),
+      }))
+    );
+    const realClips = existenceChecks.filter((e) => e.exists).map((e) => e.clip);
+    const hasMissingFile = existenceChecks.some((e) => !e.exists);
+    const hasStale = clips.some((c) => Boolean(c.needsUpdate));
+    const uniqueSigs = new Set(realClips.map((c) => buildClipVoiceSignature(c)));
+    const allReady = clips.length === items.length && items.length > 0 && realClips.length === items.length;
+    const isConsistent = allReady && uniqueSigs.size === 1;
+    const firstReal = realClips[0] || null;
+    const voiceReadiness = {
+      ready: isConsistent,
+      reason:
+        items.length === 0
+          ? ('empty_booth' as const)
+          : isConsistent
+            ? ('consistent_ready' as const)
+            : uniqueSigs.size > 1
+              ? ('mixed_voice_signatures' as const)
+              : hasStale
+                ? ('stale_needs_update' as const)
+                : hasMissingFile
+                  ? ('missing_or_fallback' as const)
+                  : ('missing_or_fallback' as const),
+      totalRequired: items.length,
+      realReadyCount: realClips.length,
+      dominantProvider: firstReal ? firstReal.provider : null,
+      dominantModelId: firstReal ? firstReal.modelId : null,
+      dominantVoiceId: firstReal ? firstReal.voiceId : null,
+      voiceSignature: isConsistent && firstReal ? buildClipVoiceSignature(firstReal) : null,
+    };
+
+    const hasRealAudio = realClips.length > 0;
 
     return {
       boothId: booth.boothId,
@@ -1638,6 +1701,7 @@ export class V28AudioCacheService {
       clips,
       cacheHits,
       generatedCount,
+      voiceReadiness,
     };
   }
 
@@ -1864,6 +1928,16 @@ export class V28AudioCacheService {
     clips: AudioAssetRecord[];
     cacheHits: number;
     generatedCount: number;
+    voiceReadiness: {
+      ready: boolean;
+      reason: 'consistent_ready' | 'missing_or_fallback' | 'stale_needs_update' | 'mixed_voice_signatures' | 'empty_booth';
+      totalRequired: number;
+      realReadyCount: number;
+      dominantProvider: string | null;
+      dominantModelId: string | null;
+      dominantVoiceId: string | null;
+      voiceSignature: string | null;
+    };
   }> {
     const productIds = booth.slots.map((s) => s.product?.id).filter((id): id is string => Boolean(id));
     this.db

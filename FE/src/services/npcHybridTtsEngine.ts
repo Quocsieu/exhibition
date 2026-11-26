@@ -12,7 +12,9 @@
  */
 
 export const PREGEN_MANIFEST_URL = '/tts/pregen/manifest.json';
+export const PREGEN_V2_MANIFEST_URL = '/tts/pregen_v2/manifest.json';
 export const EXPECTED_PIPER_VOICE_ID = 'vi_VN-vais1000-medium';
+export const EXPECTED_PREGEN_VERSION = 'v2-soft-fast';
 const MAX_PREGEN_RAM_ENTRIES = 60;
 const PREGEN_FETCH_TIMEOUT_MS = 4000;
 
@@ -261,6 +263,7 @@ export class NpcHybridTtsEngine {
           !json ||
           typeof json !== 'object' ||
           json.voiceId !== EXPECTED_PIPER_VOICE_ID ||
+          (this.manifestUrl === PREGEN_V2_MANIFEST_URL && json.version !== EXPECTED_PREGEN_VERSION) ||
           !json.entries ||
           typeof json.entries !== 'object'
         ) {
@@ -394,4 +397,6 @@ export class NpcHybridTtsEngine {
   }
 }
 
-export const npcHybridTtsEngine = new NpcHybridTtsEngine();
+export const npcHybridTtsEngine = new NpcHybridTtsEngine({
+  manifestUrl: PREGEN_V2_MANIFEST_URL,
+});

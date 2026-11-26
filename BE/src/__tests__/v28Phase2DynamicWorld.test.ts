@@ -156,16 +156,39 @@ describe('V28 PHASE 2 — Dynamic Layout Generator, Exhibition Versioning, Resiz
       });
       expect(pub1.status).toBe(200);
 
-      // 7. Published version MUST be immutable (409 on zone rename & booth edit)
+      // 7. Published version allows zone rename (commit 0c125e8) while keeping booth layout edits immutable (409)
       const immutZone = await fetch(
         `${baseUrl}/api/v28/exhibitions/${exhibition.id}/versions/${v1Id}/zones/${v1.zones[0].id}`,
         {
           method: 'PATCH',
           headers: authHeaders,
-          body: JSON.stringify({ displayName: 'Illegal Mutation' }),
+          body: JSON.stringify({ displayName: 'Khu Công Nghệ & AI (Published)' }),
         }
       );
-      expect(immutZone.status).toBe(409);
+      expect(immutZone.status).toBe(200);
+      const renamedZoneRes = (await immutZone.json()) as {
+        version: { zones: Array<{ id: string; displayName: string; boothCount: number }> };
+      };
+      expect(renamedZoneRes.version.zones[0].displayName).toBe('Khu Công Nghệ & AI (Published)');
+      expect(renamedZoneRes.version.zones[0].boothCount).toBe(v1.zones[0].boothCount);
+
+      const visitorActiveAfterRename = await fetch(`${baseUrl}/api/v28/exhibitions/active`);
+      expect(visitorActiveAfterRename.status).toBe(200);
+      const activeJson = (await visitorActiveAfterRename.json()) as {
+        world: { zones: Array<{ displayName: string }> };
+      };
+      expect(activeJson.world.zones[0].displayName).toBe('Khu Công Nghệ & AI (Published)');
+
+      // Restore original zone name for subsequent v2 clone assertion
+      const restoreZone = await fetch(
+        `${baseUrl}/api/v28/exhibitions/${exhibition.id}/versions/${v1Id}/zones/${v1.zones[0].id}`,
+        {
+          method: 'PATCH',
+          headers: authHeaders,
+          body: JSON.stringify({ displayName: 'Khu Công Nghệ & AI' }),
+        }
+      );
+      expect(restoreZone.status).toBe(200);
 
       const immutBooth = await fetch(
         `${baseUrl}/api/v28/exhibitions/${exhibition.id}/versions/${v1Id}/booths/${v1.booths[0].boothId}`,

@@ -43,6 +43,7 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
     category: 'Thương mại & Triển lãm',
     description: '',
     contactEmail: '',
+    contactPhone: '',
     contactUrl: '',
     logoUrl: '',
     bannerUrl: '',
@@ -55,6 +56,7 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
       category: 'Thương mại & Triển lãm',
       description: '',
       contactEmail: '',
+      contactPhone: '',
       contactUrl: '',
       logoUrl: '',
       bannerUrl: '',
@@ -68,6 +70,7 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
       category: company.category || 'General',
       description: company.description || '',
       contactEmail: company.contactEmail || '',
+      contactPhone: company.contactPhone || '',
       contactUrl: company.contactUrl || '',
       logoUrl: company.logoUrl || '',
       bannerUrl: company.bannerUrl || '',
@@ -108,6 +111,7 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
         category: form.category.trim() || 'General',
         description: form.description.trim(),
         contactEmail: form.contactEmail.trim(),
+        contactPhone: form.contactPhone.trim(),
         contactUrl: form.contactUrl.trim(),
         logoUrl: form.logoUrl.trim(),
         bannerUrl: form.bannerUrl.trim(),
@@ -164,6 +168,7 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
           category: form.category.trim() || 'General',
           description: form.description.trim(),
           contactEmail: form.contactEmail.trim(),
+          contactPhone: form.contactPhone.trim(),
           contactUrl: form.contactUrl.trim(),
           logoUrl: form.logoUrl.trim(),
           bannerUrl: form.bannerUrl.trim(),
@@ -217,6 +222,7 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
         category: form.category.trim() || 'General',
         description: form.description.trim(),
         contactEmail: form.contactEmail.trim(),
+        contactPhone: form.contactPhone.trim(),
         contactUrl: form.contactUrl.trim(),
         logoUrl: form.logoUrl.trim(),
         bannerUrl: form.bannerUrl.trim(),
@@ -337,6 +343,18 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
                 placeholder="contact@example.com"
                 value={form.contactEmail}
                 onChange={(e) => setForm({ ...form, contactEmail: e.target.value })}
+              />
+            </label>
+            <label className="v28-field">
+              <span>Số điện thoại / Zalo doanh nghiệp</span>
+              <input
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                className="v28-input"
+                placeholder="VD: 0901234567"
+                value={form.contactPhone}
+                onChange={(e) => setForm({ ...form, contactPhone: e.target.value })}
               />
             </label>
           </div>
@@ -541,6 +559,18 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
                   placeholder="https://..."
                   value={form.contactUrl}
                   onChange={(e) => setForm({ ...form, contactUrl: e.target.value })}
+                />
+              </label>
+              <label className="v28-field">
+                <span>Số điện thoại / Zalo doanh nghiệp</span>
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  className="v28-input"
+                  placeholder="VD: 0901234567"
+                  value={form.contactPhone}
+                  onChange={(e) => setForm({ ...form, contactPhone: e.target.value })}
                 />
               </label>
             </div>
@@ -818,6 +848,18 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
                 onChange={(e) => setForm({ ...form, contactEmail: e.target.value })}
               />
             </label>
+            <label className="v28-field">
+              <span>Số điện thoại / Zalo doanh nghiệp</span>
+              <input
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                className="v28-input"
+                placeholder="VD: 0901234567"
+                value={form.contactPhone}
+                onChange={(e) => setForm({ ...form, contactPhone: e.target.value })}
+              />
+            </label>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
@@ -942,6 +984,18 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
                 placeholder="contact@..."
                 value={form.contactEmail}
                 onChange={(e) => setForm({ ...form, contactEmail: e.target.value })}
+              />
+            </label>
+            <label className="v28-field">
+              <span>Số điện thoại / Zalo doanh nghiệp</span>
+              <input
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                className="v28-input"
+                placeholder="VD: 0901234567"
+                value={form.contactPhone}
+                onChange={(e) => setForm({ ...form, contactPhone: e.target.value })}
               />
             </label>
           </div>

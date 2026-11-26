@@ -43,6 +43,7 @@ export const CompanySchema = z.object({
       message: 'Email liên hệ không hợp lệ',
     })
     .default(''),
+  contactPhone: z.string().trim().max(30).default(''),
   contactUrl: OptionalHttpUrlSchema,
   status: EntityStatusSchema.default('active'),
   createdAt: z.string(),
@@ -71,10 +72,11 @@ export const CreateCompanyInputSchema = z.object({
     })
     .optional()
     .default(''),
+  contactPhone: z.string().trim().max(30).optional().default(''),
   contactUrl: OptionalHttpUrlSchema.optional().default(''),
 });
 
-export type CreateCompanyInput = z.infer<typeof CreateCompanyInputSchema>;
+export type CreateCompanyInput = z.input<typeof CreateCompanyInputSchema>;
 
 export const UpdateCompanyInputSchema = z.object({
   name: z.string().trim().min(2).max(160).optional(),
@@ -95,6 +97,7 @@ export const UpdateCompanyInputSchema = z.object({
       message: 'Email liên hệ không hợp lệ',
     })
     .optional(),
+  contactPhone: z.string().trim().max(30).optional(),
   contactUrl: OptionalHttpUrlSchema.optional(),
   status: EntityStatusSchema.optional(),
 });

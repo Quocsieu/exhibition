@@ -184,6 +184,8 @@ export class SupertonicTtsClientAdapter {
   private readonly inFlight = new Map<string, Promise<SupertonicChunkResult | null>>();
   private unavailableUntilMs = 0;
   private lastFailureReason: string | null = null;
+  private serverReadyChecked = false;
+  private serverReadyPromise: Promise<boolean> | null = null;
   private readonly fetchFn: typeof fetch;
   private readonly endpointUrl: string;
 
@@ -205,6 +207,51 @@ export class SupertonicTtsClientAdapter {
     this.inFlight.clear();
     this.unavailableUntilMs = 0;
     this.lastFailureReason = null;
+    this.serverReadyChecked = false;
+    this.serverReadyPromise = null;
+  }
+
+  /**
+   * Probes `GET /api/v28/tts/supertonic/status` (HTTP 200) once per session before
+   * sending `POST /api/v28/tts/supertonic`, preventing 503 network spam when Supertonic
+   * ONNX model files are not installed on the backend.
+   */
+  public async ensureServerReady(signal?: AbortSignal): Promise<boolean> {
+    if (this.isCircuitOpen()) return false;
+    if (this.serverReadyChecked) return !this.isCircuitOpen();
+    if (this.serverReadyPromise) return this.serverReadyPromise;
+
+    this.serverReadyPromise = (async () => {
+      try {
+        const res = await this.fetchFn(`${this.endpointUrl}/status`, {
+          method: 'GET',
+          signal,
+        });
+        if (!res.ok) {
+          this.lastFailureReason = `Supertonic status HTTP ${res.status}`;
+          this.unavailableUntilMs = Date.now() + UNAVAILABLE_COOLDOWN_MS;
+          return false;
+        }
+        const data = (await res.json()) as { enabled?: boolean; ready?: boolean; reason?: string };
+        this.serverReadyChecked = true;
+        if (!data?.enabled || !data?.ready) {
+          this.lastFailureReason = data?.reason || 'Supertonic 3 chưa sẵn sàng trên máy chủ.';
+          this.unavailableUntilMs = Date.now() + 10 * 60_000;
+          return false;
+        }
+        return true;
+      } catch (err: unknown) {
+        if (!signal?.aborted) {
+          this.lastFailureReason = err instanceof Error ? err.message : 'Supertonic status check failed';
+          this.unavailableUntilMs = Date.now() + UNAVAILABLE_COOLDOWN_MS;
+        }
+        return false;
+      } finally {
+        this.serverReadyPromise = null;
+      }
+    })();
+
+    return this.serverReadyPromise;
   }
 
   public async trySynthesizeChunk(

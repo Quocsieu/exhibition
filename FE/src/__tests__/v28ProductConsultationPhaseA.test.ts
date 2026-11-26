@@ -115,7 +115,9 @@ describe('Phase A FE — Product-Specific Consultation Script & Interaction Guar
     // Rapid-click race condition guard: nonce increment + AbortController + cleanupActiveAudio
     expect(hookSrc).toContain('sessionNonceRef.current += 1');
     expect(hookSrc).toContain('fetchController.signal.aborted');
-    expect(hookSrc).toContain('v28Api\n        .getProductConsultation(');
+    expect(hookSrc).toMatch(/v28Api\s*\.getProductConsultation\(/);
+    // DIRECT_TTS_LOCKED skips Audio TTS & getProductConsultation in HybridPlaybackCoordinator
+    expect(hookSrc).toContain('directTtsOnly: true');
     // AI Chat binds productId when open
     expect(chatSrc).toContain('productId: reqProductId');
   });

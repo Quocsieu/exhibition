@@ -1,6 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { TtsProviderId } from './ttsTypes.js';
+
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const BE_ROOT_ENV_PATH = path.resolve(MODULE_DIR, '..', '..', '..', '..', '.env');
+
+// Capture non-empty OS-level env keys at module load (before server.ts dotenv.config runs)
+// so .env hot-reload never overrides explicit production/OS environment variables.
+const OS_ENV_KEYS = new Set(
+  Object.keys(process.env).filter((k) => (process.env[k] ?? '').trim() !== '')
+);
 
 let lastDotEnvCheckMs = 0;
 let lastDotEnvMtimeMs = 0;
@@ -8,7 +18,8 @@ let lastDotEnvMtimeMs = 0;
 /**
  * Lightweight hot-reload of BE/.env when modified on disk while the server is running
  * (e.g., when Admin replaces GEMINI_API_KEY without restarting `tsx watch`).
- * Only updates keys present in BE/.env when file mtime actually changes.
+ * Reads immediately on first call if not yet synced, and only updates keys that
+ * are not locked by OS/production environment variables.
  */
 function syncDotEnvIfModified(env: NodeJS.ProcessEnv): void {
   if (env !== process.env || process.env.VITEST) return;
@@ -17,16 +28,13 @@ function syncDotEnvIfModified(env: NodeJS.ProcessEnv): void {
   lastDotEnvCheckMs = now;
 
   const candidates = [
+    BE_ROOT_ENV_PATH,
     path.resolve(process.cwd(), '.env'),
     path.resolve(process.cwd(), 'BE', '.env'),
   ];
   for (const candidate of candidates) {
     try {
       const st = fs.statSync(candidate);
-      if (lastDotEnvMtimeMs === 0) {
-        lastDotEnvMtimeMs = st.mtimeMs;
-        return;
-      }
       if (st.mtimeMs <= lastDotEnvMtimeMs) return;
       lastDotEnvMtimeMs = st.mtimeMs;
       const raw = fs.readFileSync(candidate, 'utf8');
@@ -40,7 +48,7 @@ function syncDotEnvIfModified(env: NodeJS.ProcessEnv): void {
         if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
           val = val.slice(1, -1);
         }
-        if (/^[A-Z0-9_]+$/.test(key)) {
+        if (/^[A-Z0-9_]+$/.test(key) && !OS_ENV_KEYS.has(key)) {
           env[key] = val;
         }
       }

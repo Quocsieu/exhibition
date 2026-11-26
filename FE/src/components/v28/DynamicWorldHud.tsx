@@ -24,6 +24,7 @@ import { DesktopProductDetailCard } from './DesktopProductDetailCard';
 import { WorldMinimapTopRight } from './WorldMinimapTopRight';
 import { NearbyDiscoveryWidget } from './NearbyDiscoveryWidget';
 import { V28SvgIcon } from './V28SvgIcon';
+import { resolveFavoriteBoothEntries } from '../../services/v28FavoriteBooths';
 
 const V28NpcChatModal = lazy(() =>
   import('./V28NpcChatModal').then((m) => ({ default: m.V28NpcChatModal }))
@@ -177,6 +178,7 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   const [directoryOpen, setDirectoryOpen] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [desktopMoreOpen, setDesktopMoreOpen] = useState<boolean>(false);
+  const [favoritesListOpen, setFavoritesListOpen] = useState<boolean>(false);
   const [rewardModalOpen, setRewardModalOpen] = useState<boolean>(false);
   const [controlsGuideOpen, setControlsGuideOpen] = useState<boolean>(false);
   const [desktopGuideModalOpen, setDesktopGuideModalOpen] = useState<boolean>(false);
@@ -184,6 +186,16 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
   const isBoothFocusActive = cameraMode === 'focus' && Boolean(focusedBooth);
   const isFocusedVisited = Boolean(focusedBooth && visitedBoothIds?.has(focusedBooth.boothId));
   const isFocusedFavorite = Boolean(focusedBooth && favoriteBoothIds?.has(focusedBooth.boothId));
+  const favoriteEntries = useMemo(
+    () => resolveFavoriteBoothEntries(world.booths, favoriteBoothIds ?? new Set<string>()),
+    [world.booths, favoriteBoothIds]
+  );
+
+  useEffect(() => {
+    if (!isBoothFocusActive) {
+      setFavoritesListOpen(false);
+    }
+  }, [isBoothFocusActive]);
   const [showFirstVisitHint, setShowFirstVisitHint] = useState<boolean>(() => {
     try {
       return !localStorage.getItem('v28_mobile_touch_hint_seen');
@@ -386,28 +398,36 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               <button
                 type="button"
                 data-testid="v28-focus-favorite-btn-mobile"
-                aria-pressed={isFocusedFavorite}
-                onClick={() => onToggleFavoriteBooth(focusedBooth)}
-                aria-label={isFocusedFavorite ? 'Bỏ ghim gian hàng khỏi yêu thích' : 'Ghim gian hàng vào yêu thích'}
-                title={isFocusedFavorite ? 'Đã ghim yêu thích' : 'Ghim yêu thích'}
+                aria-expanded={favoritesListOpen}
+                onClick={() => setFavoritesListOpen((prev) => !prev)}
+                aria-label={`Danh sách gian hàng yêu thích (${favoriteEntries.length})`}
+                title={`Xem danh sách gian hàng yêu thích (${favoriteEntries.length})`}
                 style={{
                   minWidth: 40,
                   minHeight: 40,
-                  padding: '0 8px',
+                  padding: '0 9px',
                   borderRadius: 9,
-                  border: isFocusedFavorite
+                  border: favoritesListOpen || favoriteEntries.length > 0
                     ? '1px solid rgba(251, 113, 133, 0.75)'
                     : '1px solid rgba(148, 163, 184, 0.35)',
-                  background: isFocusedFavorite ? 'rgba(225, 29, 72, 0.85)' : 'rgba(255, 255, 255, 0.1)',
+                  background: favoritesListOpen
+                    ? 'rgba(225, 29, 72, 0.92)'
+                    : favoriteEntries.length > 0
+                      ? 'rgba(225, 29, 72, 0.32)'
+                      : 'rgba(255, 255, 255, 0.1)',
                   color: '#fff',
                   cursor: 'pointer',
                   flexShrink: 0,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  gap: 4,
+                  fontSize: 12,
+                  fontWeight: 700,
                 }}
               >
-                <V28SvgIcon name={isFocusedFavorite ? 'heart-filled' : 'heart'} size={16} />
+                <V28SvgIcon name={favoriteEntries.length > 0 ? 'heart-filled' : 'heart'} size={15} />
+                {favoriteEntries.length > 0 && <span>{favoriteEntries.length}</span>}
               </button>
             )}
 
@@ -569,11 +589,11 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
               <button
                 type="button"
                 data-testid="v28-focus-favorite-btn"
-                aria-pressed={isFocusedFavorite}
-                onClick={() => onToggleFavoriteBooth(focusedBooth)}
+                aria-expanded={favoritesListOpen}
+                onClick={() => setFavoritesListOpen((prev) => !prev)}
                 className="btn btn--outline btn--sm"
-                aria-label={isFocusedFavorite ? 'Bỏ ghim gian hàng khỏi yêu thích' : 'Ghim gian hàng vào yêu thích'}
-                title={isFocusedFavorite ? 'Đã ghim gian hàng vào yêu thích' : 'Ghim gian hàng vào yêu thích'}
+                aria-label={`Danh sách gian hàng yêu thích (${favoriteEntries.length})`}
+                title={`Xem danh sách gian hàng yêu thích (${favoriteEntries.length})`}
                 style={{
                   minHeight: 34,
                   padding: '4px 10px',
@@ -582,13 +602,23 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
                   alignItems: 'center',
                   gap: 5,
                   whiteSpace: 'nowrap',
-                  borderColor: isFocusedFavorite ? '#e11d48' : undefined,
-                  background: isFocusedFavorite ? '#e11d48' : undefined,
-                  color: isFocusedFavorite ? '#ffffff' : undefined,
+                  borderColor: favoritesListOpen || favoriteEntries.length > 0 ? '#e11d48' : undefined,
+                  background: favoritesListOpen
+                    ? '#e11d48'
+                    : favoriteEntries.length > 0
+                      ? '#fff1f2'
+                      : undefined,
+                  color: favoritesListOpen
+                    ? '#ffffff'
+                    : favoriteEntries.length > 0
+                      ? '#be123c'
+                      : undefined,
                 }}
               >
-                <V28SvgIcon name={isFocusedFavorite ? 'heart-filled' : 'heart'} size={14} />
-                {isFocusedFavorite ? 'Đã thích' : 'Yêu thích'}
+                <V28SvgIcon name={favoriteEntries.length > 0 || favoritesListOpen ? 'heart-filled' : 'heart'} size={14} />
+                <span>
+                  Yêu thích{favoriteEntries.length > 0 ? ` (${favoriteEntries.length})` : ''}
+                </span>
               </button>
             )}
 
@@ -1629,6 +1659,284 @@ export const DynamicWorldHud: React.FC<DynamicWorldHudProps> = ({
           />
         ) : null}
       </div>
+
+      {/* Focus-Mode Favorites List Popover (opened from top-bar "Yêu thích" button) */}
+      {isBoothFocusActive && focusedBooth && favoritesListOpen && (
+        <>
+          <div
+            aria-hidden="true"
+            onClick={() => setFavoritesListOpen(false)}
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 39,
+              background: 'transparent',
+              pointerEvents: 'auto',
+            }}
+          />
+          <aside
+            role="dialog"
+            aria-label="Danh sách gian hàng yêu thích"
+            data-testid="v28-focus-favorites-popover"
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              top: isMobileUi ? 62 : 58,
+              left: isMobileUi ? 10 : 16,
+              width: isMobileUi ? 'calc(100vw - 20px)' : 360,
+              maxWidth: 'calc(100vw - 20px)',
+              maxHeight: '65vh',
+              zIndex: 40,
+              pointerEvents: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              background: 'rgba(255, 255, 255, 0.98)',
+              backdropFilter: 'blur(14px)',
+              borderRadius: 16,
+              border: '1px solid #fecdd3',
+              boxShadow: '0 16px 40px rgba(15, 23, 42, 0.28)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                padding: '12px 14px',
+                background: 'linear-gradient(135deg, #fff1f2 0%, #ffffff 100%)',
+                borderBottom: '1px solid #ffe4e6',
+              }}
+            >
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontWeight: 800, fontSize: 14, color: '#be123c' }}>
+                <V28SvgIcon name="heart-filled" size={16} />
+                <span>Gian hàng yêu thích ({favoriteEntries.length})</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFavoritesListOpen(false)}
+                aria-label="Đóng danh sách yêu thích"
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 8,
+                  border: '1px solid #fecdd3',
+                  background: '#ffffff',
+                  color: '#475569',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <V28SvgIcon name="close" size={14} />
+              </button>
+            </div>
+
+            {/* Quick toggle for the currently focused booth */}
+            {onToggleFavoriteBooth && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  padding: '9px 14px',
+                  background: '#f8fafc',
+                  borderBottom: '1px solid #e2e8f0',
+                  fontSize: 12,
+                }}
+              >
+                <div style={{ minWidth: 0, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  Gian hiện tại: <strong>#{focusedBooth.slotIndex + 1}</strong>
+                </div>
+                <button
+                  type="button"
+                  data-testid="v28-focus-favorite-toggle-current"
+                  onClick={() => onToggleFavoriteBooth(focusedBooth)}
+                  style={{
+                    flexShrink: 0,
+                    padding: '5px 10px',
+                    borderRadius: 999,
+                    border: isFocusedFavorite ? '1px solid #fda4af' : '1px solid #e11d48',
+                    background: isFocusedFavorite ? '#fff1f2' : '#e11d48',
+                    color: isFocusedFavorite ? '#be123c' : '#ffffff',
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <V28SvgIcon name={isFocusedFavorite ? 'heart-filled' : 'heart'} size={12} />
+                  <span>{isFocusedFavorite ? 'Bỏ ghim gian này' : 'Lưu gian này'}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Scrollable Favorites List */}
+            <div style={{ overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {favoriteEntries.length === 0 ? (
+                <div
+                  style={{
+                    padding: '20px 12px',
+                    textAlign: 'center',
+                    color: '#64748b',
+                    fontSize: 12.5,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Chưa có gian hàng yêu thích nào. Nhấn biểu tượng trái tim trên biển hiệu gian hàng hoặc nút <strong>Lưu gian này</strong> ở trên để ghim nhanh.
+                </div>
+              ) : (
+                favoriteEntries.map(({ booth, boothNumber }) => {
+                  const isCurrent = booth.boothId === focusedBooth.boothId;
+                  const isVisited = Boolean(visitedBoothIds?.has(booth.boothId));
+                  return (
+                    <div
+                      key={booth.boothId}
+                      data-testid={`v28-focus-favorite-item-${boothNumber}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        padding: '9px 10px',
+                        borderRadius: 12,
+                        border: isCurrent ? '1px solid #38bdf8' : '1px solid #e2e8f0',
+                        background: isCurrent ? '#f0f9ff' : '#ffffff',
+                      }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 800,
+                              padding: '1px 7px',
+                              borderRadius: 999,
+                              background: '#0284c7',
+                              color: '#ffffff',
+                            }}
+                          >
+                            #{boothNumber}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: '#475569',
+                            }}
+                          >
+                            Khu {booth.zoneCode}
+                          </span>
+                          <span style={{ fontSize: 11, color: '#64748b' }}>
+                            · {booth.assignedSlotCount}/6 SP
+                          </span>
+                          {isVisited && (
+                            <span
+                              style={{
+                                fontSize: 10.5,
+                                fontWeight: 700,
+                                color: '#047857',
+                                background: '#ecfdf5',
+                                border: '1px solid #a7f3d0',
+                                borderRadius: 999,
+                                padding: '0 6px',
+                              }}
+                            >
+                              Đã xem
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            marginTop: 3,
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: '#0f172a',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={booth.companyName || booth.boothName}
+                        >
+                          {booth.companyName || booth.boothName}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+                        {isCurrent ? (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: '#0369a1',
+                              background: '#e0f2fe',
+                              padding: '4px 8px',
+                              borderRadius: 8,
+                            }}
+                          >
+                            Đang xem
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            data-testid={`v28-focus-favorite-go-${boothNumber}`}
+                            onClick={() => {
+                              setFavoritesListOpen(false);
+                              onTeleportToBooth(booth);
+                            }}
+                            style={{
+                              padding: '5px 10px',
+                              borderRadius: 8,
+                              border: 'none',
+                              background: '#0284c7',
+                              color: '#ffffff',
+                              fontSize: 11.5,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Đi tới
+                          </button>
+                        )}
+                        {onToggleFavoriteBooth && (
+                          <button
+                            type="button"
+                            data-testid={`v28-focus-favorite-remove-${boothNumber}`}
+                            onClick={() => onToggleFavoriteBooth(booth)}
+                            aria-label={`Bỏ ghim Gian #${boothNumber}`}
+                            title="Bỏ ghim khỏi yêu thích"
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 8,
+                              border: '1px solid #fecdd3',
+                              background: '#fff1f2',
+                              color: '#e11d48',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <V28SvgIcon name="close" size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </aside>
+        </>
+      )}
 
       {/* Desktop Top-Right Product Detail Card (Image + Price + Description + Compact NPC Subtitle) */}
       {!isMobileUi && selectedProduct && !npcChatOpen && (

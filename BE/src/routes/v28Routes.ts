@@ -270,6 +270,7 @@ export function createV28ApiRoutes(
       category: body.category || 'General',
       description: body.description || '',
       contactEmail: body.contactEmail || '',
+      contactPhone: body.contactPhone || '',
       contactUrl: body.contactUrl || '',
       logoUrl: body.logoUrl || '',
     });

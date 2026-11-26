@@ -1,5 +1,11 @@
 import React, { useRef, useState } from 'react';
-import { resolveV28ProductImageUrl, type V28BoothPlacementView, type V28Product } from '../../services/v28Api';
+import {
+  buildZaloChatUrl,
+  getSafeV28HttpUrl,
+  resolveV28ProductImageUrl,
+  type V28BoothPlacementView,
+  type V28Product,
+} from '../../services/v28Api';
 import type { NpcSessionState } from '../../hooks/useNpcConsultationSession';
 
 export interface MobileProductBottomSheetProps {
@@ -76,8 +82,6 @@ export const MobileProductBottomSheet: React.FC<MobileProductBottomSheetProps> =
     product.price > 0
       ? `${product.price.toLocaleString('vi-VN')} ${product.currency || 'VND'}`
       : 'Liên hệ báo giá';
-
-  const productLink = product.sourceUrl || contactUrl;
 
   return (
     <section
@@ -267,93 +271,77 @@ export const MobileProductBottomSheet: React.FC<MobileProductBottomSheetProps> =
           {product.description || 'Sản phẩm trưng bày chính thức tại gian hàng.'}
         </p>
 
-        {/* Compact NPC Product Consultation Status & Synced Subtitle */}
-        {(npcSubtitle || npcSessionState !== 'IDLE') && (
-          <div
-            data-testid="v28-product-npc-bar"
-            style={{
-              borderRadius: 12,
-              background: '#f0f9ff',
-              border: '1px solid #bae6fd',
-              padding: '9px 11px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: '#0369a1' }}>
-                {npcSessionState === 'LOADING'
-                  ? '⏳ Đang chuẩn bị giọng tư vấn...'
-                  : npcSessionState === 'SPEAKING'
-                    ? '🔊 NPC đang tư vấn sản phẩm'
-                    : npcSessionState === 'PAUSED'
-                      ? '⏸ Tạm dừng tư vấn'
-                      : npcSessionState === 'ERROR'
-                        ? '⚠️ Tạm chưa phát được giọng đọc'
-                        : '✓ Đã giới thiệu sản phẩm'}
-              </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {onToggleMute && (
-                  <button
-                    type="button"
-                    onClick={onToggleMute}
-                    aria-label={npcIsMuted ? 'Bật âm thanh tư vấn' : 'Tắt âm thanh tư vấn'}
-                    style={{
-                      minHeight: 32,
-                      padding: '2px 8px',
-                      borderRadius: 8,
-                      border: '1px solid #bae6fd',
-                      background: '#ffffff',
-                      color: '#0369a1',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {npcIsMuted ? '🔇' : '🔊'}
-                  </button>
-                )}
-                {onReplayConsultation && (
-                  <button
-                    type="button"
-                    onClick={onReplayConsultation}
-                    aria-label="Nghe lại tư vấn sản phẩm"
-                    style={{
-                      minHeight: 32,
-                      padding: '2px 9px',
-                      borderRadius: 8,
-                      border: '1px solid #bae6fd',
-                      background: '#ffffff',
-                      color: '#0369a1',
-                      fontSize: 11.5,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    ↻ Nghe lại
-                  </button>
-                )}
+        {/* Admin Sales Website Access Bar */}
+        {(() => {
+          const salesWebsiteUrl = getSafeV28HttpUrl(
+            contactUrl || booth.contactUrl || product.contactUrl || product.sourceUrl
+          );
+          return (
+            <div
+              data-testid="v28-product-sales-website-bar"
+              style={{
+                borderRadius: 12,
+                background: '#f0f9ff',
+                border: '1px solid #bae6fd',
+                padding: '9px 11px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}
+            >
+              <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: '#0369a1' }}>
+                  🌐 Trang web bán hàng
+                </span>
+                <span
+                  style={{
+                    fontSize: 11.5,
+                    color: '#334155',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {booth.companyName}
+                </span>
               </div>
+              {salesWebsiteUrl ? (
+                <a
+                  href={salesWebsiteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="v28-product-sales-website-link"
+                  aria-label={`Truy cập trang web bán hàng của ${booth.companyName}`}
+                  style={{
+                    minHeight: 34,
+                    padding: '4px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #7dd3fc',
+                    background: '#ffffff',
+                    color: '#0369a1',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  Truy cập web ↗
+                </a>
+              ) : (
+                <span style={{ fontSize: 11.5, color: '#64748b', flexShrink: 0 }}>
+                  Chưa có website
+                </span>
+              )}
             </div>
-            {npcSubtitle && (
-              <p
-                data-testid="v28-product-npc-subtitle"
-                style={{
-                  margin: 0,
-                  fontSize: 12.5,
-                  color: '#0f172a',
-                  lineHeight: 1.45,
-                }}
-              >
-                “{npcSubtitle}”
-              </p>
-            )}
-          </div>
-        )}
+          );
+        })()}
       </div>
 
-      {/* Thumb-friendly Action Footer */}
+      {/* Thumb-friendly Action Footer: Split into AI Chat and Zalo Business Chat */}
       <div
         style={{
           padding: '10px 16px 4px',
@@ -384,30 +372,8 @@ export const MobileProductBottomSheet: React.FC<MobileProductBottomSheetProps> =
               gap: 6,
             }}
           >
-            💬 Hỏi AI về sản phẩm
+            💬 Chat với AI
           </button>
-        ) : productLink ? (
-          <a
-            href={productLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              flex: 1,
-              minHeight: 44,
-              borderRadius: 12,
-              background: '#0284c7',
-              color: '#fff',
-              fontWeight: 700,
-              fontSize: 14,
-              textDecoration: 'none',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-            }}
-          >
-            🛒 Liên hệ / Mua hàng ↗
-          </a>
         ) : (
           <button
             type="button"
@@ -431,34 +397,64 @@ export const MobileProductBottomSheet: React.FC<MobileProductBottomSheetProps> =
               gap: 6,
             }}
           >
-            💬 Hỏi tư vấn viên
+            💬 Chat với AI
           </button>
         )}
 
-        {onOpenChat && productLink && (
-          <a
-            href={productLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              minHeight: 44,
-              padding: '0 14px',
-              borderRadius: 12,
-              border: '1px solid #cbd5e1',
-              background: '#f8fafc',
-              color: '#0f172a',
-              fontWeight: 700,
-              fontSize: 13.5,
-              textDecoration: 'none',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            Mua ↗
-          </a>
-        )}
+        {(() => {
+          const zaloChatUrl = buildZaloChatUrl(booth.contactPhone);
+          return zaloChatUrl ? (
+            <a
+              href={zaloChatUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="v28-product-zalo-chat"
+              aria-label={`Chat Zalo với ${booth.companyName} (${booth.contactPhone})`}
+              style={{
+                flex: 1,
+                minHeight: 44,
+                borderRadius: 12,
+                border: '1px solid #0068ff',
+                background: '#0068ff',
+                color: '#ffffff',
+                fontWeight: 700,
+                fontSize: 14,
+                textDecoration: 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+              }}
+            >
+              💬 Chat Zalo
+            </a>
+          ) : (
+            <button
+              type="button"
+              data-testid="v28-product-zalo-chat"
+              aria-disabled="true"
+              onClick={(e) => e.preventDefault()}
+              title="Doanh nghiệp chưa cập nhật số điện thoại Zalo"
+              style={{
+                flex: 1,
+                minHeight: 44,
+                borderRadius: 12,
+                border: '1px solid #cbd5e1',
+                background: '#f1f5f9',
+                color: '#64748b',
+                fontWeight: 700,
+                fontSize: 13.5,
+                cursor: 'not-allowed',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+              }}
+            >
+              💬 Chat Zalo
+            </button>
+          );
+        })()}
       </div>
     </section>
   );

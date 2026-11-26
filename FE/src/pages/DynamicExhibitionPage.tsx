@@ -505,6 +505,25 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     };
   }, [loading, world]);
 
+  // Phase 1.7.3: Deferred background prewarm of Piper Worker + ONNX session after 3D exhibition is ready
+  useEffect(() => {
+    if (loading || !world) return;
+    if (!shouldAllowHybridPreload().allowed) return;
+    const timer = window.setTimeout(() => {
+      void npcHybridTtsEngine.warmManifest().catch(() => false);
+      void import('../services/hybridTtsAdapter')
+        .then(({ piperBrowserTts, shouldAllowPiperBackgroundPrewarm }) => {
+          if (shouldAllowPiperBackgroundPrewarm().allowed) {
+            void piperBrowserTts.prewarmInBackground().catch(() => false);
+          }
+        })
+        .catch(() => {});
+    }, 3500);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [loading, world]);
+
   // 2) When visitor focuses a booth, selectively preload that booth's opening consultation audio (cancellable on booth switch, 0 auto-play):
   //    - Supertonic 3 active: pre-synthesizes the opening Greeting chunks so clicking "Nghe tư vấn" / NPC starts with 0ms wait!
   //    - Hybrid mode: preloads manifest-verified WAV chunks.
@@ -522,6 +541,18 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         .flatMap((st) => buildSupertonicStepChunks(st.naturalSpeechText || st.fallbackText))
         .slice(0, 3);
       void (async () => {
+        const stReady = await supertonicTtsAdapter.ensureServerReady(controller.signal);
+        if (!stReady || controller.signal.aborted) {
+          if (resolveNpcTtsMode() === 'hybrid' && !controller.signal.aborted) {
+            const chunks = extractBoothConsultationChunks(focusedBooth);
+            void npcHybridTtsEngine.preloadChunks(chunks, {
+              signal: controller.signal,
+              maxConcurrency: 2,
+              maxChunks: 40,
+            });
+          }
+          return;
+        }
         for (const ch of openingChunks) {
           if (controller.signal.aborted || supertonicTtsAdapter.isCircuitOpen()) break;
           await supertonicTtsAdapter
@@ -908,7 +939,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
 
   const handleCloseProduct = useCallback(() => {
     if (npcSession.consultationMode === 'product') {
-      npcSession.stopSession();
+      npcSession.stopPlaybackOnly();
     }
     setSelectedProduct(null);
   }, [npcSession]);
@@ -921,6 +952,19 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     setChatAnimState('idle');
     setCameraMode(forceExplore ? 'explore' : previousExteriorModeRef.current);
   }, [npcSession]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || typeof window === 'undefined') return;
+    (window as unknown as { __V28_DEV_QA__?: unknown }).__V28_DEV_QA__ = {
+      getWorld: () => world,
+      getFocusedBooth: () => focusedBooth,
+      getNpcSession: () => npcSession,
+      teleportToBooth: handleTeleportToBooth,
+      selectProduct: handleSelectProduct,
+      closeProduct: handleCloseProduct,
+      exitBooth: handleExitBoothFocus,
+    };
+  });
 
   // Single unified Escape & WASD keyboard handler (Modal-first priority matching V27.5 BoothPanel)
   useEffect(() => {

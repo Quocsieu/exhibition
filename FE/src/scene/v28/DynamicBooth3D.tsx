@@ -26,8 +26,8 @@ const SLOT_CARD_FRAME_GEOM = new THREE.BoxGeometry(1.22, 1.48, 0.046);
 const SLOT_CARD_BEZEL_GEOM = new THREE.BoxGeometry(1.26, 1.52, 0.03);
 const SLOT_CARD_PLANE_GEOM = new THREE.PlaneGeometry(1.18, 1.43);
 
-// UAT Fix 06: Wider Elongated Rounded Exhibition Signage (+14.4% wider: 4.78 × 0.56m, 8.54:1 aspect)
-const SIGN_WIDTH = 4.78;
+// Compact Rounded Exhibition Signage (3.60 × 0.56m, ~6.43:1 aspect)
+const SIGN_WIDTH = 3.6;
 const SIGN_HEIGHT = 0.56;
 const SIGN_CORNER_R = 0.15;
 
@@ -352,9 +352,9 @@ function createBoothSignTexture(
   isVisited = false,
   logoUrl = ''
 ): THREE.CanvasTexture {
-  // Exact 8.51:1 aspect ratio matching 4.78 × 0.56m wider rounded 3D plaque (0% distortion on logo or text!)
+  // Exact ~6.43:1 aspect ratio matching 3.60 × 0.56m compact rounded 3D plaque (0% distortion on logo or text!)
   const canvas = document.createElement('canvas');
-  canvas.width = 1464;
+  canvas.width = 1106;
   canvas.height = 172;
   const ctx = canvas.getContext('2d')!;
   const theme = ARCHETYPE_SIGN_THEME[archetypeId] || ARCHETYPE_SIGN_THEME.signature_ring;
