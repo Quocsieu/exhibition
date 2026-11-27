@@ -65,7 +65,7 @@ export class V28AudioBatchManager {
     private readonly v28Db: V28CatalogDatabase,
     private readonly audioCacheService: V28AudioCacheService,
     private readonly voiceApprovalService: V28VoiceApprovalService
-  ) {}
+  ) { }
 
   private get db() {
     return this.v28Db.getConnection();
@@ -431,6 +431,54 @@ export class V28AudioBatchManager {
                 bypassPermissionCooldown: Boolean(params.isResume && idx === 0 && attempt === 0),
                 signal: params.signal,
               });
+
+              // Ensure booth batch also prepares `company_intro` and `closing` slots with the EXACT same
+              // approved voice so `voiceReadiness.ready === true` (ONE BOOTH - ONE VOICE, instant AUDIO_TTS!)
+              if (target.entityType === 'booth' && target.slotKey === 'welcome' && !params.signal.aborted) {
+                const boothRow = this.v28Db.getBoothById(target.entityId);
+                if (boothRow) {
+                  const extraBoothSlots: Array<{ slotKey: string; text: string }> = [
+                    {
+                      slotKey: 'company_intro',
+                      text: `${boothRow.companyName || boothRow.name} mang đến giải pháp thuộc nhóm ${boothRow.category || 'triển lãm'}. ${boothRow.description || 'Quý khách có thể xem chi tiết các sản phẩm trưng bày tại gian hàng hoặc đặt câu hỏi trực tiếp cho tôi.'}`,
+                    },
+                    {
+                      slotKey: 'closing',
+                      text: `Cảm ơn quý khách đã tham quan gian hàng ${boothRow.name} của ${boothRow.companyName || boothRow.name}. Nếu quý khách cần tư vấn thêm về sản phẩm, vui lòng chuyển sang tab Chat để trò chuyện trực tiếp với tôi.`,
+                    },
+                  ];
+                  for (const extra of extraBoothSlots) {
+                    if (params.signal.aborted) break;
+                    const existingExtra = await this.audioCacheService.resolveAudioFirst({
+                      entityType: 'booth',
+                      entityId: target.entityId,
+                      slotKey: extra.slotKey,
+                    });
+                    if (
+                      existingExtra &&
+                      existingExtra.asset.provider === params.approvedProvider &&
+                      existingExtra.asset.voiceId === params.approvedVoiceId &&
+                      !existingExtra.asset.needsUpdate
+                    ) {
+                      continue;
+                    }
+                    await this.audioCacheService.generateAdminAudio({
+                      entityType: 'booth',
+                      entityId: target.entityId,
+                      slotKey: extra.slotKey,
+                      transcript: extra.text,
+                      preferredProvider: params.approvedProvider,
+                      modelId: params.approvedModelId,
+                      voiceId: params.approvedVoiceId,
+                      speed: params.approvedSpeed,
+                      style: params.approvedStyle,
+                      allowFallback: false,
+                      preserveMode: true,
+                      signal: params.signal,
+                    });
+                  }
+                }
+              }
               itemOk = true;
               consecutiveTransientFailures = 0;
               break;

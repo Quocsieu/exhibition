@@ -239,4 +239,105 @@ describe('GRAND EXPO V28 — PHASE 1.5: Gemini Key Rotation Recovery, Batch Tran
     v28Db.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  it('aligns product intro slotKey and generates booth welcome/company_intro/closing so voiceReadiness.ready === true (instant AUDIO_TTS, ONE BOOTH - ONE VOICE)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'v28-phase15-readiness-'));
+    const v28Db = new V28CatalogDatabase(path.join(tmpDir, 'test.db'));
+    const company = v28Db.createCompany({ name: 'Con Đường Nông Sản' });
+    const boothId = 'booth-readiness-01';
+    v28Db.getConnection().prepare(
+      `INSERT INTO booths (id, name, tagline, description, category, color, position_x, position_z, rotation_y, width, depth, company_name, company_id, status)
+       VALUES (?, 'Gian Nông Sản 1', 'Đặc sản sạch', 'Chuyên đặc sản miền Tây', 'Nông sản', '#16a34a', 0, 0, 0, 8, 8, 'Con Đường Nông Sản', ?, 'active')`
+    ).run(boothId, company.id);
+    const prod = v28Db.createProduct({
+      companyId: company.id,
+      boothId,
+      name: 'Tôm Sấy Sốt Trứng Muối',
+      price: 150000,
+      description: 'Đặc sản miền Tây thơm ngon.',
+    });
+
+    const ttsService = new MultiProviderTtsService({
+      adapters: {
+        gemini: makeAdapter({ id: 'gemini', enabled: true, configured: false }),
+        vbee: makeAdapter({ id: 'vbee', enabled: true, configured: false }),
+        edge: makeAdapter({
+          id: 'edge',
+          enabled: true,
+          configured: true,
+          onSynth: async () => fakeMp3(0x77),
+        }),
+        fpt: makeAdapter({ id: 'fpt', enabled: false, configured: false }),
+      },
+    });
+
+    const audioCache = new V28AudioCacheService(
+      v28Db,
+      new LocalAudioStorageAdapter(path.join(tmpDir, 'audio')),
+      ttsService
+    );
+    const voiceApproval = new V28VoiceApprovalService(v28Db, audioCache);
+    const batchManager = new V28AudioBatchManager(v28Db, audioCache, voiceApproval);
+
+    const prev = await voiceApproval.createVoicePreview({
+      voiceProfile: 'female_standard',
+      transcript: 'Xin chào quý khách.',
+    });
+    voiceApproval.approveVoiceConfig({
+      configSignature: prev.preview.configSignature,
+      adminUsername: 'admin',
+    });
+
+    const job = batchManager.startBatch({
+      confirmed: true,
+      entityType: 'all',
+      companyId: company.id,
+      entityIds: [boothId, prod.id],
+      configSignature: prev.preview.configSignature,
+      concurrency: 1,
+    });
+
+    let cur = batchManager.getJob(job.jobId)!;
+    for (let i = 0; i < 40 && cur.status === 'running'; i++) {
+      await new Promise((r) => setTimeout(r, 30));
+      cur = batchManager.getJob(job.jobId)!;
+    }
+    expect(cur.status).toBe('completed');
+
+    // Now simulate visitor clicking the booth (`allowLiveSynthesis: false`)
+    const pack = await audioCache.getOrPrepareBoothAudioPack(
+      {
+        boothId,
+        boothName: 'Gian Nông Sản 1',
+        companyId: company.id,
+        companyName: 'Con Đường Nông Sản',
+        zoneId: 'zone-a',
+        zoneName: 'Khu A',
+        category: 'Nông sản',
+        color: '#16a34a',
+        description: 'Chuyên đặc sản miền Tây',
+        tagline: 'Đặc sản sạch',
+        contactEmail: '',
+        contactUrl: '',
+        logoUrl: '',
+        bannerUrl: '',
+        positionX: 0,
+        positionZ: 0,
+        rotationY: 0,
+        width: 8,
+        depth: 8,
+        slots: [{ slotId: 'slot_01', product: prod }],
+      } as never,
+      { allowLiveSynthesis: false }
+    );
+
+    expect(pack.voiceReadiness.ready).toBe(true);
+    expect(pack.voiceReadiness.reason).toBe('consistent_ready');
+    expect(pack.voiceReadiness.dominantProvider).toBe('edge');
+    expect(pack.clips.map((c) => c.slotKey)).toEqual(['welcome', 'company_intro', 'slot_01', 'closing']);
+    expect(pack.generatedCount).toBe(0);
+
+    v28Db.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 });

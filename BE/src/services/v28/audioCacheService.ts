@@ -632,16 +632,19 @@ export class V28AudioCacheService {
       return null;
     }
 
-    // Priority 2: Valid pre-generated audio (matches slotKey or entity intro, not stale, real speech)
+    // Priority 2: Valid pre-generated or cached real-speech audio (matches slotKey or entity intro, not stale)
     const pregenRows = this.db
       .prepare(
         `SELECT * FROM audio_assets
-         WHERE entity_type = ? AND entity_id = ? AND (slot_key = ? OR slot_key = 'intro')
-           AND source_type = 'pre_generated' AND is_active = 1 AND status = 'ready' AND needs_update = 0
+         WHERE entity_type = ? AND entity_id = ? AND (slot_key = ? OR (? = 'product' AND slot_key = 'intro'))
+           AND source_type IN ('pre_generated', 'cached') AND is_active = 1 AND status = 'ready' AND needs_update = 0
            AND model_id NOT LIKE '%local-fallback%' AND provider != 'local-fallback'
-         ORDER BY CASE WHEN slot_key = ? THEN 0 ELSE 1 END, updated_at DESC, rowid DESC LIMIT 3`
+         ORDER BY
+           CASE WHEN source_type = 'pre_generated' THEN 0 ELSE 1 END,
+           CASE WHEN slot_key = ? THEN 0 ELSE 1 END,
+           updated_at DESC, rowid DESC LIMIT 4`
       )
-      .all(params.entityType, params.entityId, slotKey, slotKey) as Array<Record<string, unknown>>;
+      .all(params.entityType, params.entityId, slotKey, params.entityType, slotKey) as Array<Record<string, unknown>>;
 
     for (const row of pregenRows) {
       if (params.expectedContentHash && String(row.content_hash) !== params.expectedContentHash) {
@@ -650,8 +653,9 @@ export class V28AudioCacheService {
       const buf = await this.storage.get(String(row.storage_key));
       if (isValidAudioBuffer(buf)) {
         this.metrics.cacheHits++;
-        this.metrics.pregeneratedHits++;
-        return { asset: this.mapRow(row), source: 'pre_generated' };
+        const src = String(row.source_type) === 'pre_generated' ? 'pre_generated' : 'cached';
+        if (src === 'pre_generated') this.metrics.pregeneratedHits++;
+        return { asset: this.mapRow(row), source: src };
       }
     }
 
@@ -1630,7 +1634,8 @@ export class V28AudioCacheService {
         transcript: item.text,
         allowLiveSynthesis: options?.allowLiveSynthesis,
       });
-      clips.push(res.asset);
+      // Align returned clip slotKey to the exact booth/slot key expected by FE playback & voiceReadiness
+      clips.push({ ...res.asset, slotKey: item.slotKey });
       if (res.cacheHit) cacheHits++;
       else generatedCount++;
     }
