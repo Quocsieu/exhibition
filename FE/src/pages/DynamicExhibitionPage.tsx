@@ -34,7 +34,16 @@ import {
 } from '../scene/v28/v28MobileControls';
 import { ParametricExpoRoof } from '../scene/v28/ParametricExpoRoof';
 import { useV28SpatialRealtime } from '../hooks/useV28SpatialRealtime';
-import { piperBrowserTts, shouldAllowPiperBackgroundPrewarm } from '../services/hybridTtsAdapter';
+import {
+  buildPiperStepPlanFromDisplayText,
+  hasCachedPiperModelInBrowser,
+  piperBrowserTts,
+  shouldAllowPiperBackgroundPrewarm,
+} from '../services/hybridTtsAdapter';
+import {
+  predictiveResourceGovernor,
+  resolvePredictivePreSynthEnabled,
+} from '../services/predictiveAudioScheduler';
 import {
   resolveNpcTtsMode,
   resolveNpcTtsProvider,
@@ -48,6 +57,7 @@ import {
 } from '../services/supertonicTtsAdapter';
 import {
   buildBoothConsultationSteps,
+  buildProductConsultationSteps,
   extractBoothConsultationChunks,
 } from '../services/npcConsultationScript';
 import { findSimilarBooths } from '../services/similarBooths';
@@ -517,7 +527,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
             void piperBrowserTts.prewarmInBackground().catch(() => false);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     }, 3500);
     return () => {
       window.clearTimeout(timer);
@@ -532,6 +542,64 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
     if (!shouldAllowHybridPreload().allowed) return;
 
     const controller = new AbortController();
+    const runPredictiveProductOpeningPreSynth = async (triggerSource: string, attempt = 0) => {
+      if (!resolvePredictivePreSynthEnabled() || controller.signal.aborted) return;
+      // Task 1 Safety Policy: Single-threaded WASM (non-crossOriginIsolated) cannot preempt an active
+      // 4-7s ONNX inference, which can block foreground clicks up to ~4.6s. Skip speculative booth_focus
+      // synthesis unless explicitly opted in via ?predictiveTts=on.
+      const explicitlyOptedIn =
+        typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('predictiveTts')?.toLowerCase() === 'on';
+      const isSingleThreadWasm = typeof window !== 'undefined' && !window.crossOriginIsolated;
+      const isCompactViewport = typeof window !== 'undefined' && window.innerWidth < 768;
+      if (!explicitlyOptedIn && (isSingleThreadWasm || isCompactViewport)) {
+        return;
+      }
+      const modelReadyOrCached =
+        piperBrowserTts.isModelReady() || (await hasCachedPiperModelInBrowser());
+      if (!modelReadyOrCached || controller.signal.aborted) return;
+      const gov = predictiveResourceGovernor.canRunBackgroundJob();
+      if (!gov.allowed) {
+        if (
+          attempt < 3 &&
+          (gov.reason === 'user_moving' ||
+            gov.reason === 'frame_spike_cooldown' ||
+            gov.reason === 'foreground_active')
+        ) {
+          window.setTimeout(() => {
+            if (!controller.signal.aborted) {
+              void runPredictiveProductOpeningPreSynth(triggerSource, attempt + 1);
+            }
+          }, 1500);
+        }
+        return;
+      }
+      const maxProducts = 1;
+
+      const productFirstChunks: string[] = [];
+      for (const sl of focusedBooth.slots) {
+        if (!sl.product || productFirstChunks.length >= maxProducts) continue;
+        const pSteps = buildProductConsultationSteps(focusedBooth, sl.product, sl.slotId);
+        const firstText = pSteps[0]?.fallbackText;
+        if (!firstText) continue;
+        const plan = buildPiperStepPlanFromDisplayText(firstText);
+        const openingChunk = plan.chunks[0];
+        if (!openingChunk) continue;
+        if (await npcHybridTtsEngine.hasPregenEntry(openingChunk)) continue;
+        productFirstChunks.push(openingChunk);
+      }
+
+      if (productFirstChunks.length > 0 && !controller.signal.aborted) {
+        void piperBrowserTts.preSynthesizeChunks({
+          chunks: productFirstChunks,
+          priority: 2,
+          triggerSource,
+          signal: controller.signal,
+          maxChunks: maxProducts,
+        });
+      }
+    };
+
     if (resolveNpcTtsProvider() === 'supertonic' && !supertonicTtsAdapter.isCircuitOpen()) {
       const steps = buildBoothConsultationSteps(focusedBooth);
       const openingSteps = steps.slice(0, 2); // Greeting + Product #1 opening
@@ -551,6 +619,7 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
               maxChunks: 40,
             });
           }
+          await runPredictiveProductOpeningPreSynth('booth_focus');
           return;
         }
         for (const ch of openingChunks) {
@@ -571,6 +640,9 @@ export const DynamicExhibitionPage: React.FC<DynamicExhibitionPageProps> = ({ on
         maxConcurrency: 2,
         maxChunks: 40,
       });
+      void runPredictiveProductOpeningPreSynth('booth_focus');
+    } else {
+      void runPredictiveProductOpeningPreSynth('booth_focus');
     }
 
     return () => {

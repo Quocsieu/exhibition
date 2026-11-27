@@ -466,7 +466,9 @@ async function ensureInitialized(
 
         const session = await ort.InferenceSession.create(modelRes.buffer, {
           executionProviders: ['wasm'],
-          graphOptimizationLevel: 'basic',
+          graphOptimizationLevel: 'all',
+          enableCpuMemArena: true,
+          enableMemPattern: true,
         });
 
         modelConfig = parsedCfg;

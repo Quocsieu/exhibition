@@ -211,7 +211,9 @@ export function useNpcConsultationSession(): UseNpcConsultationSessionResult {
         await piperBrowserTts
           .synthesizeNormalizedChunk({
             normalizedText: openingChunk,
-            priority: 'low',
+            schedulerPriority: 1,
+            triggerSource: 'active_click_prewarm',
+            isPredictive: false,
             signal,
           })
           .catch(() => null);

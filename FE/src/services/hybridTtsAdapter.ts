@@ -2,6 +2,13 @@ import {
   chunkNormalizedSpeechForPiper,
   normalizeVietnameseForPiper,
 } from './piperSpeechNormalizer';
+import {
+  predictiveResourceGovernor,
+  predictiveTtsTelemetry,
+  resolvePredictivePreSynthEnabled,
+  type PredictivePriority,
+} from './predictiveAudioScheduler';
+import { persistentAudioCache, type PersistentAudioCache } from './persistentAudioCache';
 
 export type ConfiguredTtsProvider = 'auto' | 'local-korvatts' | 'browser-piper';
 export type ResolvedActiveTtsProvider = 'local-korvatts' | 'browser-piper';
@@ -19,7 +26,24 @@ const MAX_PENDING_WORKER_JOBS = 4;
 const WORKER_PING_TIMEOUT_MS = 6_000;
 const WORKER_INIT_TOTAL_TIMEOUT_MS = 275_000; // 180s download + 90s init + 5s margin
 const WORKER_SYNTH_TIMEOUT_MS = 92_000;
-const DEFAULT_IDLE_RELEASE_MS = 45_000;
+const DEFAULT_IDLE_RELEASE_MS = 90_000;
+const DESKTOP_IDLE_RELEASE_MS = 300_000;
+
+export function resolveAdaptiveIdleReleaseMs(cap: {
+  lowMemoryDevice: boolean;
+  deviceMemoryGb: number | null;
+}): number {
+  if (cap.lowMemoryDevice) return 0;
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+    return 30_000;
+  }
+  const isCompact = typeof window !== 'undefined' && window.innerWidth < 768;
+  if (isCompact) return DEFAULT_IDLE_RELEASE_MS;
+  if (cap.deviceMemoryGb === null || cap.deviceMemoryGb >= 6) {
+    return DESKTOP_IDLE_RELEASE_MS;
+  }
+  return DEFAULT_IDLE_RELEASE_MS;
+}
 
 export interface PiperProgressEvent {
   stage: 'downloading' | 'initializing' | 'synthesizing';
@@ -127,9 +151,8 @@ export function resolveTtsProviderConfig(options?: {
   return {
     configured: 'auto',
     preferredInitial: isLocal ? 'local-korvatts' : 'browser-piper',
-    configWarning: `Giá trị VITE_TTS_PROVIDER="${raw}" không hợp lệ — Đã dùng chế độ mặc định an toàn (${
-      isLocal ? 'local-korvatts' : 'browser-piper'
-    }).`,
+    configWarning: `Giá trị VITE_TTS_PROVIDER="${raw}" không hợp lệ — Đã dùng chế độ mặc định an toàn (${isLocal ? 'local-korvatts' : 'browser-piper'
+      }).`,
   };
 }
 
@@ -321,15 +344,24 @@ interface PendingWorkerRequest {
   onProgress?: (ev: PiperProgressEvent) => void;
 }
 
-interface QueuedSynthesisTask {
-  normalizedText: string;
-  lengthScale: number;
-  priority: 'high' | 'low';
-  signal?: AbortSignal;
-  onProgress?: (ev: PiperProgressEvent) => void;
-  overrides?: PiperAssetUrlOverrides;
+interface TaskWaiter {
   resolve: (res: PiperSynthesizedChunkResult) => void;
   reject: (err: Error) => void;
+  signal?: AbortSignal;
+  onProgress?: (ev: PiperProgressEvent) => void;
+}
+
+interface QueuedSynthesisTask {
+  cacheKey: string;
+  normalizedText: string;
+  lengthScale: number;
+  priority: PredictivePriority;
+  seq: number;
+  enqueuedAtMs: number;
+  triggerSource: string;
+  isBackground: boolean;
+  overrides?: PiperAssetUrlOverrides;
+  waiters: TaskWaiter[];
 }
 
 export type WorkerFactoryFn = () => Worker;
@@ -348,16 +380,24 @@ export class PiperBrowserTtsManager {
   private msgSeq = 0;
   private readonly pending = new Map<number, PendingWorkerRequest>();
   private readonly wavCache = new Map<string, CachedWavEntry>();
+  private readonly predictedCacheKeys = new Set<string>();
   private wavCacheTotalBytes = 0;
   private readonly jobQueue: QueuedSynthesisTask[] = [];
+  private activeTask: QueuedSynthesisTask | null = null;
   private activeJobRunning = false;
+  private taskSeq = 0;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private isModelReadyInWorker = false;
   private prewarmInFlight: Promise<boolean> | null = null;
   private workerFactory: WorkerFactoryFn;
+  private readonly idbCache: PersistentAudioCache;
 
-  constructor(workerFactory: WorkerFactoryFn = defaultWorkerFactory) {
+  constructor(
+    workerFactory: WorkerFactoryFn = defaultWorkerFactory,
+    idbCache: PersistentAudioCache = persistentAudioCache
+  ) {
     this.workerFactory = workerFactory;
+    this.idbCache = idbCache;
   }
 
   isModelReady(): boolean {
@@ -475,10 +515,12 @@ export class PiperBrowserTtsManager {
     if (!this.worker) return;
     const cap = checkBrowserPiperCapability();
     const effectiveDelay =
-      delayMs !== undefined ? delayMs : cap.lowMemoryDevice ? 0 : DEFAULT_IDLE_RELEASE_MS;
+      delayMs !== undefined ? delayMs : resolveAdaptiveIdleReleaseMs(cap);
 
     if (effectiveDelay <= 0) {
-      void this.disposeWorker();
+      if (!this.activeJobRunning && this.jobQueue.length === 0) {
+        void this.disposeWorker();
+      }
       return;
     }
 
@@ -496,7 +538,9 @@ export class PiperBrowserTtsManager {
       const task = this.jobQueue.shift();
       const abortErr = new Error('Đã hủy yêu cầu tổng hợp âm thanh.');
       abortErr.name = 'AbortError';
-      task?.reject(abortErr);
+      if (task) {
+        for (const w of task.waiters) w.reject(abortErr);
+      }
     }
 
     const w = this.worker;
@@ -565,8 +609,7 @@ export class PiperBrowserTtsManager {
     } catch (err) {
       return Promise.reject(
         new Error(
-          `Không thể khởi tạo Web Worker cho giọng nói: ${
-            err instanceof Error ? err.message : String(err)
+          `Không thể khởi tạo Web Worker cho giọng nói: ${err instanceof Error ? err.message : String(err)
           }`
         )
       );
@@ -659,10 +702,29 @@ export class PiperBrowserTtsManager {
     });
   }
 
+  hasWavInCache(normalizedText: string, lengthScale = DEFAULT_PIPER_LENGTH_SCALE): boolean {
+    const clean = normalizedText.trim();
+    if (!clean) return false;
+    return this.wavCache.has(computePiperWavCacheKey(clean, lengthScale));
+  }
+
+  private sortJobQueue(): void {
+    this.jobQueue.sort((a, b) => (a.priority !== b.priority ? a.priority - b.priority : a.seq - b.seq));
+  }
+
+  private syncForegroundGovernorCount(): void {
+    const fgQueued = this.jobQueue.filter((t) => t.priority === 0).length;
+    const fgActive = this.activeTask?.priority === 0 ? 1 : 0;
+    predictiveResourceGovernor.setForegroundPendingCount(fgQueued + fgActive);
+  }
+
   async synthesizeNormalizedChunk(options: {
     normalizedText: string;
     lengthScale?: number;
     priority?: 'high' | 'low';
+    schedulerPriority?: PredictivePriority;
+    triggerSource?: string;
+    isPredictive?: boolean;
     signal?: AbortSignal;
     onProgress?: (ev: PiperProgressEvent) => void;
     overrides?: PiperAssetUrlOverrides;
@@ -678,10 +740,22 @@ export class PiperBrowserTtsManager {
       throw abortErr;
     }
 
+    const reqPriority: PredictivePriority =
+      options.schedulerPriority ?? (options.priority === 'low' ? 3 : 0);
+    const isForeground = reqPriority === 0;
+    const isPredictive = Boolean(options.isPredictive);
+    const triggerSource = options.triggerSource ?? (isForeground ? 'foreground_click' : 'background');
+
     const lengthScale = options.lengthScale ?? DEFAULT_PIPER_LENGTH_SCALE;
     const cacheKey = computePiperWavCacheKey(cleanText, lengthScale);
     const hit = this.getFromWavCache(cacheKey);
     if (hit) {
+      if (isForeground) {
+        if (this.predictedCacheKeys.has(cacheKey)) {
+          predictiveTtsTelemetry.inc('predictionHits');
+        }
+        predictiveTtsTelemetry.record({ lastQueueWaitMs: 0, lastTriggerSource: triggerSource });
+      }
       return {
         blob: new Blob([hit.buffer], { type: 'audio/wav' }),
         cacheStatus: 'HIT',
@@ -690,6 +764,32 @@ export class PiperBrowserTtsManager {
         synthMs: 0,
         durationSec: hit.durationSec,
       };
+    }
+
+    // Phase 3: Check IndexedDB Persistent Audio Cache before queuing/waking Worker
+    const idbHit = await this.idbCache.get(cacheKey).catch(() => null);
+    if (idbHit && !options.signal?.aborted) {
+      this.putInWavCache(cacheKey, idbHit.buffer, idbHit.durationSec);
+      if (isForeground) {
+        predictiveTtsTelemetry.record({ lastQueueWaitMs: 0, lastTriggerSource: triggerSource });
+      }
+      return {
+        blob: new Blob([idbHit.buffer], { type: 'audio/wav' }),
+        cacheStatus: 'HIT',
+        provider: 'browser-piper',
+        voice: PIPER_VOICE_DISPLAY_NAME,
+        synthMs: 0,
+        durationSec: idbHit.durationSec,
+      };
+    }
+    if (options.signal?.aborted) {
+      const abortErr = new Error('Đã hủy yêu cầu âm thanh.');
+      abortErr.name = 'AbortError';
+      throw abortErr;
+    }
+
+    if (isForeground && !this.predictedCacheKeys.has(cacheKey)) {
+      predictiveTtsTelemetry.inc('predictionMisses');
     }
 
     // Check offline status BEFORE queuing cold download if model isn't ready yet
@@ -704,78 +804,298 @@ export class PiperBrowserTtsManager {
       );
     }
 
+    // Case C: Single-flight reuse if active worker task matches exact cacheKey
+    if (this.activeTask && this.activeTask.cacheKey === cacheKey) {
+      predictiveTtsTelemetry.inc('singleFlightReuses');
+      if (reqPriority < this.activeTask.priority) {
+        this.activeTask.priority = reqPriority;
+        predictiveTtsTelemetry.inc('priorityPromotions');
+        this.syncForegroundGovernorCount();
+      }
+      return new Promise<PiperSynthesizedChunkResult>((resolve, reject) => {
+        const waiter: TaskWaiter = {
+          resolve,
+          reject,
+          signal: options.signal,
+          onProgress: options.onProgress,
+        };
+        this.activeTask!.waiters.push(waiter);
+        if (options.signal) {
+          options.signal.addEventListener(
+            'abort',
+            () => {
+              const idx = this.activeTask?.waiters.indexOf(waiter) ?? -1;
+              if (idx !== -1 && this.activeTask) {
+                this.activeTask.waiters.splice(idx, 1);
+                const abortErr = new Error('Đã hủy yêu cầu tổng hợp âm thanh.');
+                abortErr.name = 'AbortError';
+                reject(abortErr);
+              }
+            },
+            { once: true }
+          );
+        }
+      });
+    }
+
+    // Case B: Priority promotion + single-flight deduplication if already queued
+    const existingQueued = this.jobQueue.find((t) => t.cacheKey === cacheKey);
+    if (existingQueued) {
+      predictiveTtsTelemetry.inc('duplicatePrevented');
+      if (reqPriority < existingQueued.priority) {
+        existingQueued.priority = reqPriority;
+        existingQueued.isBackground = existingQueued.isBackground && !isForeground;
+        predictiveTtsTelemetry.inc('priorityPromotions');
+        this.sortJobQueue();
+        this.syncForegroundGovernorCount();
+      }
+      return new Promise<PiperSynthesizedChunkResult>((resolve, reject) => {
+        const waiter: TaskWaiter = {
+          resolve,
+          reject,
+          signal: options.signal,
+          onProgress: options.onProgress,
+        };
+        existingQueued.waiters.push(waiter);
+        if (options.signal) {
+          options.signal.addEventListener(
+            'abort',
+            () => {
+              const idx = existingQueued.waiters.indexOf(waiter);
+              if (idx !== -1) {
+                existingQueued.waiters.splice(idx, 1);
+                const abortErr = new Error('Đã hủy yêu cầu tổng hợp âm thanh.');
+                abortErr.name = 'AbortError';
+                reject(abortErr);
+              }
+              if (existingQueued.waiters.length === 0) {
+                const qIdx = this.jobQueue.indexOf(existingQueued);
+                if (qIdx !== -1) {
+                  this.jobQueue.splice(qIdx, 1);
+                  if (existingQueued.isBackground) predictiveTtsTelemetry.inc('backgroundCancelled');
+                }
+              }
+            },
+            { once: true }
+          );
+        }
+      });
+    }
+
     if (this.jobQueue.length >= MAX_PENDING_WORKER_JOBS) {
-      // Evict oldest non-running queued prefetch job to prevent memory/queue buildup
-      const evicted = this.jobQueue.shift();
-      if (evicted) {
+      // Never evict P0 foreground requests; evict lowest-priority non-P0 job
+      let evictIdx = -1;
+      let worstPriority = -1;
+      for (let i = this.jobQueue.length - 1; i >= 0; i--) {
+        if (this.jobQueue[i].priority > 0 && this.jobQueue[i].priority > worstPriority) {
+          worstPriority = this.jobQueue[i].priority;
+          evictIdx = i;
+        }
+      }
+      if (evictIdx !== -1) {
+        const [evicted] = this.jobQueue.splice(evictIdx, 1);
+        if (evicted.isBackground) predictiveTtsTelemetry.inc('backgroundCancelled');
         const abortErr = new Error('Đã nhường hàng đợi cho câu thoại mới.');
         abortErr.name = 'AbortError';
-        evicted.reject(abortErr);
+        for (const w of evicted.waiters) w.reject(abortErr);
       }
     }
 
     return new Promise<PiperSynthesizedChunkResult>((resolve, reject) => {
-      const priority = options.priority ?? 'high';
-      const task: QueuedSynthesisTask = {
-        normalizedText: cleanText,
-        lengthScale,
-        priority,
-        signal: options.signal,
-        onProgress: options.onProgress,
-        overrides: options.overrides,
+      const waiter: TaskWaiter = {
         resolve,
         reject,
+        signal: options.signal,
+        onProgress: options.onProgress,
+      };
+      const task: QueuedSynthesisTask = {
+        cacheKey,
+        normalizedText: cleanText,
+        lengthScale,
+        priority: reqPriority,
+        seq: ++this.taskSeq,
+        enqueuedAtMs: Date.now(),
+        triggerSource,
+        isBackground: isPredictive,
+        overrides: options.overrides,
+        waiters: [waiter],
       };
 
-      if (options.signal) {
-        const onAbort = () => {
-          const idx = this.jobQueue.indexOf(task);
-          if (idx !== -1) {
-            this.jobQueue.splice(idx, 1);
-            const abortErr = new Error('Đã hủy yêu cầu tổng hợp âm thanh.');
+      if (isPredictive) {
+        predictiveTtsTelemetry.inc('backgroundQueued');
+        predictiveTtsTelemetry.record({ lastTriggerSource: triggerSource });
+      } else if (isForeground) {
+        // Cancel any unstarted speculative predictive jobs so P0 never queues behind them
+        for (let i = this.jobQueue.length - 1; i >= 0; i--) {
+          if (this.jobQueue[i].isBackground) {
+            const [cancelled] = this.jobQueue.splice(i, 1);
+            predictiveTtsTelemetry.inc('backgroundCancelled');
+            const abortErr = new Error('Đã nhường hàng đợi cho yêu cầu người dùng.');
             abortErr.name = 'AbortError';
-            reject(abortErr);
+            for (const w of cancelled.waiters) w.reject(abortErr);
           }
-        };
-        options.signal.addEventListener('abort', onAbort, { once: true });
+        }
       }
 
-      if (priority === 'high') {
-        const firstLowIdx = this.jobQueue.findIndex((t) => t.priority === 'low');
-        if (firstLowIdx === -1) this.jobQueue.push(task);
-        else this.jobQueue.splice(firstLowIdx, 0, task);
-      } else {
-        this.jobQueue.push(task);
+      if (options.signal) {
+        options.signal.addEventListener(
+          'abort',
+          () => {
+            const wIdx = task.waiters.indexOf(waiter);
+            if (wIdx !== -1) {
+              task.waiters.splice(wIdx, 1);
+              const abortErr = new Error('Đã hủy yêu cầu tổng hợp âm thanh.');
+              abortErr.name = 'AbortError';
+              reject(abortErr);
+            }
+            if (task.waiters.length === 0) {
+              const qIdx = this.jobQueue.indexOf(task);
+              if (qIdx !== -1) {
+                this.jobQueue.splice(qIdx, 1);
+                if (task.isBackground) predictiveTtsTelemetry.inc('backgroundCancelled');
+                this.syncForegroundGovernorCount();
+              }
+            }
+          },
+          { once: true }
+        );
       }
+
+      this.jobQueue.push(task);
+      this.sortJobQueue();
+      this.syncForegroundGovernorCount();
       this.pumpQueue();
     });
+  }
+
+  /**
+   * Predictive background pre-synthesis helper (Phase 2):
+   * - Respects feature flag, Adaptive Resource Governor, and AbortSignal.
+   * - Only warms `wavCache` (never plays audio, never alters booth voice lock).
+   */
+  async preSynthesizeChunks(options: {
+    chunks: string[];
+    priority?: PredictivePriority;
+    triggerSource: string;
+    signal?: AbortSignal;
+    maxChunks?: number;
+  }): Promise<number> {
+    if (!resolvePredictivePreSynthEnabled()) return 0;
+    const gov = predictiveResourceGovernor.canRunBackgroundJob();
+    if (!gov.allowed) {
+      predictiveTtsTelemetry.inc('governorBlocked');
+      return 0;
+    }
+
+    const prio: PredictivePriority = options.priority ?? 2;
+    const limit = Math.min(options.maxChunks ?? 1, gov.maxBackgroundProducts);
+    let completed = 0;
+
+    for (const rawChunk of options.chunks) {
+      if (completed >= limit) break;
+      if (options.signal?.aborted) break;
+      const again = predictiveResourceGovernor.canRunBackgroundJob();
+      if (!again.allowed) {
+        predictiveTtsTelemetry.inc('governorBlocked');
+        break;
+      }
+
+      const clean = rawChunk.trim();
+      if (!clean) continue;
+      const cacheKey = computePiperWavCacheKey(clean, DEFAULT_PIPER_LENGTH_SCALE);
+      if (this.wavCache.has(cacheKey)) {
+        this.predictedCacheKeys.add(cacheKey);
+        continue;
+      }
+
+      try {
+        await this.synthesizeNormalizedChunk({
+          normalizedText: clean,
+          schedulerPriority: prio,
+          triggerSource: options.triggerSource,
+          isPredictive: true,
+          signal: options.signal,
+        });
+        this.predictedCacheKeys.add(cacheKey);
+        predictiveTtsTelemetry.inc('backgroundCompleted');
+        completed += 1;
+      } catch {
+        // Silently ignore AbortError or worker errors during speculative background pre-synth
+        if (options.signal?.aborted) break;
+        predictiveTtsTelemetry.inc('backgroundFailed');
+      }
+    }
+    return completed;
   }
 
   private pumpQueue(): void {
     if (this.activeJobRunning || this.jobQueue.length === 0) return;
 
-    while (this.jobQueue.length > 0 && this.jobQueue[0].signal?.aborted) {
-      const cancelled = this.jobQueue.shift()!;
-      const abortErr = new Error('Đã hủy yêu cầu tổng hợp âm thanh.');
-      abortErr.name = 'AbortError';
-      cancelled.reject(abortErr);
+    while (this.jobQueue.length > 0) {
+      const head = this.jobQueue[0];
+      const allWaitersAborted = head.waiters.every((w) => w.signal?.aborted);
+      if (allWaitersAborted) {
+        this.jobQueue.shift();
+        if (head.isBackground) predictiveTtsTelemetry.inc('backgroundCancelled');
+        const abortErr = new Error('Đã hủy yêu cầu tổng hợp âm thanh.');
+        abortErr.name = 'AbortError';
+        for (const w of head.waiters) w.reject(abortErr);
+        continue;
+      }
+      // Pause launching new background jobs if Resource Governor blocks (foreground P0 always proceeds!)
+      if (head.priority > 0 && !predictiveResourceGovernor.canRunBackgroundJob().allowed) {
+        return;
+      }
+      break;
     }
 
     const nextTask = this.jobQueue.shift();
     if (!nextTask) return;
 
+    this.activeTask = nextTask;
     this.activeJobRunning = true;
+    this.syncForegroundGovernorCount();
+
+    const queueWaitMs = Math.max(0, Date.now() - nextTask.enqueuedAtMs);
+    if (nextTask.priority === 0) {
+      predictiveTtsTelemetry.record({
+        lastQueueWaitMs: queueWaitMs,
+        lastForegroundBlockedMs: queueWaitMs,
+      });
+      predictiveResourceGovernor.recordForegroundBlocked(queueWaitMs);
+    } else if (nextTask.isBackground) {
+      predictiveTtsTelemetry.inc('backgroundStarted');
+    }
+
     this.executeTask(nextTask)
-      .then((res) => nextTask.resolve(res))
-      .catch((err) => nextTask.reject(err instanceof Error ? err : new Error(String(err))))
+      .then((res) => {
+        if (nextTask.priority === 0) {
+          predictiveTtsTelemetry.record({ lastSynthMs: res.synthMs });
+        }
+        for (const w of nextTask.waiters) {
+          if (w.signal?.aborted) {
+            const abortErr = new Error('Đã hủy yêu cầu tổng hợp âm thanh.');
+            abortErr.name = 'AbortError';
+            w.reject(abortErr);
+          } else {
+            w.resolve(res);
+          }
+        }
+      })
+      .catch((err) => {
+        const errorObj = err instanceof Error ? err : new Error(String(err));
+        for (const w of nextTask.waiters) w.reject(errorObj);
+      })
       .finally(() => {
+        this.activeTask = null;
         this.activeJobRunning = false;
+        this.syncForegroundGovernorCount();
         this.pumpQueue();
       });
   }
 
   private async executeTask(task: QueuedSynthesisTask): Promise<PiperSynthesizedChunkResult> {
-    const cacheKey = computePiperWavCacheKey(task.normalizedText, task.lengthScale);
+    const cacheKey = task.cacheKey;
     const cached = this.getFromWavCache(cacheKey);
     if (cached) {
       return {
@@ -791,30 +1111,30 @@ export class PiperBrowserTtsManager {
     await this.ensureWorkerAlive();
 
     if (!this.isModelReadyInWorker) {
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        // Still allow init attempt in case CacheStorage already holds the full model offline;
-        // if CacheStorage misses while offline, fetchValidatedAsset will fail fast and cleanly.
-      }
       await this.sendWorkerCommand(
         { type: 'init', overrides: task.overrides },
         WORKER_INIT_TOTAL_TIMEOUT_MS,
-        task.onProgress
+        (ev) => {
+          for (const w of task.waiters) w.onProgress?.(ev);
+        }
       );
       this.isModelReadyInWorker = true;
     }
 
-    if (task.signal?.aborted) {
+    if (task.waiters.every((w) => w.signal?.aborted)) {
       const abortErr = new Error('Đã hủy yêu cầu tổng hợp âm thanh.');
       abortErr.name = 'AbortError';
       throw abortErr;
     }
 
-    task.onProgress?.({
-      stage: 'synthesizing',
-      loadedBytes: 1,
-      totalBytes: 1,
-      percent: 100,
-    });
+    for (const w of task.waiters) {
+      w.onProgress?.({
+        stage: 'synthesizing',
+        loadedBytes: 1,
+        totalBytes: 1,
+        percent: 100,
+      });
+    }
 
     const res = await this.sendWorkerCommand(
       {
@@ -824,7 +1144,9 @@ export class PiperBrowserTtsManager {
         overrides: task.overrides,
       },
       WORKER_SYNTH_TIMEOUT_MS,
-      task.onProgress
+      (ev) => {
+        for (const w of task.waiters) w.onProgress?.(ev);
+      }
     );
 
     const wavBuffer = res.wavBuffer as ArrayBuffer;
@@ -836,6 +1158,12 @@ export class PiperBrowserTtsManager {
     }
 
     this.putInWavCache(cacheKey, wavBuffer, durationSec);
+    void this.idbCache.put({
+      key: cacheKey,
+      buffer: wavBuffer,
+      durationSec,
+      voiceSignature: `piper-v2-soft-fast|vi_VN-vais1000-medium|ls:${task.lengthScale.toFixed(2)}`,
+    });
 
     return {
       blob: new Blob([wavBuffer], { type: 'audio/wav' }),

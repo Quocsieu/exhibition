@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { useFrame } from '@react-three/fiber';
 import { cloneCachedAsset, type GlbAssetId } from './assetLoader';
 import { buildCentralPlazaFountainModel } from './architecturalModels';
@@ -42,7 +43,10 @@ interface Part { geometry: THREE.BufferGeometry; material: THREE.Material | THRE
 interface Asset { parts: Part[]; lowParts?: Part[]; source: THREE.Group }
 interface Entry { users: number; promise: Promise<Asset>; asset?: Asset; timer?: ReturnType<typeof setTimeout> }
 const cache = new Map<ExteriorAssetId, Entry>();
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath(typeof window !== 'undefined' ? `${window.location.origin}/draco/` : '/draco/');
 const loader = new GLTFLoader();
+loader.setDRACOLoader(dracoLoader);
 const noRaycast = () => {};
 
 function releaseAsset(asset: Asset) {

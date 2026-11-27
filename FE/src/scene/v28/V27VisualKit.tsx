@@ -1,11 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { createGrandExpoMedallionTexture } from '../sceneTextures';
 import type { V28ClusterSpec, V28ExhibitionVersionDetail } from '../../services/v28Api';
 import { computeDynamicEnvPlacements } from './v28EnvPlacement';
 
+const plazaDracoLoader = new DRACOLoader();
+plazaDracoLoader.setDecoderPath(
+  typeof window !== 'undefined' ? `${window.location.origin}/draco/` : '/draco/'
+);
 const plazaLoader = new GLTFLoader();
+plazaLoader.setDRACOLoader(plazaDracoLoader);
 const plazaProtoPromises = new Map<string, Promise<THREE.Group>>();
 const plazaProtoResolved = new Map<string, THREE.Group>();
 

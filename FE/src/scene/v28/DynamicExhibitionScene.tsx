@@ -8,6 +8,7 @@ import type {
   V28ZoneRecord,
 } from '../../services/v28Api';
 import { DynamicBooth3D } from './DynamicBooth3D';
+import { predictiveResourceGovernor } from '../../services/predictiveAudioScheduler';
 import { NavigationPath3D } from './NavigationPath3D';
 import { CharacterNavigationRing3D } from './CharacterNavigationRing3D';
 import { getV28BoothSlotSpec } from './v28ProductSlotLayouts';
@@ -616,6 +617,7 @@ const InnerDynamicScene: React.FC<InnerSceneProps> = ({
   const desiredCamPos = useMemo(() => new THREE.Vector3(), []);
 
   useFrame((_, rawDelta) => {
+    predictiveResourceGovernor.recordFrameDeltaMs(rawDelta * 1000);
     const dt = Math.min(0.05, rawDelta);
     const p = playerPosRef.current;
     const speed = 11.0;

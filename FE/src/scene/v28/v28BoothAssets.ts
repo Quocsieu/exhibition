@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import type { V28ArchetypeId } from '../../services/v28Api';
 
 const ARCHETYPE_GLB_PATHS: Record<V28ArchetypeId, string> = {
@@ -11,7 +12,12 @@ const ARCHETYPE_GLB_PATHS: Record<V28ArchetypeId, string> = {
   dynamic_frame: '/models/booths/v27_4/booth_06_dynamic_frame_v27_4.glb',
 };
 
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath(
+  typeof window !== 'undefined' ? `${window.location.origin}/draco/` : '/draco/'
+);
 const loader = new GLTFLoader();
+loader.setDRACOLoader(dracoLoader);
 const prototypeCache = new Map<V28ArchetypeId, Promise<THREE.Group>>();
 const resolvedPrototypes = new Map<V28ArchetypeId, THREE.Group>();
 

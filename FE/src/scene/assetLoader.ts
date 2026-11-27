@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import {
   type ArchitecturalBoothTheme,
   buildBoothExteriorShell,
@@ -281,7 +282,10 @@ export async function loadGlbAssetFromUrl(assetId: GlbAssetId): Promise<THREE.Gr
   if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
     try {
       if (!gltfLoaderInstance) {
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath(typeof window !== 'undefined' ? `${window.location.origin}/draco/` : '/draco/');
         gltfLoaderInstance = new GLTFLoader();
+        gltfLoaderInstance.setDRACOLoader(dracoLoader);
       }
       const gltf = await gltfLoaderInstance.loadAsync(GLB_ASSET_PATHS[assetId]);
       const group = gltf.scene || new THREE.Group();
